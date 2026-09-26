@@ -94,6 +94,25 @@ functions and parameters get a per-node prefix, so two nodes can both define `bu
 names the node and the line inside it, and that node shows the error too. Reroutes and muted nodes pass
 shapes through, and graphs can have up to 256 sliders.
 
+## Driving it from an assistant
+
+`codenodes.agent` is the surface an assistant works through. Every call returns a plain dict and
+never raises for a fixable mistake, so a model can read the error, fix its code and try again:
+
+```python
+from bl_ext.user_default.codenodes import agent
+agent.help()                                   # the kinds, the GLSL helpers, a template for each
+agent.make("mesh", code, name="Ring")          # or "particles" / "volume"
+agent.set_params("Ring", radius=1.4)
+agent.look_at("Ring"); agent.light("studio")   # frame it, light it
+agent.render()                                 # -> {"path": "...png"} to open and look at
+agent.scene()                                  # what exists, with each object's kind and sliders
+agent.bake("Ring", 1, 48)
+```
+
+`look_at` and `light` exist because a render with no camera aim or lighting comes out black, which
+wastes a whole round trip.
+
 ## Animation, and making it render
 
 There are three phases; the first two are built (see `docs/ROADMAP.md`).
@@ -134,7 +153,8 @@ blender --factory-startup --python tests/test_nodes.py         # node editor, in
 blender --factory-startup --python tests/test_bake.py          # baking, and playback through stock nodes (18)
 blender -b --factory-startup --python tests/test_farm.py       # the bake renders with no GPU and no add-on (10)
 blender --factory-startup --python tests/test_volume.py        # density code -> OpenVDB -> Volume object (16)
-blender --factory-startup --python tests/test_particles.py     # GPU particle solver, incl. baking (21)
+blender --factory-startup --python tests/test_particles.py     # GPU particle solver, incl. baking (22)
+blender --factory-startup --python tests/test_agent.py         # the assistant-facing surface (29)
 ```
 
 Run `test_bake.py` before `test_farm.py`: the first saves the .blend the second opens.
