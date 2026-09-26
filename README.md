@@ -115,6 +115,12 @@ agent.bake("Ring", 1, 48)
 `look_at` and `light` exist because a render with no camera aim or lighting comes out black, which
 wastes a whole round trip.
 
+**Over MCP.** `mcp/` is an MCP server that exposes exactly those functions to an assistant, so it can
+build something, render it and look at what it made. Start it from the sidebar (CodeNodes ›
+Assistant › Start) and point your MCP client at `mcp/` — see [mcp/README.md](mcp/README.md).
+It is localhost-only, needs a token, and **has no way to run arbitrary code in Blender**: the add-on
+answers only the names in its own tool table.
+
 ## Animation, and making it render
 
 There are three phases; the first two are built (see `docs/ROADMAP.md`).
@@ -157,6 +163,8 @@ blender -b --factory-startup --python tests/test_farm.py       # the bake render
 blender --factory-startup --python tests/test_volume.py        # density code -> OpenVDB -> Volume object (16)
 blender --factory-startup --python tests/test_particles.py     # GPU particle solver, incl. baking (22)
 blender --factory-startup --python tests/test_agent.py         # the assistant-facing surface (29)
+python tests/test_rpc.py                                       # the MCP wire protocol, no Blender (29)
+blender --factory-startup --python tests/test_server.py        # a real socket client against Blender (25)
 ```
 
 Run `test_bake.py` before `test_farm.py`: the first saves the .blend the second opens.
