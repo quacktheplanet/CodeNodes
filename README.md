@@ -18,6 +18,23 @@ float sdf(vec3 p) {
 Each `// @param name default min max` line becomes a slider. Your slider values are kept when the code
 changes, so Claude can rewrite the code without resetting what you tuned.
 
+**Code → Volume.** Write a density instead of a distance and get smoke, cloud or nebula geometry that
+EEVEE and Cycles render natively:
+
+```glsl
+// @param scale 1.6 0.2 6.0
+float density(vec3 p) {
+  return clamp(1.0 - length(p) / 1.6 + 0.5 * (fbm3(p * scale) - 0.55), 0.0, 1.0);
+}
+```
+
+```python
+api.code_to_volume(source, name="Smoke", resolution=96)                    # one frame
+api.code_to_volume(source, name="Smoke", frame_start=1, frame_end=48)      # a .vdb sequence
+```
+
+Volumes are written as OpenVDB files, so a sequence plays back natively with no add-on and no GPU.
+
 ## Use it
 
 - **In Blender:** Add › Mesh › **Code Mesh**, then View3D › Sidebar (N) › **CodeNodes**. The code
@@ -93,6 +110,7 @@ blender --factory-startup --python tests/test_blender.py       # needs a window:
 blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (20)
 blender --factory-startup --python tests/test_bake.py          # baking, and playback through stock nodes (18)
 blender -b --factory-startup --python tests/test_farm.py       # the bake renders with no GPU and no add-on (10)
+blender --factory-startup --python tests/test_volume.py        # density code -> OpenVDB -> Volume object (16)
 ```
 
 Run `test_bake.py` before `test_farm.py`: the first saves the .blend the second opens.
@@ -102,6 +120,7 @@ All of them pass on Blender 5.0.1 and 5.1.2 (NVIDIA RTX A4500, OpenGL).
 
 - Needs Blender with a window. Background mode (`-b`) has no GPU, so there's no Code → Mesh in
   headless renders yet.
-- Shapes (signed distance functions) are the only socket type so far. Float links between nodes,
-  particles and the live GPU viewport preview are next.
+- The node editor handles shapes only so far. Volumes are available through `api.code_to_volume`
+  but have no node or panel yet. Particles, float links between nodes and the live GPU viewport
+  preview are next — see `docs/ROADMAP.md`.
 - Surface nets rounds off sharp edges and corners slightly.

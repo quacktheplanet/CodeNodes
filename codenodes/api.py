@@ -91,6 +91,37 @@ def bake(name, frame_start=None, frame_end=None):
             "error": None if ok else obj.codenodes.last_error or "bake failed"}
 
 
+def code_to_volume(source, name="CodeVolume", resolution=96, bounds_min=(-2, -2, -2),
+                   bounds_max=(2, 2, 2), params=None, frame_start=None, frame_end=None):
+    """Smoke, cloud or nebula from `float density(vec3 p)`.
+
+    One frame by default; pass a frame range to write a sequence that Blender plays
+    natively (no GPU and no add-on needed at render time).
+    """
+    from . import volume
+    from .sdf_code import SdfCodeError, parse_params
+    try:
+        values = {p.name: p.default for p in parse_params(source)}
+        values.update(params or {})
+        scene = bpy.context.scene
+        if frame_start is None and frame_end is None:
+            fps = scene.render.fps / (scene.render.fps_base or 1.0)
+            obj, stats = volume.build(name, source, tuple(bounds_min), tuple(bounds_max), int(resolution),
+                                      time_s=(scene.frame_current - scene.frame_start) / fps,
+                                      frame=scene.frame_current, values=values)
+            return {"ok": True, "object": obj.name, "error": None, "filepath": stats["filepath"],
+                    "max_density": round(stats["max_density"], 4), "bytes": stats["bytes"],
+                    "dims": stats["dims"]}
+        obj, info = volume.bake_sequence(name, source, tuple(bounds_min), tuple(bounds_max),
+                                         int(resolution),
+                                         frame_start if frame_start is not None else scene.frame_start,
+                                         frame_end if frame_end is not None else scene.frame_end,
+                                         values=values)
+        return {"ok": True, "object": obj.name, "error": None, "sequence": True, **info}
+    except SdfCodeError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def reference():
     """What sdf code can use: a cheat sheet to hand to Claude."""
     return (sdf_code.__doc__ + "\nHelpers available:\n" + "\n".join(

@@ -61,6 +61,8 @@ so there are no files at all and the maths is evaluated natively on every frame.
 | Point clouds from Python | `pointclouds.new()` works but **cannot add points**; use a vertex-only mesh + Mesh to Points, or Import PLY |
 | Curves (hair) from Python | `hair_curves.new()` + `add_curves()` |
 | Alembic export of a Python-driven mesh | **doesn't work**: the exporter's own frame stepping doesn't run our Python rebuild, so every frame gets frame 1. We drive the frame loop ourselves instead |
+| Volume objects from a written `.vdb` | works, placed exactly where the code puts it (a ball offset to x=1 measured at 1.016); `volume.grids` is lazy, so call `grids.load()`. OpenVDB stores only non-empty voxels, so the object's box hugs the filled part rather than the sample bounds |
+| Volumes in a render | Cycles shows them out of the box; EEVEE needs its volumetric settings turned up, so the test renders with Cycles |
 | Mesh datablock identity | rebuilding must fill the **same** datablock; making a new one per frame broke cache identity (`Blob_001`, `Blob_002`…) and doubled file size. Fixed |
 
 ## Layers (how this grows past one add-on)
@@ -81,9 +83,10 @@ drive real solvers and CAD, not stand in for them.
 **P0 — foundations**
 1. ~~**Bake to disk + a stock-node reader.**~~ **Done.** `codenodes.cache`, the Bake and Remove Cache
    buttons, `api.bake()`; 18 checks plus a 10-check render-farm test.
-2. **Volume output.** `float density(vec3 p)` → a `.vdb` per frame → a Volume object. Renders smoke,
-   clouds and nebulae in EEVEE and Cycles. Small: the sampler exists, this adds a density channel and
-   a VDB writer, and reuses the same bake plumbing.
+2. ~~**Volume output.**~~ **Done.** `float density(vec3 p)` → OpenVDB → a Blender Volume object, one
+   frame or a numbered sequence Blender plays natively. `codenodes.volume`, `api.code_to_volume()`,
+   16 checks. Still to add: a node and a panel (it is API-only today), plus temperature and colour
+   grids for fire.
 
 **P1 — the headline features**
 3. **Code Particles.** GPU state buffers (position, velocity, age, custom attributes) and an emitter;

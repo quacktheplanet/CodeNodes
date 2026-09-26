@@ -119,12 +119,17 @@ def parse_params(source):
     return params
 
 
-def check_source(source):
-    if not re.search(r"\bfloat\s+sdf\s*\(\s*vec3\s+\w+\s*\)", source):
-        raise SdfCodeError("the code must define:  float sdf(vec3 p) { ... }")
+SHAPE, DENSITY = "SDF", "DENSITY"
+_ENTRY = {SHAPE: ("sdf", "the distance"), DENSITY: ("density", "the density")}
+
+
+def check_source(source, kind=SHAPE):
+    entry, what = _ENTRY[kind]
+    if not re.search(rf"\bfloat\s+{entry}\s*\(\s*vec3\s+\w+\s*\)", source):
+        raise SdfCodeError(f"the code must define:  float {entry}(vec3 p) {{ ... }}")
     for bad in ("imageStore", "imageLoad", "gl_GlobalInvocationID", "barrier("):
         if bad in source:
-            raise SdfCodeError(f"'{bad}' isn't allowed in sdf code; just return the distance")
+            raise SdfCodeError(f"'{bad}' isn't allowed here; just return {what}")
 
 
 def param_defines(params):
@@ -132,12 +137,17 @@ def param_defines(params):
     return "".join(f"#define {p.name} (cnParams.v[{i >> 2}].{'xyzw'[i & 3]})\n" for i, p in enumerate(params))
 
 
-def full_source(source, params=None):
-    """(compute source, number of lines before the user's first line)."""
-    check_source(source)
+def full_source(source, params=None, kind=SHAPE):
+    """(compute source, number of lines before the user's first line).
+
+    The sampler always calls ``sdf``; density code gets a one-line wrapper so both
+    kinds share the same compute shader.
+    """
+    check_source(source, kind)
     params = parse_params(source) if params is None else params
     head = PRELUDE + param_defines(params)
-    return head + source + "\n" + MAIN, head.count("\n")
+    tail = MAIN if kind == SHAPE else "\nfloat sdf(vec3 p) { return density(p); }\n" + MAIN
+    return head + source + "\n" + tail, head.count("\n")
 
 
 # GLSL compiler logs name lines as "file.glsl:12: Error", ":12: Error" (Blender 5.0),

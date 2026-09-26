@@ -16,7 +16,7 @@ import time
 
 import numpy as np
 
-from .sdf_code import SdfCodeError, full_source, parse_params, user_errors
+from .sdf_code import SHAPE, SdfCodeError, full_source, parse_params, user_errors
 
 MIN_RES, MAX_RES = 8, 512
 MAX_GPU_BYTES = 1 << 30            # refuse grids over 1 GiB
@@ -73,15 +73,15 @@ def _compile_capturing(info):
     return shader, err, log
 
 
-def get_shader(source):
+def get_shader(source, kind=SHAPE):
     """(shader, params) for this source, compiled once and cached."""
     _require_gpu()
-    key = hashlib.sha1(source.encode()).hexdigest()
+    key = hashlib.sha1((kind + "\0" + source).encode()).hexdigest()
     if key in _cache:
         return _cache[key]
     import gpu
     params = parse_params(source)
-    code, offset = full_source(source, params)
+    code, offset = full_source(source, params, kind)
     info = gpu.types.GPUShaderCreateInfo()
     info.typedef_source("struct CNParams { vec4 v[64]; };")
     info.uniform_buf(0, "CNParams", "cnParams")
@@ -104,10 +104,11 @@ def get_shader(source):
     return shader, params
 
 
-def sample(source, lo, hi, resolution, time_s=0.0, frame=0.0, values=None, budget_s=TIME_BUDGET_S):
-    """Evaluate ``sdf`` on the grid. Returns (vol[z, y, x] float32, stats dict)."""
+def sample(source, lo, hi, resolution, time_s=0.0, frame=0.0, values=None, budget_s=TIME_BUDGET_S,
+           kind=SHAPE):
+    """Evaluate the code on the grid. Returns (vol[z, y, x] float32, stats dict)."""
     import gpu
-    shader, params = get_shader(source)
+    shader, params = get_shader(source, kind)
     nx, ny, nz = grid_dims(lo, hi, resolution)
     tiles_x = math.ceil(math.sqrt(nz))
     tiles_y = math.ceil(nz / tiles_x)
