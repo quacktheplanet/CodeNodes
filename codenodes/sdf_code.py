@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-MAX_PARAMS = 16
+MAX_PARAMS = 256          # stored in one uniform buffer: vec4 v[64]
 
 PRELUDE = """\
 // ---- CodeNodes helpers (distance functions from the usual raymarching toolkit) ----
@@ -73,6 +73,12 @@ float sdf(vec3 p) {
 
 _PARAM_RE = re.compile(r"^\s*//\s*@param\s+([A-Za-z_]\w*)\s+([-+0-9.eE]+)(?:\s+([-+0-9.eE]+)\s+([-+0-9.eE]+))?\s*$")
 _RESERVED = re.compile(r"^(cn[A-Z_]|gl_|u(Time|Frame)$)")
+# Parameters become #defines, so they can't shadow GLSL words or the helpers.
+_TAKEN = set(re.findall(r"^(?:float|vec3)\s+(\w+)\s*\(", PRELUDE, re.M)) | set("""
+    p sdf abs sign floor ceil fract mod min max clamp mix step smoothstep sqrt inversesqrt pow exp log exp2 log2
+    sin cos tan asin acos atan radians degrees length distance dot cross normalize reflect refract faceforward
+    float int uint bool vec2 vec3 vec4 ivec2 ivec3 ivec4 mat2 mat3 mat4 if else for while do return break
+    continue const in out inout true false discard struct void""".split())
 
 
 class SdfCodeError(Exception):
@@ -100,7 +106,7 @@ def parse_params(source):
                 raise SdfCodeError(f"line {n}: couldn't read the @param. Use: // @param name default [min max]")
             continue
         name = m.group(1)
-        if _RESERVED.match(name):
+        if _RESERVED.match(name) or name in _TAKEN:
             raise SdfCodeError(f"line {n}: '{name}' is a reserved name; pick another")
         if name in seen:
             raise SdfCodeError(f"line {n}: parameter '{name}' is declared twice")
@@ -121,10 +127,17 @@ def check_source(source):
             raise SdfCodeError(f"'{bad}' isn't allowed in sdf code; just return the distance")
 
 
-def full_source(source):
+def param_defines(params):
+    """Each parameter reads its slot of the parameter buffer."""
+    return "".join(f"#define {p.name} (cnParams.v[{i >> 2}].{'xyzw'[i & 3]})\n" for i, p in enumerate(params))
+
+
+def full_source(source, params=None):
     """(compute source, number of lines before the user's first line)."""
     check_source(source)
-    return PRELUDE + source + "\n" + MAIN, PRELUDE.count("\n")
+    params = parse_params(source) if params is None else params
+    head = PRELUDE + param_defines(params)
+    return head + source + "\n" + MAIN, head.count("\n")
 
 
 # GLSL compiler logs name lines as "file.glsl:12: Error", ":12: Error" (Blender 5.0),

@@ -81,8 +81,10 @@ def get_shader(source):
         return _cache[key]
     import gpu
     params = parse_params(source)
-    code, offset = full_source(source)
+    code, offset = full_source(source, params)
     info = gpu.types.GPUShaderCreateInfo()
+    info.typedef_source("struct CNParams { vec4 v[64]; };")
+    info.uniform_buf(0, "CNParams", "cnParams")
     info.image(0, 'R32F', 'FLOAT_2D', "cnGrid", qualifiers={'WRITE'})
     info.push_constant('VEC3', "cnLo")
     info.push_constant('VEC3', "cnHi")
@@ -91,8 +93,6 @@ def get_shader(source):
     info.push_constant('INT', "cnTiles")
     info.push_constant('FLOAT', "uTime")
     info.push_constant('FLOAT', "uFrame")
-    for prm in params:
-        info.push_constant('FLOAT', prm.name)
     info.local_group_size(GROUP, GROUP, 1)
     info.compute_source(code)
     shader, err, log = _compile_capturing(info)
@@ -132,8 +132,11 @@ def sample(source, lo, hi, resolution, time_s=0.0, frame=0.0, values=None, budge
     uniform(shader.uniform_float, "uTime", float(time_s))
     uniform(shader.uniform_float, "uFrame", float(frame))
     values = values or {}
-    for prm in params:
-        uniform(shader.uniform_float, prm.name, float(values.get(prm.name, prm.default)))
+    slots = np.zeros(256, np.float32)
+    for i, prm in enumerate(params):
+        slots[i] = float(values.get(prm.name, prm.default))
+    ubo = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
+    shader.uniform_block("cnParams", ubo)
 
     def run(target, tiles, w, h, z0, z1):
         shader.image("cnGrid", target)

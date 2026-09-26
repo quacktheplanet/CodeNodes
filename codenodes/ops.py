@@ -77,19 +77,27 @@ class CODENODES_OT_edit_code(bpy.types.Operator):
 
     def execute(self, context):
         text = context.active_object.codenodes.text if context.active_object else None
-        if text is None:
+        if text is None or not show_text(context, text, self):
             return {'CANCELLED'}
-        areas = [a for a in context.screen.areas if a.type == 'TEXT_EDITOR']
-        if not areas:
-            others = [a for a in context.screen.areas if a != context.area and a.type != 'PROPERTIES']
-            if not others:
-                self.report({'WARNING'}, "open a Text Editor to edit the code")
-                return {'CANCELLED'}
-            area = max(others, key=lambda a: a.width * a.height)
-            area.type = 'TEXT_EDITOR'
-            areas = [area]
-        areas[0].spaces.active.text = text
         return {'FINISHED'}
+
+
+def show_text(context, text, op=None):
+    """Show `text` in a Text Editor, turning the largest other editor into one if there is none."""
+    areas = [a for a in context.screen.areas if a.type == 'TEXT_EDITOR']
+    if not areas:
+        keep = {'PROPERTIES', 'NODE_EDITOR', 'VIEW_3D'} if len(context.screen.areas) > 2 else {'PROPERTIES'}
+        others = [a for a in context.screen.areas if a != context.area and a.type not in keep] or \
+                 [a for a in context.screen.areas if a != context.area and a.type != 'PROPERTIES']
+        if not others:
+            if op is not None:
+                op.report({'WARNING'}, "open a Text Editor to edit the code")
+            return False
+        area = max(others, key=lambda a: a.width * a.height)
+        area.type = 'TEXT_EDITOR'
+        areas = [area]
+    areas[0].spaces.active.text = text
+    return True
 
 
 classes = (CODENODES_OT_add, CODENODES_OT_rebuild, CODENODES_OT_bake, CODENODES_OT_edit_code)

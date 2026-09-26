@@ -16,6 +16,7 @@ class CODENODES_PT_main(bpy.types.Panel):
         obj = context.active_object
         if obj is None or not getattr(obj, "codenodes", None) or not obj.codenodes.enabled:
             layout.operator("codenodes.add", icon='ADD')
+            layout.operator("codenodes.new_graph", icon='NODETREE')
             layout.label(text="Or select a Code Mesh object.")
             return
         s = obj.codenodes

@@ -36,6 +36,24 @@ changes, so Claude can rewrite the code without resetting what you tuned.
   Errors never raise. They come back with the line number in *your* code, so a caller can fix the
   code and try again.
 
+## Node editor
+
+Open a Node Editor and switch its type to **CodeNodes** (or View3D › Sidebar › CodeNodes ›
+**New Node Graph** for a starter graph).
+
+| node | does |
+|---|---|
+| **SDF Code** | code in a Text block; each `@param` line becomes an input socket |
+| **Combine** | Union, Subtract, Intersect, Smooth Union, Smooth Subtract (blend width K) |
+| **Transform** | move, rotate, scale a shape |
+| **Offset** | grow or shrink a shape |
+| **Mesh Output** | Code → Mesh: target object, resolution, bounds, Live, Animate |
+
+The whole graph compiles into one GPU program (`codenodes/graph.py`, pure Python). Each code node's
+functions and parameters get a per-node prefix, so two nodes can both define `bump()`. A compile error
+names the node and the line inside it, and that node shows the error too. Reroutes and muted nodes pass
+shapes through, and graphs can have up to 256 sliders.
+
 ## What keeps it from crashing
 
 - A shader that doesn't compile is a message, not a crash. The driver's log is captured and mapped
@@ -51,7 +69,9 @@ changes, so Claude can rewrite the code without resetting what you tuned.
 
 ```bash
 python tests/test_mesher.py                                    # mesher, no Blender (17 checks)
+python tests/test_graph.py                                     # graph compiler, no Blender (16 checks)
 blender --factory-startup --python tests/test_blender.py       # needs a window: the GPU isn't available with -b (27 checks)
+blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (20 checks)
 ```
 
 Both pass on Blender 5.0.1 and 5.1.2 (NVIDIA RTX A4500, OpenGL).
@@ -60,6 +80,6 @@ Both pass on Blender 5.0.1 and 5.1.2 (NVIDIA RTX A4500, OpenGL).
 
 - Needs Blender with a window. Background mode (`-b`) has no GPU, so there's no Code → Mesh in
   headless renders yet.
-- Only signed distance functions for now. The node editor (code nodes with typed inputs and outputs)
-  is next.
+- Shapes (signed distance functions) are the only socket type so far. Float links between nodes,
+  particles and the live GPU viewport preview are next.
 - Surface nets rounds off sharp edges and corners slightly.
