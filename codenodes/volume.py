@@ -19,14 +19,17 @@ GRID_NAME = "density"
 
 TEMPLATE = """\
 // Volume: return how thick the smoke is at p. 0 is empty, ~1 is solid.
+// Keep it at 0 near the edge of the bounds, or you get a visible box.
 // Helpers: noise3 fbm3 sdSphere sdBox length smoothstep. Time: uTime.
-// @param scale 1.6 0.2 6.0
-// @param wisp 0.55 0.0 1.5
+// @param radius 1.5 0.3 3.0
+// @param scale 1.9 0.2 6.0
+// @param wisp 0.9 0.0 1.5
 
 float density(vec3 p) {
-  float ball = 1.0 - length(p) / 1.6;             // fades out from the centre
-  float swirl = fbm3(p * scale + vec3(0.0, 0.0, uTime * 0.3));
-  return clamp(ball + wisp * (swirl - 0.55), 0.0, 1.0);
+  float fade = smoothstep(radius, radius * 0.25, length(p));  // 1 in the middle, 0 by `radius`
+  float swirl = fbm3(p * scale + vec3(0.0, 0.0, uTime * 0.25));
+  float wisps = smoothstep(0.62 - 0.3 * wisp, 0.66, swirl);   // contrast: holes and filaments
+  return clamp(fade * wisps, 0.0, 1.0);
 }
 """
 
@@ -74,7 +77,13 @@ def compute(source, lo, hi, resolution, time_s=0.0, frame=0.0, values=None):
 
 
 def smoke_material(name="CodeNodes Smoke"):
-    """A Principled Volume material, so the volume shows up without extra setup."""
+    """A Principled Volume material, so the volume shows up without extra setup.
+
+    Emission is left at zero on purpose. Principled Volume does **not** multiply
+    emission by the density grid, so a constant Emission Strength makes the whole
+    bounding box glow as a solid cube. To make a volume glow, feed an Attribute
+    node reading "density" into Emission Strength.
+    """
     import bpy
     mat = bpy.data.materials.get(name)
     if mat is not None:
