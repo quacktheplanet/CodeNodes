@@ -56,10 +56,33 @@ def simulate_object(obj):
     return state, st
 
 
+def build_shape(obj):
+    """Build a parametric shape and put it in the object's mesh. (solid, stats)."""
+    from . import shape_build
+    s = obj.codenodes
+    if s.text is None:
+        raise SdfCodeError("no code: pick a text block")
+    source = s.text.as_string()
+    s.code_hash = hashlib.sha1(source.encode()).hexdigest()
+    values = props.sync_params(s, source, 'SHAPE')
+    solid = shape_build.build(source, values)
+    if obj.mode == 'EDIT':
+        raise SdfCodeError(f"'{obj.name}' is in Edit Mode; leave Edit Mode to rebuild it")
+    shape_build.fill_mesh(obj.data, solid, s.smooth)
+    return solid, shape_build.stats(solid)
+
+
 def rebuild(obj):
     """Rebuild one object now. Returns "" or an error message (also stored on the object)."""
     s = obj.codenodes
     try:
+        if s.kind == 'SHAPE':
+            solid, st = build_shape(obj)
+            s.last_error = ""
+            s.stats = (f"{st['quads']:,} quads + {st['tris']:,} tris · "
+                       f"{st['sharp_edges']:,} sharp edges · "
+                       f"{st['size'][0]:g} × {st['size'][1]:g} × {st['size'][2]:g} m")
+            return ""
         if s.kind == 'PARTICLES':
             state, st = simulate_object(obj)
             s.last_error = ""

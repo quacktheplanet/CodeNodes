@@ -75,13 +75,19 @@ def session(token):
         check(make["summary"].startswith("Build or update"), f"tools carry their own documentation ({make['summary']!r})")
 
         r = c.call("help")
-        check(r["ok"] and set(r["result"]["kinds"]) == {"mesh", "particles", "volume"},
-              "help comes through the socket")
+        check(r["ok"] and set(r["result"]["kinds"]) == {"mesh", "shape", "particles", "volume"},
+              f"help comes through the socket ({r['result'].get('kinds') if r['ok'] else r.get('error')})")
 
         r = c.call("make", kind="mesh", code="// @param r 1.0 0.2 3.0\nfloat sdf(vec3 p){ return sdSphere(p, r); }",
                    name="Ball", resolution=64)
         check(r["ok"] and r["result"]["ok"] and r["result"]["faces"] > 100,
               f"a mesh is built over the wire ({r['result'].get('faces')} faces)")
+
+        r = c.call("make", kind="shape", name="Post", code=(
+            "param r 0.2\nparam h 1.0\nprofile\n  move 0, 0\n  line r, 0\n  line r, h\n"
+            "  line 0, h\n  close\nrevolve segments 32"))
+        check(r["ok"] and r["result"]["ok"] and r["result"]["faces"] > 50,
+              f"a parametric shape is built over the wire too ({r['result'].get('error') or r['result'].get('faces')})")
 
         r = c.call("make", kind="mesh", code="float sdf(vec3 p){ return lenght(p); }", name="Bad")
         check(r["ok"] and not r["result"]["ok"] and "line 1" in r["result"]["error"],

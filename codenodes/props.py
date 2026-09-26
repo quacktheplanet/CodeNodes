@@ -37,6 +37,8 @@ class CN_ObjectSettings(bpy.types.PropertyGroup):
     kind: EnumProperty(name="Kind", default='MESH', items=[
         ('MESH', "Mesh", "A surface from a signed distance function"),
         ('PARTICLES', "Particles", "Points moved by your own solver on the GPU"),
+        ('SHAPE', "Shape", "A model built from a parametric description: profiles, "
+                           "revolve, extrude — exact edges and clean quads"),
     ])
     count: IntProperty(name="Particles", default=20000, min=1, max=2_000_000, soft_max=500_000,
                        update=_sim_changed)
@@ -62,9 +64,14 @@ class CN_ObjectSettings(bpy.types.PropertyGroup):
     code_hash: StringProperty()
 
 
-def sync_params(settings, source):
-    """Match the sliders to the code's @param lines. Existing values are kept."""
-    wanted = sdf_code.parse_params(source)
+def sync_params(settings, source, kind='MESH'):
+    """Match the sliders to what the code declares. Existing values are kept."""
+    if kind == 'SHAPE':
+        from .shapes import parse
+        wanted = [sdf_code.Param(name, default, lo, hi)
+                  for name, default, lo, hi in parse(source).params]
+    else:
+        wanted = sdf_code.parse_params(source)
     old = {p.name: p.value for p in settings.params}
     settings.params.clear()
     for prm in wanted:

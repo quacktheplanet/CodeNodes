@@ -16,6 +16,7 @@ class CODENODES_PT_main(bpy.types.Panel):
         obj = context.active_object
         if obj is None or not getattr(obj, "codenodes", None) or not obj.codenodes.enabled:
             layout.operator("codenodes.add", icon='ADD')
+            layout.operator("codenodes.add_shape", icon='MESH_CYLINDER')
             layout.operator("codenodes.add_particles", icon='PARTICLES')
             layout.operator("codenodes.new_graph", icon='NODETREE')
             layout.label(text="Or select a Code Mesh object.")
@@ -25,7 +26,9 @@ class CODENODES_PT_main(bpy.types.Panel):
         row.prop(s, "text", text="")
         row.operator("codenodes.edit_code", text="", icon='TEXT')
         col = layout.column(align=True)
-        if s.kind == 'PARTICLES':
+        if s.kind == 'SHAPE':
+            col.prop(s, "smooth", toggle=True)
+        elif s.kind == 'PARTICLES':
             col.prop(s, "count")
             col.prop(s, "substeps")
             col.prop(s, "point_radius")

@@ -91,6 +91,49 @@ def bake(name, frame_start=None, frame_end=None):
             "error": None if ok else obj.codenodes.last_error or "bake failed"}
 
 
+def code_to_shape(source, name="CodeShape", params=None, live_update=True):
+    """A model built from a parametric description: profiles, revolve, extrude.
+
+    Exact edges and clean quads, rather than a sampled field. See
+    `codenodes.shapes.TEMPLATE` for the language.
+    """
+    from . import live
+    from .shapes import ShapeError
+    obj = bpy.data.objects.get(name)
+    if obj is not None and obj.type != 'MESH':
+        return {"ok": False, "error": f"an object named '{name}' exists and isn't a mesh"}
+    try:
+        from .shapes import parse
+        parse(source)
+    except ShapeError as exc:
+        return {"ok": False, "error": str(exc)}
+    if obj is None:
+        obj = bpy.data.objects.new(name, bpy.data.meshes.new(name))
+        bpy.context.scene.collection.objects.link(obj)
+    s = obj.codenodes
+    text = s.text or bpy.data.texts.get(f"{name}.shape") or bpy.data.texts.new(f"{name}.shape")
+    text.from_string(source)
+    s.enabled = True
+    s.kind = 'SHAPE'
+    s.live, s.animate = bool(live_update), False
+    s.text = text
+    try:
+        from .props import sync_params
+        sync_params(s, source, 'SHAPE')
+    except ShapeError:
+        pass
+    for pname, value in (params or {}).items():
+        item = next((p for p in s.params if p.name == pname), None)
+        if item is None:
+            return {"ok": False, "error": f"no param named '{pname}' in the description"}
+        item["value"] = float(value)
+    err = live.rebuild(obj)
+    live._pending.discard(obj.name)
+    return {"ok": not err, "object": obj.name, "text": text.name, "error": err or None,
+            "faces": len(obj.data.polygons), "verts": len(obj.data.vertices),
+            "stats": s.stats, "params": {p.name: p.value for p in s.params}}
+
+
 def code_to_particles(source, name="CodeParticles", count=20000, params=None, radius=0.02,
                       substeps=1, live_update=True):
     """A GPU particle system from `spawn(inout Particle p)` and `update(inout Particle p, float dt)`.

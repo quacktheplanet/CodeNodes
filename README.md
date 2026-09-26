@@ -18,6 +18,32 @@ float sdf(vec3 p) {
 Each `// @param name default min max` line becomes a slider. Your slider values are kept when the code
 changes, so Claude can rewrite the code without resetting what you tuned.
 
+**Code → Shape.** Maths turned into a model that is *constructed* rather than sampled. Declare
+sliders, describe a 2D profile, then spin or push it:
+
+```
+param height  0.34  0.10 0.80
+param radius  0.14  0.03 0.40
+
+part shade
+  profile
+    move  radius * 0.38, height
+    curve x = radius * (0.38 + 0.62 * t)  y = height - height * 0.22 * t  steps 20
+  revolve segments 72
+```
+
+Every number can be maths, so the whole object is one formula. Because the mesh is built rather
+than marched, **edges land exactly where the maths puts them, corners stay sharp, the quads follow
+the form, and the UVs mean something** — what you want for lamps, bottles, columns, walls and
+anything turned or extruded. Add › Mesh › **Code Shape**, or `api.code_to_shape(source)`.
+
+Commands: `param`, `part`, `profile` (`move`, `line`, `arc`, `curve`, `close`), `revolve`,
+`extrude`, `translate`, `rotate`, `scale`, `array`, `smooth`. Functions: `sin cos tan asin acos
+atan atan2 sqrt abs sign floor ceil round exp log pow min max mod hypot clamp mix smoothstep`, plus
+`pi`, `tau`, `e` and `t` inside a `curve`.
+
+It is a language we parse ourselves, not Python — so a description from anywhere is safe to build.
+
 **Code → Volume.** Write a density instead of a distance and get smoke, cloud or nebula geometry that
 EEVEE and Cycles render natively:
 
@@ -163,7 +189,9 @@ blender -b --factory-startup --python tests/test_farm.py       # the bake render
 blender --factory-startup --python tests/test_volume.py        # density code -> OpenVDB -> Volume object (16)
 blender --factory-startup --python tests/test_particles.py     # GPU particle solver, incl. baking (22)
 blender --factory-startup --python tests/test_agent.py         # the assistant-facing surface (29)
+python tests/test_shapes.py                                    # maths, the kernel, the language (63)
 python tests/test_rpc.py                                       # the MCP wire protocol, no Blender (29)
+blender --factory-startup --python tests/test_shape_blender.py # shapes as Blender objects (19)
 blender --factory-startup --python tests/test_server.py        # a real socket client against Blender (25)
 ```
 

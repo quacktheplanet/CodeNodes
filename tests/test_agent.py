@@ -49,10 +49,12 @@ def run():
 
     # --- the guide is usable on its own ------------------------------------------------
     g = agent.help()
-    check(set(g["kinds"]) == {"mesh", "particles", "volume"}, f"help lists the kinds ({g['kinds']})")
+    check(set(g["kinds"]) == {"mesh", "shape", "particles", "volume"}, f"help lists the kinds ({g['kinds']})")
     check(any("sdSphere" in h for h in g["helpers"]) and any("randBall" in h for h in g["helpers"]),
           "help lists the GLSL helpers")
-    check(all(k in g["templates"] for k in ("mesh", "particles", "volume")), "help carries a template for each kind")
+    check(all(k in g["templates"] for k in ("mesh", "shape", "particles", "volume")),
+          "help carries a template for each kind")
+    check("revolve" in g["shape_language"]["commands"], "and describes the shape language")
     check("@param" in g["params"], "help explains sliders")
 
     # --- each kind builds from one call ------------------------------------------------

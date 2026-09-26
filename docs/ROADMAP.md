@@ -132,8 +132,16 @@ drive real solvers and CAD, not stand in for them.
 5. **Bake to Nodes (Phase 3).** See above.
 
 **P2 — beyond organic shapes**
-6. **Hard-surface backend.** Profiles, revolve, sweep, extrude, bevel and booleans, with clean
-   topology, sharp edges and UVs. This is what makes "a lamp from scratch" and walls possible.
+6. **Maths into models (the construct backend).** ~~Profiles, revolve, extrude~~ **done** — the
+   `shapes` package: a small language we parse ourselves (so it is safe to accept from anywhere),
+   a safe expression evaluator, and a numpy kernel that builds the mesh directly. Exact edges,
+   sharp corners kept, quads that follow the form, real UVs. `api.code_to_shape`,
+   `agent.make("shape", …)`, Add › Mesh › Code Shape. 63 checks without Blender, 19 with.
+
+   Still to add, in rough order: **sweep along a path** and **loft between profiles**; **shell /
+   solidify**; **bevel and fillet**; **booleans** (Blender's exact solver) so parts can cut each
+   other; **helix/screw** for threads; a **Shape node** for the editor; and **exporting the profile
+   as a curve** so it can be edited by hand and read back.
 7. **Look-good pass.** CC0 materials and HDRIs (Poly Haven, ambientCG) fetched and cached; lighting
    rigs per scene type (exterior: HDRI + sun; interior: area lights + portals); AgX; a camera tool
    with framing rules (24–35 mm interiors, eye level or three-quarter).

@@ -22,10 +22,10 @@ import tempfile
 import bpy
 from mathutils import Vector
 
-from . import api, cache, particles, sdf_code, volume
+from . import api, cache, particles, sdf_code, shapes, volume
 from .sdf_code import SdfCodeError
 
-KINDS = ("mesh", "particles", "volume")
+KINDS = ("mesh", "shape", "particles", "volume")
 
 
 def _out_path(path, stem):
@@ -40,7 +40,12 @@ def help(kind=None):
     """What you can write, and the helpers available. Give it to the model verbatim."""
     guides = {
         "mesh": ("Define `float sdf(vec3 p)` — negative inside the surface, positive outside, in "
-                 "Blender units. Built with a GPU grid, so keep it a real distance field."),
+                 "Blender units. Built with a GPU grid, so keep it a real distance field. Good for "
+                 "organic and blended forms; it rounds sharp corners and has no useful UVs."),
+        "shape": ("Not GLSL — the shape language. Declare sliders with `param name default min max`, "
+                  "describe a 2D profile with move/line/arc/curve, then `revolve` or `extrude` it. "
+                  "Any number can be maths. Exact edges, clean quads and real UVs, so this is the "
+                  "one for lamps, bottles, columns, walls and anything turned or extruded."),
         "particles": ("Define `void spawn(inout Particle p)` and `void update(inout Particle p, "
                       "float dt)`. Particle has position, velocity, age, life, seed. Ageing and "
                       "respawning happen for you. Shade with the `speed` attribute, not `velocity` "
@@ -53,15 +58,22 @@ def help(kind=None):
                if line.startswith(("float ", "vec3 "))]
     helpers += [line.split("{")[0].strip() for line in particles.PARTICLE_PRELUDE.splitlines()
                 if line.startswith(("float ", "vec3 "))]
+    templates = {"mesh": sdf_code.TEMPLATE, "particles": particles.TEMPLATE,
+                 "volume": volume.TEMPLATE, "shape": shapes.TEMPLATE}
     return {
         "kinds": list(KINDS),
         "how": guides if kind is None else {kind: guides.get(kind, "unknown kind")},
         "helpers": helpers,
-        "params": ("Add a slider with a comment line: // @param name default min max . "
-                   "Values survive code edits, so rewriting the code will not reset them."),
-        "time": "uTime is seconds since the start frame; uFrame is the frame number.",
-        "templates": {"mesh": sdf_code.TEMPLATE, "particles": particles.TEMPLATE,
-                      "volume": volume.TEMPLATE} if kind is None else {},
+        "shape_language": {
+            "commands": sorted(shapes.KEYWORDS),
+            "keywords": {k: list(v) for k, v in sorted(shapes.KEYWORDS.items()) if v},
+            "functions": sorted(shapes.expr.FUNCTIONS) if hasattr(shapes, "expr") else [],
+        },
+        "params": ("GLSL kinds declare a slider with `// @param name default min max`; the shape "
+                   "language uses `param name default min max`. Values survive code edits, so "
+                   "rewriting the code will not reset them."),
+        "time": "uTime is seconds since the start frame; uFrame is the frame number (GLSL kinds).",
+        "templates": templates if kind is None else {kind: templates.get(kind, "")},
     }
 
 
@@ -72,6 +84,8 @@ def make(kind, code, name=None, **options):
     try:
         if kind == "mesh":
             return api.code_to_mesh(code, name=name or "CodeMesh", **options)
+        if kind == "shape":
+            return api.code_to_shape(code, name=name or "CodeShape", **options)
         if kind == "particles":
             return api.code_to_particles(code, name=name or "CodeParticles", **options)
         return api.code_to_volume(code, name=name or "CodeVolume", **options)

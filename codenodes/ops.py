@@ -34,6 +34,33 @@ class CODENODES_OT_add(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class CODENODES_OT_add_shape(bpy.types.Operator):
+    bl_idname = "codenodes.add_shape"
+    bl_label = "Code Shape"
+    bl_description = ("Add a model built from a parametric description — profiles, revolve, "
+                      "extrude — with exact edges and clean quads")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        from . import api, shapes
+        name = "CodeShape"
+        n = 1
+        while name in bpy.data.objects:
+            n += 1
+            name = f"CodeShape.{n:03d}"
+        r = api.code_to_shape(shapes.TEMPLATE, name=name)
+        obj = bpy.data.objects.get(r["object"])
+        if obj is not None:
+            obj.location = context.scene.cursor.location
+            for o in context.selected_objects:
+                o.select_set(False)
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+        if not r["ok"]:
+            self.report({'WARNING'}, (r["error"] or "").splitlines()[0])
+        return {'FINISHED'}
+
+
 class CODENODES_OT_add_particles(bpy.types.Operator):
     bl_idname = "codenodes.add_particles"
     bl_label = "Code Particles"
@@ -126,12 +153,13 @@ def show_text(context, text, op=None):
     return True
 
 
-classes = (CODENODES_OT_add, CODENODES_OT_add_particles, CODENODES_OT_rebuild, CODENODES_OT_bake,
-           CODENODES_OT_edit_code)
+classes = (CODENODES_OT_add, CODENODES_OT_add_shape, CODENODES_OT_add_particles,
+           CODENODES_OT_rebuild, CODENODES_OT_bake, CODENODES_OT_edit_code)
 
 
 def menu_add(self, context):
     self.layout.operator(CODENODES_OT_add.bl_idname, icon='SCRIPT')
+    self.layout.operator(CODENODES_OT_add_shape.bl_idname, icon='MESH_CYLINDER')
     self.layout.operator(CODENODES_OT_add_particles.bl_idname, icon='PARTICLES')
 
 
