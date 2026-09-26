@@ -193,8 +193,16 @@ def reader_group(name, directory, start, end, smooth=True, as_points=False, radi
         m2p.location = (520, 0)
         m2p.inputs["Radius"].default_value = radius
         links.new(store.outputs["Geometry"], m2p.inputs["Mesh"])
-        geo = m2p.outputs[0]
-        out.location = (760, 0)
+        # Mesh to Points drops the material, so put it back (the modifier supplies it)
+        tree.interface.new_socket("Material", in_out="INPUT", socket_type="NodeSocketMaterial")
+        gin = nodes.new("NodeGroupInput")
+        gin.location = (520, -260)
+        setmat = nodes.new("GeometryNodeSetMaterial")
+        setmat.location = (700, 0)
+        links.new(m2p.outputs[0], setmat.inputs["Geometry"])
+        links.new(gin.outputs["Material"], setmat.inputs["Material"])
+        geo = setmat.outputs[0]
+        out.location = (900, 0)
     elif smooth:
         shade = nodes.new("GeometryNodeSetShadeSmooth")
         shade.location = (360, 0)

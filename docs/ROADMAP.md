@@ -67,6 +67,9 @@ so there are no files at all and the maths is evaluated natively on every frame.
 | GPU uniform buffers | a `GPUUniformBuf` passed straight into `uniform_block()` as a temporary is freed before the dispatch runs, so every parameter silently reads zero. Keep a reference |
 | Enum settings from the API | `settings["kind"] = 'PARTICLES'` writes an ID property that the enum never sees; assign `settings.kind = 'PARTICLES'` instead. ID-property writes are still the way to skip an update callback on ordinary properties |
 | `@param` detection | only treat a line as a broken declaration when it *starts* with `// @param`, or prose mentioning @param fails to compile |
+| Mesh to Points | **drops the object's material**, so the points render unshaded and vanish in a dark scene. Both the live points group and the baked cache group add a Set Material node fed from the modifier |
+| The name `velocity` | reserved by Blender for motion blur: a shader's Attribute node reads nothing from it. A `speed` scalar is written alongside so people can shade by it |
+| Particle speed | 300,000 particles step in about 12 ms per frame (RTX A4500) |
 
 ## Layers (how this grows past one add-on)
 

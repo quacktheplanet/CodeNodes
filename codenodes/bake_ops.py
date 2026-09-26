@@ -99,7 +99,11 @@ class CODENODES_OT_bake(bpy.types.Operator):
             mod = obj.modifiers.get(particles.POINTS_MODIFIER)
             if mod is not None:
                 obj.modifiers.remove(mod)      # the cache group makes the points itself
-        cache.attach(obj, tree)
+        mod = cache.attach(obj, tree)
+        if job.as_points:
+            key = particles.socket_id(tree, "Material")
+            if key is not None and obj.data.materials:
+                mod[key] = obj.data.materials[0]
         obj.data.clear_geometry()      # the cache supplies the geometry now; don't store it twice
         if self.stop_live:
             settings.animate = False

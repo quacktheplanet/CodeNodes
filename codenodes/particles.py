@@ -188,7 +188,11 @@ class Sim:
         self._dispatch(dt, time_s, frame, False, values)
 
     def read(self):
-        """{'position', 'velocity', 'age', 'life'} as numpy arrays of length count."""
+        """{'position', 'velocity', 'speed', 'age', 'life'} as numpy arrays of length count.
+
+        ``speed`` is there because Blender reserves the name ``velocity`` for motion
+        blur, so a shader cannot read it back — shade with ``speed`` instead.
+        """
         out = {}
         for tex, names in ((self.pos, ("position", "age")), (self.vel, ("velocity", "life"))):
             buf = tex.read()
@@ -196,6 +200,7 @@ class Sim:
             arr = np.frombuffer(buf, dtype=np.float32).reshape(-1, 4)[:self.count]
             out[names[0]] = np.ascontiguousarray(arr[:, :3])
             out[names[1]] = np.ascontiguousarray(arr[:, 3])
+        out["speed"] = np.linalg.norm(out["velocity"], axis=1).astype(np.float32)
         return out
 
 
@@ -256,7 +261,11 @@ POINTS_MODIFIER = "CodeNodes Points"
 
 
 def points_group(radius=0.02):
-    """A tiny node group turning the vertices into renderable points."""
+    """A tiny node group turning the vertices into renderable points.
+
+    Mesh to Points drops the object's material, so a Set Material node puts it
+    back; without it the points render unshaded and vanish in a dark scene.
+    """
     import bpy
     name = "CodeNodes Points"
     tree = bpy.data.node_groups.get(name)
@@ -265,20 +274,46 @@ def points_group(radius=0.02):
     tree = bpy.data.node_groups.new(name, "GeometryNodeTree")
     tree.use_fake_user = True
     tree.interface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+    tree.interface.new_socket("Radius", in_out="INPUT", socket_type="NodeSocketFloat")
+    tree.interface.new_socket("Material", in_out="INPUT", socket_type="NodeSocketMaterial")
     tree.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
     gin = tree.nodes.new("NodeGroupInput")
-    gin.location = (-300, 0)
+    gin.location = (-360, 0)
     gout = tree.nodes.new("NodeGroupOutput")
-    gout.location = (300, 0)
+    gout.location = (360, 0)
     m2p = tree.nodes.new("GeometryNodeMeshToPoints")
-    m2p.location = (0, 0)
+    m2p.location = (-120, 0)
     m2p.inputs["Radius"].default_value = radius
-    tree.links.new(gin.outputs[0], m2p.inputs["Mesh"])
-    tree.links.new(m2p.outputs[0], gout.inputs[0])
+    setmat = tree.nodes.new("GeometryNodeSetMaterial")
+    setmat.location = (120, 0)
+    tree.links.new(gin.outputs["Geometry"], m2p.inputs["Mesh"])
+    tree.links.new(gin.outputs["Radius"], m2p.inputs["Radius"])
+    tree.links.new(m2p.outputs[0], setmat.inputs["Geometry"])
+    tree.links.new(gin.outputs["Material"], setmat.inputs["Material"])
+    tree.links.new(setmat.outputs[0], gout.inputs[0])
     return tree
 
 
-def fill_points(me, state, extra=("velocity", "age", "life")):
+def socket_id(tree, name):
+    """The modifier key for a group input, e.g. 'Socket_2'."""
+    for item in tree.interface.items_tree:
+        if item.item_type == 'SOCKET' and item.in_out == 'INPUT' and item.name == name:
+            return item.identifier
+    return None
+
+
+def apply_settings(obj, mod, radius):
+    """Push the point size and the object's material into the modifier's sockets."""
+    tree = mod.node_group
+    key = socket_id(tree, "Radius")
+    if key is not None:
+        mod[key] = float(radius)
+    key = socket_id(tree, "Material")
+    if key is not None and obj.data.materials and mod.get(key) is None:
+        mod[key] = obj.data.materials[0]
+
+
+def fill_points(me, state, extra=("velocity", "speed", "age", "life")):
     """Put the particle state into a mesh as vertices plus point attributes."""
     me.clear_geometry()
     pos = state["position"]
@@ -309,7 +344,9 @@ def ensure_object(name, radius=0.02):
     if obj is None:
         obj = bpy.data.objects.new(name, bpy.data.meshes.new(name))
         bpy.context.scene.collection.objects.link(obj)
-    if obj.modifiers.get(POINTS_MODIFIER) is None:
+    mod = obj.modifiers.get(POINTS_MODIFIER)
+    if mod is None:
         mod = obj.modifiers.new(POINTS_MODIFIER, 'NODES')
         mod.node_group = points_group(radius)
+    apply_settings(obj, mod, radius)
     return obj

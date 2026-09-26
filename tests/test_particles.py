@@ -39,6 +39,28 @@ def positions(obj):
     return a.reshape(-1, 3)
 
 
+def render_mean(path):
+    """Average brightness of a small Cycles render of the current frame."""
+    scene = bpy.context.scene
+    cam = bpy.data.objects.get("Camera")
+    if cam is None:
+        cam = bpy.data.objects.new("Camera", bpy.data.cameras.new("Camera"))
+        scene.collection.objects.link(cam)
+        cam.location, cam.rotation_euler = (0, -8, 1), (1.45, 0, 0)
+    scene.camera = cam
+    scene.render.engine = 'CYCLES'
+    scene.cycles.samples = 12
+    scene.cycles.use_denoising = False
+    scene.render.resolution_x = scene.render.resolution_y = 160
+    scene.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+    img = bpy.data.images.load(path)
+    a = np.empty(len(img.pixels), np.float32)
+    img.pixels.foreach_get(a)
+    bpy.data.images.remove(img)
+    return float(a.reshape(-1, 4)[:, :3].mean())
+
+
 def evaluated_points(obj):
     """How many points Blender actually ends up with, after the modifiers."""
     dg = bpy.context.evaluated_depsgraph_get()
@@ -78,7 +100,8 @@ def run():
     obj = bpy.data.objects["Swirl"]
     check(len(obj.data.vertices) == 20000, f"20,000 points exist ({len(obj.data.vertices):,})")
     names = {a.name for a in obj.data.attributes}
-    check({"velocity", "age", "life"} <= names, f"velocity, age and life are point attributes ({sorted(names)})")
+    check({"velocity", "speed", "age", "life"} <= names,
+          f"velocity, speed, age and life are point attributes ({sorted(n for n in names if not n.startswith('.'))})")
     n_points, attrs = evaluated_points(obj)
     check(n_points == 20000, f"Blender evaluates them as a real point cloud ({n_points:,} points)")
     check(r["params"] and "speed" in r["params"], f"@param sliders came through ({list(r['params'])})")
@@ -132,6 +155,25 @@ def run():
     check(small["ok"] and len(bpy.data.objects["Few"].data.vertices) == 500, "a different count works")
     huge = api.code_to_particles(FALL, name="Huge", count=5_000_000)
     check(not huge["ok"] and "between 1 and" in huge["error"], "an absurd count is refused")
+
+    # --- the material reaches the points (Mesh to Points drops it on its own) -----------
+    for other in ("Fall", "Few"):
+        bpy.data.objects[other].hide_render = True
+    scene.frame_set(20)
+    before = render_mean(os.path.join(WORK, "no_mat.png"))
+    mat = bpy.data.materials.new("Glow")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    em = nt.nodes.new("ShaderNodeEmission")
+    em.inputs["Strength"].default_value = 15.0
+    em.inputs["Color"].default_value = (1.0, 0.4, 0.1, 1.0)
+    nt.links.new(em.outputs[0], nt.nodes.new("ShaderNodeOutputMaterial").inputs["Surface"])
+    obj.data.materials.append(mat)
+    scene.frame_set(21)                                   # a rebuild pushes it into the modifier
+    scene.frame_set(20)
+    after = render_mean(os.path.join(WORK, "with_mat.png"))
+    check(after > before * 1.3, f"the material reaches the points: render brightened {before:.4f} -> {after:.4f}")
 
     # --- baking -----------------------------------------------------------------------
     scene.frame_set(1)

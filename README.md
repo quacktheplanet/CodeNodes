@@ -51,9 +51,12 @@ void update(inout Particle p, float dt) {
 ```
 
 `Particle` carries `position`, `velocity`, `age`, `life` and a per-particle `seed`. The points come
-out as a real point cloud with `velocity`, `age` and `life` attributes, so Geometry Nodes can
-instance anything onto them and Cycles gets velocity for motion blur. Add › Mesh › **Code Particles**,
-or `api.code_to_particles(source, name="Swirl", count=20000)`.
+out as a real point cloud with `velocity`, `speed`, `age` and `life` attributes, so Geometry Nodes
+can instance anything onto them and Cycles uses `velocity` for motion blur. Shade with **`speed`**,
+not `velocity`: Blender reserves that name for motion blur and a shader cannot read it back.
+Add › Mesh › **Code Particles**, or `api.code_to_particles(source, name="Swirl", count=20000)`.
+
+300,000 particles simulate in about 12 ms per frame on an RTX A4500.
 
 ## Use it
 
