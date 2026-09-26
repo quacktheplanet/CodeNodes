@@ -1,0 +1,11 @@
+schema_version = "1.0.0"
+
+id = "codenodes"
+version = "0.1.0"
+name = "CodeNodes"
+tagline = "Turn GPU code into real meshes"
+maintainer = "Lucas DeMeritt"
+type = "add-on"
+tags = ["Mesh", "Modeling", "Development"]
+blender_version_min = "5.0.0"
+license = ["SPDX:GPL-3.0-or-later"]

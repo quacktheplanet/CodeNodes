@@ -1,0 +1,111 @@
+"""Operators: add a Code -> Mesh object, rebuild, and bake the current result."""
+
+from __future__ import annotations
+
+import bpy
+from bpy.props import IntProperty, StringProperty
+
+from . import live, sdf_code
+
+
+class CODENODES_OT_add(bpy.types.Operator):
+    bl_idname = "codenodes.add"
+    bl_label = "Code Mesh"
+    bl_description = "Add a mesh object built from sdf code"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        me = bpy.data.meshes.new("CodeMesh")
+        obj = bpy.data.objects.new("CodeMesh", me)
+        context.collection.objects.link(obj)
+        obj.location = context.scene.cursor.location
+        text = bpy.data.texts.new(f"{obj.name}.sdf")
+        text.from_string(sdf_code.TEMPLATE)
+        s = obj.codenodes
+        s.enabled = True
+        s.text = text
+        for o in context.selected_objects:
+            o.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        err = live.rebuild(obj)
+        if err:
+            self.report({'WARNING'}, err.splitlines()[0])
+        return {'FINISHED'}
+
+
+class CODENODES_OT_rebuild(bpy.types.Operator):
+    bl_idname = "codenodes.rebuild"
+    bl_label = "Rebuild"
+    bl_description = "Run the code and rebuild the mesh"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    object_name: StringProperty(name="Object", description="Defaults to the active object")
+
+    def execute(self, context):
+        obj = bpy.data.objects.get(self.object_name) if self.object_name else context.active_object
+        if obj is None or not obj.codenodes.enabled:
+            self.report({'ERROR'}, "not a Code -> Mesh object")
+            return {'CANCELLED'}
+        err = live.rebuild(obj)
+        if err:
+            self.report({'ERROR'}, err.splitlines()[0])
+            return {'CANCELLED'}
+        self.report({'INFO'}, obj.codenodes.stats)
+        return {'FINISHED'}
+
+
+class CODENODES_OT_bake(bpy.types.Operator):
+    bl_idname = "codenodes.bake"
+    bl_label = "Make Plain Mesh"
+    bl_description = "Keep the current mesh and stop driving it from code (the code text stays)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        obj = context.active_object
+        if obj is None or not obj.codenodes.enabled:
+            return {'CANCELLED'}
+        obj.codenodes.enabled = False
+        obj.codenodes.animate = False
+        return {'FINISHED'}
+
+
+class CODENODES_OT_edit_code(bpy.types.Operator):
+    bl_idname = "codenodes.edit_code"
+    bl_label = "Edit Code"
+    bl_description = "Show the code in a Text Editor (turns the largest other editor into one if needed)"
+
+    def execute(self, context):
+        text = context.active_object.codenodes.text if context.active_object else None
+        if text is None:
+            return {'CANCELLED'}
+        areas = [a for a in context.screen.areas if a.type == 'TEXT_EDITOR']
+        if not areas:
+            others = [a for a in context.screen.areas if a != context.area and a.type != 'PROPERTIES']
+            if not others:
+                self.report({'WARNING'}, "open a Text Editor to edit the code")
+                return {'CANCELLED'}
+            area = max(others, key=lambda a: a.width * a.height)
+            area.type = 'TEXT_EDITOR'
+            areas = [area]
+        areas[0].spaces.active.text = text
+        return {'FINISHED'}
+
+
+classes = (CODENODES_OT_add, CODENODES_OT_rebuild, CODENODES_OT_bake, CODENODES_OT_edit_code)
+
+
+def menu_add(self, context):
+    self.layout.operator(CODENODES_OT_add.bl_idname, icon='SCRIPT')
+
+
+def register():
+    for c in classes:
+        bpy.utils.register_class(c)
+    bpy.types.VIEW3D_MT_mesh_add.append(menu_add)
+
+
+def unregister():
+    bpy.types.VIEW3D_MT_mesh_add.remove(menu_add)
+    for c in reversed(classes):
+        bpy.utils.unregister_class(c)
