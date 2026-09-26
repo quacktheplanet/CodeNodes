@@ -34,6 +34,32 @@ class CODENODES_OT_add(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class CODENODES_OT_add_particles(bpy.types.Operator):
+    bl_idname = "codenodes.add_particles"
+    bl_label = "Code Particles"
+    bl_description = "Add a GPU particle system you write yourself"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        from . import api, particles
+        name = "CodeParticles"
+        n = 1
+        while name in bpy.data.objects:
+            n += 1
+            name = f"CodeParticles.{n:03d}"
+        r = api.code_to_particles(particles.TEMPLATE, name=name)
+        obj = bpy.data.objects.get(r["object"])
+        if obj is not None:
+            obj.location = context.scene.cursor.location
+            for o in context.selected_objects:
+                o.select_set(False)
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+        if not r["ok"]:
+            self.report({'WARNING'}, (r["error"] or "").splitlines()[0])
+        return {'FINISHED'}
+
+
 class CODENODES_OT_rebuild(bpy.types.Operator):
     bl_idname = "codenodes.rebuild"
     bl_label = "Rebuild"
@@ -100,11 +126,13 @@ def show_text(context, text, op=None):
     return True
 
 
-classes = (CODENODES_OT_add, CODENODES_OT_rebuild, CODENODES_OT_bake, CODENODES_OT_edit_code)
+classes = (CODENODES_OT_add, CODENODES_OT_add_particles, CODENODES_OT_rebuild, CODENODES_OT_bake,
+           CODENODES_OT_edit_code)
 
 
 def menu_add(self, context):
     self.layout.operator(CODENODES_OT_add.bl_idname, icon='SCRIPT')
+    self.layout.operator(CODENODES_OT_add_particles.bl_idname, icon='PARTICLES')
 
 
 def register():

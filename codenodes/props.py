@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import bpy
-from bpy.props import (BoolProperty, CollectionProperty, FloatProperty, FloatVectorProperty,
-                       IntProperty, PointerProperty, StringProperty)
+from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty,
+                       FloatVectorProperty, IntProperty, PointerProperty, StringProperty)
 
 from . import sdf_code
 
@@ -12,6 +12,15 @@ from . import sdf_code
 def _changed(self, context):
     from . import live
     obj = self.id_data
+    if obj.codenodes.enabled and obj.codenodes.live:
+        live.request(obj)
+
+
+def _sim_changed(self, context):
+    """A particle setting changed: start the simulation over so the change is visible."""
+    from . import live, particles
+    obj = self.id_data
+    particles.forget(obj.name)
     if obj.codenodes.enabled and obj.codenodes.live:
         live.request(obj)
 
@@ -25,6 +34,17 @@ class CN_Param(bpy.types.PropertyGroup):
 
 class CN_ObjectSettings(bpy.types.PropertyGroup):
     enabled: BoolProperty(default=False)
+    kind: EnumProperty(name="Kind", default='MESH', items=[
+        ('MESH', "Mesh", "A surface from a signed distance function"),
+        ('PARTICLES', "Particles", "Points moved by your own solver on the GPU"),
+    ])
+    count: IntProperty(name="Particles", default=20000, min=1, max=2_000_000, soft_max=500_000,
+                       update=_sim_changed)
+    substeps: IntProperty(name="Substeps", default=1, min=1, max=20, update=_sim_changed,
+                          description="Solver steps per frame; raise it if fast particles jitter")
+    point_radius: FloatProperty(name="Point Size", default=0.02, min=0.0, soft_max=0.5, update=_changed)
+    stagger: FloatProperty(name="Stagger", default=1.0, min=0.0, max=1.0, update=_sim_changed,
+                           description="Spread starting ages so particles don't all die at once")
     text: PointerProperty(type=bpy.types.Text, name="Code", update=_changed,
                           description="Text block holding the sdf code")
     resolution: IntProperty(name="Resolution", default=96, min=8, max=512, soft_max=256, update=_changed,

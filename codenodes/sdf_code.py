@@ -72,6 +72,7 @@ float sdf(vec3 p) {
 """
 
 _PARAM_RE = re.compile(r"^\s*//\s*@param\s+([A-Za-z_]\w*)\s+([-+0-9.eE]+)(?:\s+([-+0-9.eE]+)\s+([-+0-9.eE]+))?\s*$")
+_PARAM_START = re.compile(r"^\s*//\s*@param\b")
 _RESERVED = re.compile(r"^(cn[A-Z_]|gl_|u(Time|Frame)$)")
 # Parameters become #defines, so they can't shadow GLSL words or the helpers.
 _TAKEN = set(re.findall(r"^(?:float|vec3)\s+(\w+)\s*\(", PRELUDE, re.M)) | set("""
@@ -102,7 +103,9 @@ def parse_params(source):
     for n, line in enumerate(source.splitlines(), 1):
         m = _PARAM_RE.match(line)
         if not m:
-            if "@param" in line:
+            # only complain about a line that is trying to be a declaration, not prose that
+            # happens to mention @param
+            if _PARAM_START.match(line):
                 raise SdfCodeError(f"line {n}: couldn't read the @param. Use: // @param name default [min max]")
             continue
         name = m.group(1)

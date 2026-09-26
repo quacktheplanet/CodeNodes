@@ -38,10 +38,34 @@ def compute_object(obj):
                          time_s=seconds, frame=frame, values=values)
 
 
+def simulate_object(obj):
+    """Bring a particle object's simulation to the current frame and show it."""
+    from . import particles
+    s = obj.codenodes
+    if s.text is None:
+        raise SdfCodeError("no code: pick a text block")
+    source = s.text.as_string()
+    s.code_hash = hashlib.sha1(source.encode()).hexdigest()
+    values = props.sync_params(s, source)
+    scene = bpy.context.scene
+    fps = scene.render.fps / (scene.render.fps_base or 1.0)
+    state, st = particles.simulate(obj.name, source, s.count, scene.frame_current, scene.frame_start,
+                                   fps, values, s.substeps, s.stagger)
+    particles.ensure_object(obj.name, s.point_radius)
+    particles.fill_points(obj.data, state)
+    return state, st
+
+
 def rebuild(obj):
     """Rebuild one object now. Returns "" or an error message (also stored on the object)."""
     s = obj.codenodes
     try:
+        if s.kind == 'PARTICLES':
+            state, st = simulate_object(obj)
+            s.last_error = ""
+            s.stats = (f"{st['count']:,} particles · frame {st['frame']} · "
+                       f"{st['steps']} step{'s' if st['steps'] != 1 else ''} · {st['sim_s'] * 1000:.0f} ms")
+            return ""
         result, st = compute_object(obj)
         build.swap_mesh(obj, result, s.smooth)
     except SdfCodeError as exc:

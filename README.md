@@ -35,6 +35,26 @@ api.code_to_volume(source, name="Smoke", frame_start=1, frame_end=48)      # a .
 
 Volumes are written as OpenVDB files, so a sequence plays back natively with no add-on and no GPU.
 
+**Code → Particles.** Write the solver yourself. `spawn` places a particle, `update` moves it, and
+CodeNodes keeps the state on the GPU and steps it as the frame changes:
+
+```glsl
+// @param speed 1.0 0.0 4.0
+void spawn(inout Particle p) {
+  p.position = randBall(p.seed) * 1.8;
+  p.life = 4.0 + rand1(p.seed * 3.3) * 3.0;      // then it respawns
+}
+void update(inout Particle p, float dt) {
+  p.velocity = curl(p.position) * speed;          // your own field
+  p.position += p.velocity * dt;
+}
+```
+
+`Particle` carries `position`, `velocity`, `age`, `life` and a per-particle `seed`. The points come
+out as a real point cloud with `velocity`, `age` and `life` attributes, so Geometry Nodes can
+instance anything onto them and Cycles gets velocity for motion blur. Add › Mesh › **Code Particles**,
+or `api.code_to_particles(source, name="Swirl", count=20000)`.
+
 ## Use it
 
 - **In Blender:** Add › Mesh › **Code Mesh**, then View3D › Sidebar (N) › **CodeNodes**. The code
@@ -111,6 +131,7 @@ blender --factory-startup --python tests/test_nodes.py         # node editor, in
 blender --factory-startup --python tests/test_bake.py          # baking, and playback through stock nodes (18)
 blender -b --factory-startup --python tests/test_farm.py       # the bake renders with no GPU and no add-on (10)
 blender --factory-startup --python tests/test_volume.py        # density code -> OpenVDB -> Volume object (16)
+blender --factory-startup --python tests/test_particles.py     # GPU particle solver, incl. baking (21)
 ```
 
 Run `test_bake.py` before `test_farm.py`: the first saves the .blend the second opens.

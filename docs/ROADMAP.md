@@ -64,6 +64,9 @@ so there are no files at all and the maths is evaluated natively on every frame.
 | Volume objects from a written `.vdb` | works, placed exactly where the code puts it (a ball offset to x=1 measured at 1.016); `volume.grids` is lazy, so call `grids.load()`. OpenVDB stores only non-empty voxels, so the object's box hugs the filled part rather than the sample bounds |
 | Volumes in a render | Cycles shows them out of the box; EEVEE needs its volumetric settings turned up, so the test renders with Cycles |
 | Mesh datablock identity | rebuilding must fill the **same** datablock; making a new one per frame broke cache identity (`Blob_001`, `Blob_002`…) and doubled file size. Fixed |
+| GPU uniform buffers | a `GPUUniformBuf` passed straight into `uniform_block()` as a temporary is freed before the dispatch runs, so every parameter silently reads zero. Keep a reference |
+| Enum settings from the API | `settings["kind"] = 'PARTICLES'` writes an ID property that the enum never sees; assign `settings.kind = 'PARTICLES'` instead. ID-property writes are still the way to skip an update callback on ordinary properties |
+| `@param` detection | only treat a line as a broken declaration when it *starts* with `// @param`, or prose mentioning @param fails to compile |
 
 ## Layers (how this grows past one add-on)
 
@@ -89,11 +92,18 @@ drive real solvers and CAD, not stand in for them.
    grids for fire.
 
 **P1 — the headline features**
-3. **Code Particles.** GPU state buffers (position, velocity, age, custom attributes) and an emitter;
-   your code updates each particle. The artifact's curl flow is the first demo. Bakes to `.ply` with
-   velocity so motion blur works, and Geometry Nodes can instance anything onto the points.
-4. **Claude connection (MCP).** A structured tool surface — `code_to_mesh`, `build_graph`, `bake`,
-   `render_preview`, `screenshot` — so Claude works in your open Blender and checks its own results.
+3. ~~**Code Particles.**~~ **Done.** `spawn` / `update` in GLSL, state in two RGBA32F textures stepped
+   on the GPU, output as a point cloud with `velocity`, `age` and `life` attributes. Bakes to `.ply`
+   (velocity as three scalars, put back together by the cache group, so Cycles gets motion blur).
+   `codenodes.particles`, `api.code_to_particles()`, 21 checks — including gravity matching the
+   closed-form answer to 3 decimal places.
+   Still to do: a Particles node in the editor, forces/colliders as nodes, and sampling a CodeNodes
+   SDF as a collider.
+4. **Claude connection (MCP).** **Decided: Blender's own Lab MCP** (projects.blender.org/lab/blender_mcp,
+   official, experimental, needs 5.1+). Read it before installing — it runs arbitrary Python inside
+   Blender. On top of it, give CodeNodes a structured tool surface: `code_to_mesh`, `code_to_particles`,
+   `code_to_volume`, `build_graph`, `bake`, `render_preview`, `screenshot`, so Claude works in your open
+   Blender and checks its own results by looking at renders.
 5. **Bake to Nodes (Phase 3).** See above.
 
 **P2 — beyond organic shapes**

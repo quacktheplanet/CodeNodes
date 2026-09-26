@@ -7,12 +7,20 @@ import traceback
 import bpy
 from bpy.props import BoolProperty, IntProperty, StringProperty
 
-from . import cache, live
+from . import cache, live, particles
 from .sdf_code import SdfCodeError
 
 
+class Job:
+    """What to bake: where it goes, how to make a frame, and how to write it."""
+
+    def __init__(self, obj, settings, compute, name, writer=None, as_points=False):
+        self.obj, self.settings, self.compute, self.name = obj, settings, compute, name
+        self.writer = writer or cache.write_ply
+        self.as_points = as_points
+
+
 def _target(context, object_name, tree_name, node_name):
-    """(object, settings-owner, compute(frame) -> MeshResult, name) for whatever is being baked."""
     if tree_name:
         from . import nodes
         tree = bpy.data.node_groups.get(tree_name)
@@ -21,11 +29,14 @@ def _target(context, object_name, tree_name, node_name):
             raise SdfCodeError("that Mesh Output node is gone")
         if out.target is None:
             raise SdfCodeError("build the mesh once before baking, so there is an object to bake to")
-        return out.target, out, (lambda f: nodes.compute_output(tree, out)[0]), tree.name
+        return Job(out.target, out, lambda f: nodes.compute_output(tree, out)[0], tree.name)
     obj = bpy.data.objects.get(object_name) if object_name else context.active_object
     if obj is None or not obj.codenodes.enabled:
-        raise SdfCodeError("select a Code Mesh object")
-    return obj, obj.codenodes, (lambda f: live.compute_object(obj)[0]), obj.name
+        raise SdfCodeError("select a Code Mesh or Code Particles object")
+    if obj.codenodes.kind == 'PARTICLES':
+        return Job(obj, obj.codenodes, lambda f: live.simulate_object(obj)[0], obj.name,
+                   writer=cache.write_points_ply, as_points=True)
+    return Job(obj, obj.codenodes, lambda f: live.compute_object(obj)[0], obj.name)
 
 
 class CODENODES_OT_bake(bpy.types.Operator):
@@ -59,17 +70,18 @@ class CODENODES_OT_bake(bpy.types.Operator):
 
     def execute(self, context):
         try:
-            obj, settings, compute, name = _target(context, self.object_name, self.tree, self.node)
+            job = _target(context, self.object_name, self.tree, self.node)
         except SdfCodeError as exc:
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
+        obj, settings, name = job.obj, job.settings, job.name
 
         wm = context.window_manager
         total = max(1, self.frame_end - self.frame_start + 1)
         wm.progress_begin(0, total)
         try:
-            info = cache.bake(name, compute, self.frame_start, self.frame_end,
-                              progress=lambda done, n: wm.progress_update(done))
+            info = cache.bake(name, job.compute, self.frame_start, self.frame_end,
+                              progress=lambda done, n: wm.progress_update(done), writer=job.writer)
         except SdfCodeError as exc:
             self.report({'ERROR'}, str(exc).splitlines()[0])
             return {'CANCELLED'}
@@ -80,16 +92,20 @@ class CODENODES_OT_bake(bpy.types.Operator):
         finally:
             wm.progress_end()
 
-        tree = cache.reader_group(name, info["dir"], info["start"], info["end"], settings.smooth)
+        tree = cache.reader_group(name, info["dir"], info["start"], info["end"],
+                                  getattr(settings, "smooth", True), as_points=job.as_points,
+                                  radius=getattr(settings, "point_radius", 0.02))
+        if job.as_points:
+            mod = obj.modifiers.get(particles.POINTS_MODIFIER)
+            if mod is not None:
+                obj.modifiers.remove(mod)      # the cache group makes the points itself
         cache.attach(obj, tree)
         obj.data.clear_geometry()      # the cache supplies the geometry now; don't store it twice
         if self.stop_live:
             settings.animate = False
             settings.live = False
-            if hasattr(settings, "enabled"):
-                settings.enabled = True        # keep the panel; the cache modifier now supplies the mesh
-        msg = (f"Baked {info['frames']} frames · {cache.human_bytes(info['bytes'])} · "
-               f"~{info['avg_faces']:,} faces/frame")
+        what = "particles" if job.as_points else f"~{info['avg_faces']:,} faces/frame"
+        msg = f"Baked {info['frames']} frames · {cache.human_bytes(info['bytes'])} · {what}"
         settings.stats = msg
         self.report({'INFO'}, msg)
         return {'FINISHED'}

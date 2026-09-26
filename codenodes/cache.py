@@ -68,8 +68,38 @@ def write_ply(path, result):
     return os.path.getsize(path)
 
 
-def bake(name, compute, start, end, progress=None):
-    """Write one .ply per frame. `compute(frame)` returns a MeshResult.
+def write_points_ply(path, state):
+    """A binary PLY of points plus per-point scalars, for particle bakes.
+
+    Vectors are written as three scalars (``velocity_x`` and friends) because PLY
+    has no vector type; the reader group puts them back together.
+    """
+    pos = np.ascontiguousarray(state["position"], "<f4")
+    columns, names = [], []
+    for key, values in state.items():
+        if key == "position":
+            continue
+        values = np.asarray(values, np.float32)
+        if values.ndim == 2:
+            for axis in range(values.shape[1]):
+                columns.append(values[:, axis])
+                names.append(f"{key}_{'xyzw'[axis]}")
+        else:
+            columns.append(values)
+            names.append(key)
+    with open(path, "wb") as f:
+        f.write(b"ply\nformat binary_little_endian 1.0\n")
+        f.write(b"element vertex %d\nproperty float x\nproperty float y\nproperty float z\n" % len(pos))
+        for n in names:
+            f.write(b"property float %s\n" % n.encode())
+        f.write(b"end_header\n")
+        data = np.column_stack([pos] + [np.asarray(c, "<f4") for c in columns]).astype("<f4")
+        f.write(np.ascontiguousarray(data).tobytes())
+    return os.path.getsize(path)
+
+
+def bake(name, compute, start, end, progress=None, writer=write_ply):
+    """Write one .ply per frame. `compute(frame)` returns whatever `writer` takes.
 
     Restores the current frame afterwards. Returns a summary dict.
     """
@@ -88,8 +118,8 @@ def bake(name, compute, start, end, progress=None):
         for frame in range(start, end + 1):
             scene.frame_set(frame)
             result = compute(frame)
-            total_bytes += write_ply(frame_path(directory, frame), result)
-            faces += len(result.quads)
+            total_bytes += writer(frame_path(directory, frame), result)
+            faces += len(getattr(result, "quads", ()))
             if progress is not None:
                 progress(frame - start + 1, end - start + 1)
     finally:
@@ -99,7 +129,7 @@ def bake(name, compute, start, end, progress=None):
             "bytes": total_bytes, "avg_faces": faces // max(n, 1)}
 
 
-def reader_group(name, directory, start, end, smooth=True):
+def reader_group(name, directory, start, end, smooth=True, as_points=False, radius=0.02):
     """Build (or rebuild) the node group that plays a bake back."""
     import bpy
     group_name = f"{GROUP_PREFIX} · {name}"
@@ -141,7 +171,31 @@ def reader_group(name, directory, start, end, smooth=True):
     links.new(as_int.outputs[0], fmt.inputs["frame"])
     links.new(fmt.outputs["String"], imp.inputs["Path"])
     geo = imp.outputs[0]
-    if smooth:
+    if as_points:
+        # PLY has no vector type, so velocity arrived as three scalars: put it back together
+        # (Cycles reads a "velocity" attribute for motion blur), then make real points.
+        comb = nodes.new("ShaderNodeCombineXYZ")
+        comb.location = (320, -220)
+        for axis, socket in zip("xyz", ("X", "Y", "Z")):
+            attr = nodes.new("GeometryNodeInputNamedAttribute")
+            attr.data_type = 'FLOAT'
+            attr.inputs["Name"].default_value = f"velocity_{axis}"
+            attr.location = (140, -160 - 60 * "xyz".index(axis))
+            links.new(attr.outputs["Attribute"], comb.inputs[socket])
+        store = nodes.new("GeometryNodeStoreNamedAttribute")
+        store.domain = 'POINT'
+        store.data_type = 'FLOAT_VECTOR'
+        store.inputs["Name"].default_value = "velocity"
+        store.location = (360, 0)
+        links.new(geo, store.inputs["Geometry"])
+        links.new(comb.outputs[0], store.inputs["Value"])
+        m2p = nodes.new("GeometryNodeMeshToPoints")
+        m2p.location = (520, 0)
+        m2p.inputs["Radius"].default_value = radius
+        links.new(store.outputs["Geometry"], m2p.inputs["Mesh"])
+        geo = m2p.outputs[0]
+        out.location = (760, 0)
+    elif smooth:
         shade = nodes.new("GeometryNodeSetShadeSmooth")
         shade.location = (360, 0)
         links.new(geo, shade.inputs["Geometry"])

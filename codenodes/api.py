@@ -91,6 +91,51 @@ def bake(name, frame_start=None, frame_end=None):
             "error": None if ok else obj.codenodes.last_error or "bake failed"}
 
 
+def code_to_particles(source, name="CodeParticles", count=20000, params=None, radius=0.02,
+                      substeps=1, live_update=True):
+    """A GPU particle system from `spawn(inout Particle p)` and `update(inout Particle p, float dt)`.
+
+    The simulation steps as the frame changes. Bake it with `bake(name, ...)` to get
+    a cache that renders anywhere.
+    """
+    from . import live, particles
+    from .sdf_code import SdfCodeError
+    obj = bpy.data.objects.get(name)
+    if obj is not None and obj.type != 'MESH':
+        return {"ok": False, "error": f"an object named '{name}' exists and isn't a mesh"}
+    try:
+        particles.check_source(source)
+    except SdfCodeError as exc:
+        return {"ok": False, "error": str(exc)}
+    particles.forget(name)
+    obj = particles.ensure_object(name, radius)
+    s = obj.codenodes
+    text = s.text or bpy.data.texts.get(f"{name}.sdf") or bpy.data.texts.new(f"{name}.sdf")
+    text.from_string(source)
+    s.enabled = True
+    s.kind = 'PARTICLES'                 # an enum: must be set by name, not as an ID property
+    s.live, s.animate = bool(live_update), True
+    for key, value in (("count", int(count)), ("substeps", int(substeps)),
+                       ("point_radius", float(radius))):
+        s[key] = value                   # as ID properties, so their update callbacks don't fire
+    s.text = text
+    try:
+        from .props import sync_params
+        sync_params(s, source)
+    except SdfCodeError:
+        pass
+    for pname, value in (params or {}).items():
+        item = next((p for p in s.params if p.name == pname), None)
+        if item is None:
+            return {"ok": False, "error": f"no @param named '{pname}' in the code"}
+        item["value"] = float(value)
+    err = live.rebuild(obj)
+    live._pending.discard(obj.name)
+    return {"ok": not err, "object": obj.name, "text": text.name, "error": err or None,
+            "count": int(count), "points": len(obj.data.vertices), "stats": s.stats,
+            "params": {p.name: p.value for p in s.params}}
+
+
 def code_to_volume(source, name="CodeVolume", resolution=96, bounds_min=(-2, -2, -2),
                    bounds_max=(2, 2, 2), params=None, frame_start=None, frame_end=None):
     """Smoke, cloud or nebula from `float density(vec3 p)`.
