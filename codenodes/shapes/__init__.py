@@ -13,11 +13,12 @@ turned and extruded parts.
 Nothing here needs Blender or a GPU, and nothing here can run code.
 """
 
-from . import expr
+from . import expr, solids
 from .expr import ExprError, evaluate
-from .language import KEYWORDS, TEMPLATE, Shape, ShapeError, parse, split_args
-from .solids import MAX_FACES, Profile, Solid, array, extrude, join, revolve, transform
+from .language import KEYWORDS, TEMPLATE, Part, Shape, ShapeError, parse, split_args
+from .solids import (MAX_FACES, Path, Profile, Solid, array, extrude, join, loft, revolve,
+                     shell, sweep, transform)
 
-__all__ = ["parse", "Shape", "ShapeError", "ExprError", "evaluate", "TEMPLATE", "KEYWORDS",
-           "split_args", "Profile", "Solid", "revolve", "extrude", "array", "join",
-           "transform", "MAX_FACES"]
+__all__ = ["parse", "Shape", "Part", "ShapeError", "ExprError", "evaluate", "TEMPLATE",
+           "KEYWORDS", "split_args", "Profile", "Path", "Solid", "revolve", "extrude",
+           "sweep", "loft", "shell", "array", "join", "transform", "MAX_FACES", "solids", "expr"]

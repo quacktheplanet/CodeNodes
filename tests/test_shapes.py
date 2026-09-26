@@ -99,11 +99,24 @@ def test_profiles_and_solids():
     box = solids.revolve(solids.Profile().move(0, 0).line(1, 0).line(1, 1).line(0, 1), segments=16)
     check(len(box.sharp) > 0, f"corners are marked sharp ({len(box.sharp)} edges)")
     curved = solids.Profile()
-    curved.curve("cos(t * pi / 2)", "sin(t * pi / 2)", steps=16)
+    curved.curve("1 + 0.5 * cos(t * pi / 2)", "sin(t * pi / 2)", steps=16)
     round_solid = solids.revolve(curved, segments=16)
     check(len(round_solid.sharp) == 2 * 16,
           f"along a smooth curve only the two open ends are sharp ({len(round_solid.sharp)} of "
           f"{len(edges_of(round_solid))} edges)")
+
+    # a profile touching the axis: the poles must be one vertex each, or the solid is
+    # non-manifold and useless as a boolean cutter
+    capsule = solids.Profile().move(0, 0).line(1, 0).line(1, 2).line(0, 2).close()
+    pole = solids.revolve(capsule, segments=24)
+    counts = edge_counts(pole)
+    check(all(c == 2 for c in counts.values()),
+          f"a lathe that touches the axis is still watertight "
+          f"({sum(1 for c in counts.values() if c != 2)} bad edges)")
+    at_axis = np.sum(np.linalg.norm(pole.verts[:, :2], axis=1) < 1e-6)
+    check(at_axis == 2, f"with exactly one vertex at each pole, not one per segment ({at_axis})")
+    check(len(pole.tris) == 2 * 24, f"and triangles where the quads collapsed ({len(pole.tris)})")
+    check(solids._signed_volume(pole) > 0, "and its faces point outward")
 
     # extrude
     square = solids.Profile().move(-1, -1).line(1, -1).line(1, 1).line(-1, 1).close()
@@ -157,11 +170,19 @@ def test_language():
     check(positional == ["shade_r * 0.45", "height"], f"maths is not mistaken for keywords ({positional})")
     _, named = language.split_args("6 around z", language.KEYWORDS["array"])
     check(named == {"around": "z"}, f"a one-word keyword value stops there ({named})")
+    _, named = language.split_args("radius shaft pitch pitch turns 4 steps 700",
+                                   language.KEYWORDS["helix"])
+    check(named == {"radius": "shaft", "pitch": "pitch", "turns": "4", "steps": "700"},
+          f"a parameter named after a keyword still reads as its value ({named})")
+    _, named = language.split_args("radius r pitch p turns (length - head) / p steps 700",
+                                   language.KEYWORDS["helix"])
+    check(named["turns"] == "(length - head) / p" and named["steps"] == "700",
+          f"a keyword word inside an expression stays part of it ({named})")
 
     shape = language.parse(language.TEMPLATE)
     check([p[0] for p in shape.params] == ["height", "shade_r", "stem_r", "base_r"],
           "the lamp's sliders are read")
-    check([n for n, _ in shape.parts] == ["shade", "stem", "base"], "and its three parts")
+    check([n for n, _mode, _ops in shape.parts] == ["shade", "stem", "base"], "and its three parts")
     solid = shape.build()
     check(len(solid.faces) > 1000, f"the lamp builds ({len(solid.faces):,} faces)")
     check(np.isfinite(solid.verts).all(), "with finite vertices")
@@ -213,10 +234,137 @@ revolve segments 8
     check(radius.max() > radius.min() * 1.4, "and the wave really is in the geometry")
 
 
+def test_sweep_loft_shell():
+    # a circle swept along a helix is a spring: right tube radius, right rise
+    circle = solids.Profile()
+    circle.curve("0.02 * cos(t * tau)", "0.02 * sin(t * tau)", steps=16)
+    circle.close()
+    path = solids.Path().helix(radius=0.1, pitch=0.05, turns=3, steps=144)
+    spring = solids.sweep(circle, path)
+    r = np.linalg.norm(spring.verts[:, :2], axis=1)
+    check(abs(r.min() - 0.08) < 0.004 and abs(r.max() - 0.12) < 0.004,
+          f"a swept tube keeps its thickness all the way round ({r.min():.3f}..{r.max():.3f})")
+    rise = spring.verts[:, 2].max() - spring.verts[:, 2].min()
+    check(abs(rise - (0.05 * 3 + 0.04)) < 0.01, f"the helix rises pitch × turns ({rise:.3f} m)")
+    counts = edge_counts(spring)
+    check(all(c == 2 for c in counts.values()), "and it is watertight, caps and all")
+
+    # parallel transport: a square swept round a bend must not spin
+    square = solids.Profile().move(-0.1, -0.1).line(0.1, -0.1).line(0.1, 0.1).line(-0.1, 0.1).close()
+    bend = solids.Path()
+    bend.curve("cos(t * pi / 2)", "sin(t * pi / 2)", "0", steps=32)
+    elbow = solids.sweep(square, bend)
+    start = elbow.verts[:4]
+    end = elbow.verts[-4 - 2:-2]
+    check(abs(np.ptp(start[:, 2]) - np.ptp(end[:, 2])) < 1e-3,
+          "a profile carried round a bend does not twist on the way")
+
+    # loft
+    circ = solids.Profile()
+    circ.curve("cos(t * tau)", "sin(t * tau)", steps=32)
+    circ.close()
+    unit_square = solids.Profile().move(-1, -1).line(1, -1).line(1, 1).line(-1, 1).close()
+    tower = solids.loft([unit_square, circ], heights=[0, 2], steps=8)
+    check(abs(tower.verts[:, 2].max() - 2.0) < 1e-6, "a loft spans the heights given")
+    counts = edge_counts(tower)
+    check(all(c == 2 for c in counts.values()), "and is closed at both ends")
+    bottom = tower.verts[np.isclose(tower.verts[:, 2], 0)][:, :2]
+    top = tower.verts[np.isclose(tower.verts[:, 2], 2)][:, :2]
+    check(abs(np.abs(bottom).max() - 1.0) < 1e-6 and abs(np.linalg.norm(top, axis=1).max() - 1.0) < 0.01,
+          "square at the bottom, round at the top")
+    check(raises(lambda: solids.loft([unit_square], steps=2), "at least two"), "a loft needs two profiles")
+    check(raises(lambda: solids.loft([unit_square, solids.Profile().move(0, 0).line(1, 1)]),
+                 "open, or every"), "a loft won't mix an open profile with a closed one")
+
+    # shell
+    line = solids.Profile().move(0.2, 0).line(0.5, 0.4)
+    walled = solids.shell(line, 0.02)
+    pts, _ = walled.finish()
+    check(walled.closed and len(pts) == 4, f"shell closes an open profile ({len(pts)} points)")
+    thickness = np.linalg.norm(pts[0] - pts[-1])
+    check(abs(thickness - 0.02) < 1e-6, f"to the thickness asked for ({thickness:.4f})")
+    check(raises(lambda: solids.shell(square, 0.01), "already a solid"),
+          "shelling a closed profile is refused")
+
+
+def test_language_extras():
+    shape = language.parse("""
+param r 0.02
+part coil
+  profile
+    curve x = r * cos(t * tau)  y = r * sin(t * tau)  steps 12
+    close
+  path
+    helix radius 0.1 pitch 0.05 turns 2
+  sweep
+part core subtract
+  profile
+    move 0, 0
+    line 0.05, 0
+    line 0.05, 0.2
+    line 0, 0.2
+    close
+  revolve segments 16
+  bevel 0.002 segments 3
+finish
+  bevel 0.001
+  smooth
+""")
+    parts = shape.build_parts()
+    check([p.name for p in parts] == ["coil", "core"], "parts are named")
+    check([p.mode for p in parts] == ["add", "subtract"], "and carry how they combine")
+    check(parts[1].bevel["segments"] == 3, f"a part can ask for a bevel ({parts[1].bevel})")
+    check(parts[0].bevel is None, "and one that doesn't, doesn't")
+    options = shape.finish_options()
+    check(options["bevel"]["width"] == 0.001 and options["smooth"],
+          f"the finish block is read ({options})")
+    check(len(parts[0].solid.faces) > 100, "the swept coil has geometry")
+
+    loft_shape = language.parse("""
+profile
+  move -1, -1
+  line 1, -1
+  line 1, 1
+  line -1, 1
+  close
+profile
+  curve x = 0.5 * cos(t * tau)  y = 0.5 * sin(t * tau)  steps 24
+  close
+loft steps 6
+""").build()
+    check(len(loft_shape.faces) > 50, f"a loft in the language builds ({len(loft_shape.faces)} faces)")
+
+    shelled = language.parse("""
+param wall 0.004
+profile
+  move 0.06, 0.3
+  line 0.14, 0.05
+  shell wall
+revolve segments 32
+""").build()
+    check(len(shelled.faces) > 50, "shell works in the language")
+    check(raises(lambda: language.parse("param t 1\nprofile\n move 0,0\n line 1,0\nrevolve"),
+                 "reserved"), "'t' can't be a parameter name: it is the curve's own variable")
+
+    for source, wanted in [
+        ("profile\n move 0,0\n line 1,0\nsweep", "needs a `path`"),
+        ("path\n move 0,0,0\n line 0,0,1\nsweep", "needs a profile"),
+        ("profile\n move 0,0\n line 1,0\n close\nloft", "at least two profiles"),
+        ("path\n move 0,0,0\n arc 1,1 radius 1\nsweep", "can't be used inside a `path`"),
+        ("profile\n move 0,0\n helix radius 1 pitch 1 turns 1\nrevolve", "inside a `profile`"),
+        ("profile\n move 0,0\n line 1,0\n close\nrevolve\nbevel", "needs a width"),
+        ("finish\n revolve segments 8", "only bevel and smooth"),
+    ]:
+        check(raises(lambda s=source: language.parse(s).build_parts(), wanted),
+              f"{wanted!r} is reported")
+
+
 def main():
     test_expressions()
     test_profiles_and_solids()
+    test_sweep_loft_shell()
     test_language()
+    test_language_extras()
     print(f"\nAll {_checks} checks passed.")
 
 

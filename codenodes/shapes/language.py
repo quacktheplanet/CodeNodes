@@ -59,13 +59,23 @@ SINGLE_WORD = {"axis", "around", "clockwise", "cap"}
 KEYWORDS = {
     "move": (), "line": (),
     "arc": ("radius", "steps", "clockwise"),
-    "curve": ("x", "y", "steps"),
+    "curve": ("x", "y", "z", "steps"),
+    "helix": ("radius", "pitch", "turns", "steps", "start"),
     "revolve": ("segments", "degrees", "angle", "axis", "cap"),
     "extrude": ("depth", "steps", "axis", "taper", "cap"),
+    "sweep": ("twist", "scale", "cap"),
+    "loft": ("steps", "axis", "cap"),
     "translate": ("x", "y", "z"), "rotate": ("x", "y", "z"), "scale": ("x", "y", "z"),
     "array": ("count", "around", "x", "y", "z"),
     "shell": ("thickness",), "smooth": (), "close": (),
+    "bevel": ("width", "segments", "shape", "angle"),
 }
+
+PART_MODES = ("add", "subtract", "intersect")
+PROFILE_WORDS = ("move", "line", "arc", "curve", "close", "shell")
+PATH_WORDS = ("move", "line", "curve", "helix")
+SOLID_WORDS = ("revolve", "extrude", "sweep", "loft", "translate", "rotate", "scale",
+               "array", "smooth", "bevel")
 
 
 def split_args(text, keywords=()):
@@ -81,7 +91,11 @@ def split_args(text, keywords=()):
     if not wanted:
         return [p.strip() for p in text.split(",") if p.strip()], {}
 
-    found, depth, skip_to = [], 0, 0
+    # A word only starts a keyword if it is outside brackets, is not the first token of
+    # the previous keyword's value, and does not follow an operator. That last rule is
+    # what keeps `turns (length - thick) / pitch` reading `pitch` as a variable, while
+    # `pitch pitch` still reads as "the keyword, then a parameter of the same name".
+    found, depth, skip_to, ignore_at = [], 0, 0, -1
     for match in re.finditer(r"[()]|[A-Za-z_]\w*", text):
         token = match.group(0)
         if token == "(":
@@ -90,7 +104,12 @@ def split_args(text, keywords=()):
         if token == ")":
             depth -= 1
             continue
-        if depth or match.start() < skip_to or token.lower() not in wanted:
+        if match.start() == ignore_at:
+            ignore_at = -1
+            continue
+        before = text[:match.start()].rstrip()
+        if depth or match.start() < skip_to or token.lower() not in wanted \
+                or (before and before[-1] in "+-*/%,=("):
             continue
         word = token.lower()
         after = text[match.end():]
@@ -104,6 +123,8 @@ def split_args(text, keywords=()):
             skip_to = value_start + single.end()
         else:
             found.append((match.start(), word, value_start))     # end filled in below
+            lead = re.match(r"\s*", text[value_start:])
+            ignore_at = value_start + lead.end()                 # the value's first token
 
     named, ends = {}, [f[0] for f in found[1:]] + [len(text)]
     for (start, word, value), end in zip(found, ends):
@@ -116,12 +137,25 @@ def split_args(text, keywords=()):
     return positional, named
 
 
-class Shape:
-    """A parsed shape: its sliders, its parts, and the solid they make."""
+class Part:
+    """One piece of a shape: its solid, how it combines, and any bevel asked for."""
 
-    def __init__(self, params, parts):
+    __slots__ = ("name", "mode", "solid", "bevel")
+
+    def __init__(self, name, mode, solid, bevel=None):
+        self.name, self.mode, self.solid, self.bevel = name, mode, solid, bevel
+
+    def __repr__(self):
+        return f"Part({self.name!r}, {self.mode}, {self.solid})"
+
+
+class Shape:
+    """A parsed shape: its sliders, its parts, and what to do to the finished result."""
+
+    def __init__(self, params, parts, finish=None):
         self.params = params            # [(name, default, min, max)]
-        self.parts = parts              # [(name, [operations])]
+        self.parts = parts              # [(name, mode, [operations])]
+        self.finish = finish or []      # operations applied to the joined result
 
     def values(self, overrides=None):
         scope = {name: default for name, default, _lo, _hi in self.params}
@@ -130,19 +164,43 @@ class Shape:
                 scope[key] = float(value)
         return scope
 
-    def build(self, overrides=None):
+    def build_parts(self, overrides=None):
+        """Every part as a Part. Booleans and bevels are described, not applied —
+        those need Blender's solvers, so `shape_build` does them."""
         scope = self.values(overrides)
-        pieces = []
-        for name, ops in self.parts:
-            pieces.append(_build_part(name, ops, scope))
-        return solids.join(pieces)
+        out = []
+        for name, mode, ops in self.parts:
+            solid, bevel = _build_part(name, ops, scope)
+            out.append(Part(name, mode, solid, bevel))
+        return out
+
+    def finish_options(self, overrides=None):
+        """What to do once the parts are combined: bevel, smooth."""
+        scope = self.values(overrides)
+        options = {}
+        for word, rest, line_no in self.finish:
+            positional, named = split_args(rest, KEYWORDS.get(word, ()))
+            if word == "bevel":
+                options["bevel"] = _bevel_options(positional, named, scope, line_no)
+            elif word == "smooth":
+                options["smooth"] = True
+        return options
+
+    def build(self, overrides=None):
+        """The whole shape as one solid, joining the parts.
+
+        Subtract and intersect need Blender, so this adds everything; it is what the
+        kernel's own tests use, and what a caller without Blender gets.
+        """
+        return solids.join([p.solid for p in self.build_parts(overrides)])
 
 
 def parse(source):
     """Text -> Shape. Raises ShapeError with a line number."""
-    params, parts = [], []
-    current = None                       # (name, [ops])
-    profile_ops = None
+    params, parts, finish = [], [], []
+    current = None                       # (name, mode, [ops])
+    block = None                         # the profile or path being written into
+    in_finish = False
     seen = set()
 
     for line_no, raw in enumerate(source.splitlines(), 1):
@@ -150,6 +208,17 @@ def parse(source):
         if not line.strip():
             continue
         word, rest = tokenise(line)
+
+        if word == "finish":
+            in_finish = True
+            block = None
+            continue
+
+        if in_finish:
+            if word in ("bevel", "smooth"):
+                finish.append((word, rest, line_no))
+                continue
+            _fail(line_no, f"after `finish` only bevel and smooth make sense, not '{word}'")
 
         if word == "param":
             bits = rest.split()
@@ -173,38 +242,45 @@ def parse(source):
             continue
 
         if word == "part":
-            current = (rest.strip() or f"part{len(parts) + 1}", [])
+            bits = rest.split()
+            mode = "add"
+            if bits and bits[-1].lower() in PART_MODES:
+                mode = bits.pop().lower()
+            name = " ".join(bits) or f"part{len(parts) + 1}"
+            current = (name, mode, [])
             parts.append(current)
-            profile_ops = None
+            block = None
             continue
 
         if current is None:              # everything before the first `part` is one unnamed part
-            current = ("shape", [])
+            current = ("shape", "add", [])
             parts.append(current)
 
-        if word == "profile":
-            profile_ops = []
-            current[1].append(("profile", profile_ops, line_no))
+        if word in ("profile", "path"):
+            block = (word, [])
+            current[2].append((word, block[1], line_no))
             continue
 
-        if word in ("move", "line", "arc", "curve", "close"):
-            if profile_ops is None:
-                _fail(line_no, f"'{word}' belongs inside a `profile` block")
-            profile_ops.append((word, rest, line_no))
+        if word in PROFILE_WORDS or word in PATH_WORDS:
+            if block is None:
+                _fail(line_no, f"'{word}' belongs inside a `profile` or `path` block")
+            allowed = PROFILE_WORDS if block[0] == "profile" else PATH_WORDS
+            if word not in allowed:
+                _fail(line_no, f"'{word}' can't be used inside a `{block[0]}` block")
+            block[1].append((word, rest, line_no))
             continue
 
-        if word in ("revolve", "extrude", "shell", "translate", "rotate", "scale", "array", "smooth"):
-            current[1].append((word, rest, line_no))
-            profile_ops = None
+        if word in SOLID_WORDS:
+            current[2].append((word, rest, line_no))
+            block = None
             continue
 
-        _fail(line_no, f"'{word}' is not a shape command. Try: param, part, profile, "
-                       "move, line, arc, curve, close, revolve, extrude, shell, "
-                       "translate, rotate, scale, array, smooth")
+        _fail(line_no, f"'{word}' is not a shape command. Try: param, part, finish, profile, path, "
+                       + ", ".join(sorted(set(PROFILE_WORDS + PATH_WORDS + SOLID_WORDS))))
 
     if not parts:
         raise ShapeError("nothing to build: describe a profile and a revolve or extrude")
-    return Shape(params, parts)
+    return Shape(params, parts, finish)
 
 
 def _vector(positional, named, scope, default=(0.0, 0.0, 0.0), line_no=0):
@@ -223,12 +299,64 @@ def _vector(positional, named, scope, default=(0.0, 0.0, 0.0), line_no=0):
     return tuple(number(b, scope, name="value") for b in bits)
 
 
+def _bevel_options(positional, named, scope, line_no):
+    width = positional[0] if positional else named.get("width")
+    if width is None:
+        _fail(line_no, "bevel needs a width, e.g. `bevel 0.002 segments 2`")
+    return {"width": number(width, scope, "bevel width"),
+            "segments": integer(named.get("segments", 2), scope, "segments", 1, 64),
+            "shape": number(named.get("shape", 0.5), scope, "shape"),
+            "angle": number(named.get("angle", 30.0), scope, "angle")}
+
+
+def _build_path(ops, scope):
+    path = solids.Path()
+    for word, rest, line_no in ops:
+        positional, named = split_args(rest, KEYWORDS.get(word, ()))
+        try:
+            if word in ("move", "line"):
+                if len(positional) != 3:
+                    _fail(line_no, f"inside a path, '{word}' needs three numbers: `{word} x, y, z`")
+                x, y, z = (number(v, scope, name=word) for v in positional)
+                if word == "move":
+                    path.move(x, y, z)
+                else:
+                    path.line(x, y, z, steps=integer(named.get("steps", 1), scope, "steps", 1, 4096))
+            elif word == "curve":
+                missing = [k for k in ("x", "y", "z") if k not in named]
+                if missing:
+                    _fail(line_no, "a path curve needs x, y and z, e.g. "
+                                   "`curve x = cos(t*tau)  y = sin(t*tau)  z = t  steps 64`")
+                path.curve(named["x"], named["y"], named["z"],
+                           steps=integer(named.get("steps", 32), scope, "steps", 1, 8192), scope=scope)
+            elif word == "helix":
+                for need in ("radius", "pitch", "turns"):
+                    if need not in named:
+                        _fail(line_no, "helix needs radius, pitch and turns, e.g. "
+                                       "`helix radius 0.02 pitch 0.006 turns 5`")
+                path.helix(number(named["radius"], scope, "radius"),
+                           number(named["pitch"], scope, "pitch"),
+                           number(named["turns"], scope, "turns"),
+                           steps=integer(named["steps"], scope, "steps", 2, 20000) if "steps" in named else None,
+                           start=number(named.get("start", 0.0), scope, "start"))
+        except ShapeError:
+            raise
+        except ExprError as exc:
+            _fail(line_no, str(exc))
+    return path
+
+
 def _build_profile(ops, scope):
     p = solids.Profile()
     for word, rest, line_no in ops:
         positional, named = split_args(rest, KEYWORDS.get(word, ()))
         try:
-            if word == "close":
+            if word == "shell":
+                value = positional[0] if positional else named.get("thickness")
+                if value is None:
+                    _fail(line_no, "shell needs a thickness, e.g. `shell 0.004`")
+                p = solids.shell(p, number(value, scope, "thickness"))
+            elif word == "close":
                 p.close()
             elif word in ("move", "line"):
                 if len(positional) != 2:
@@ -258,15 +386,21 @@ def _build_profile(ops, scope):
 
 
 def _build_part(name, ops, scope):
-    profile = None
+    profiles = []
+    path = None
     solid = None
     smooth_only = False
+    bevel = None
 
     for entry in ops:
         word, rest, line_no = entry
         if word == "profile":
-            profile = _build_profile(rest, scope)
+            profiles.append(_build_profile(rest, scope))
             continue
+        if word == "path":
+            path = _build_path(rest, scope)
+            continue
+        profile = profiles[-1] if profiles else None
         positional, named = split_args(rest, KEYWORDS.get(word, ()))
         try:
             if word == "revolve":
@@ -290,10 +424,29 @@ def _build_part(name, ops, scope):
                     axis=named.get("axis", "z"),
                     taper=number(named.get("taper", 1.0), scope, "taper"),
                     cap=str(named.get("cap", "yes")).lower() not in ("0", "no", "false"))
-                profile = None
-            elif word == "shell":
-                _fail(line_no, "shell isn't implemented yet — build both sides of the profile, "
-                               "or add a Solidify modifier in Blender")
+                profiles = []
+            elif word == "sweep":
+                if profile is None:
+                    _fail(line_no, "sweep needs a profile above it")
+                if path is None:
+                    _fail(line_no, "sweep needs a `path` block saying where to carry the profile")
+                solid = solids.sweep(
+                    profile, path,
+                    twist=number(named.get("twist", 0.0), scope, "twist"),
+                    scale_end=number(named.get("scale", 1.0), scope, "scale"),
+                    cap=str(named.get("cap", "yes")).lower() not in ("0", "no", "false"))
+                profiles, path = [], None
+            elif word == "loft":
+                if len(profiles) < 2:
+                    _fail(line_no, f"loft needs at least two profiles above it (found {len(profiles)})")
+                solid = solids.loft(
+                    profiles,
+                    steps=integer(named.get("steps", 1), scope, "steps", 1, 512),
+                    axis=named.get("axis", "z"),
+                    cap=str(named.get("cap", "yes")).lower() not in ("0", "no", "false"))
+                profiles = []
+            elif word == "bevel":
+                bevel = _bevel_options(positional, named, scope, line_no)
             elif word in ("translate", "rotate", "scale"):
                 if solid is None:
                     _fail(line_no, f"{word} needs something to act on")
@@ -320,10 +473,11 @@ def _build_part(name, ops, scope):
             _fail(line_no, str(exc))
 
     if solid is None:
-        raise ShapeError(f"part '{name}' never becomes a solid: add a revolve or extrude")
+        raise ShapeError(f"part '{name}' never becomes a solid: add a revolve, extrude, "
+                         "sweep or loft")
     if smooth_only:
         solid.sharp = set()
-    return solid
+    return solid, bevel
 
 
 TEMPLATE = """\

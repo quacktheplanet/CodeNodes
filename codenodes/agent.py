@@ -136,6 +136,9 @@ def look_at(target, distance=None, azimuth=35.0, elevation=22.0, lens=50.0):
     azimuth swings around it, elevation lifts above it.
     """
     s = bpy.context.scene
+    # Anything moved or rotated a moment ago still has a stale matrix_world until the
+    # scene is updated, and aiming at that puts the subject out of frame.
+    bpy.context.view_layer.update()
     cam = s.camera
     if cam is None:
         cam = bpy.data.objects.new("Camera", bpy.data.cameras.new("Camera"))

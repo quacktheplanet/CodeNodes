@@ -87,6 +87,52 @@ class CODENODES_OT_add_particles(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class CODENODES_OT_profile_to_curve(bpy.types.Operator):
+    bl_idname = "codenodes.profile_to_curve"
+    bl_label = "Profile as Curve"
+    bl_description = ("Draw the profiles as a curve object, to look at or reshape by hand "
+                      "while working out the maths")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    tree: StringProperty(options={'HIDDEN'})
+    node: StringProperty(options={'HIDDEN'})
+
+    def execute(self, context):
+        from . import shape_build
+        from .shapes import ShapeError
+        source = values = None
+        name = "Profile"
+        if self.tree:
+            tree = bpy.data.node_groups.get(self.tree)
+            node = tree.nodes.get(self.node) if tree else None
+            if node is None or node.text is None:
+                self.report({'ERROR'}, "that Shape node has no description")
+                return {'CANCELLED'}
+            source = node.text.as_string()
+            values = {s.name: s.default_value for s in node.inputs}
+            name = f"{node.name} Profile"
+        else:
+            obj = context.active_object
+            s = getattr(obj, "codenodes", None) if obj else None
+            if s is None or not s.enabled or s.kind != 'SHAPE' or s.text is None:
+                self.report({'ERROR'}, "select a Code Shape object")
+                return {'CANCELLED'}
+            source = s.text.as_string()
+            values = {p.name: p.value for p in s.params}
+            name = f"{obj.name} Profile"
+        try:
+            curve, found = shape_build.profiles_to_curve(source, values, name)
+        except ShapeError as exc:
+            self.report({'ERROR'}, str(exc).splitlines()[0])
+            return {'CANCELLED'}
+        for o in context.selected_objects:
+            o.select_set(False)
+        curve.select_set(True)
+        context.view_layer.objects.active = curve
+        self.report({'INFO'}, f"{found} profile{'s' if found != 1 else ''} drawn as '{curve.name}'")
+        return {'FINISHED'}
+
+
 class CODENODES_OT_rebuild(bpy.types.Operator):
     bl_idname = "codenodes.rebuild"
     bl_label = "Rebuild"
@@ -154,7 +200,8 @@ def show_text(context, text, op=None):
 
 
 classes = (CODENODES_OT_add, CODENODES_OT_add_shape, CODENODES_OT_add_particles,
-           CODENODES_OT_rebuild, CODENODES_OT_bake, CODENODES_OT_edit_code)
+           CODENODES_OT_profile_to_curve, CODENODES_OT_rebuild, CODENODES_OT_bake,
+           CODENODES_OT_edit_code)
 
 
 def menu_add(self, context):

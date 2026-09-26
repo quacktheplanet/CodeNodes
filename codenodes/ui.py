@@ -28,6 +28,7 @@ class CODENODES_PT_main(bpy.types.Panel):
         col = layout.column(align=True)
         if s.kind == 'SHAPE':
             col.prop(s, "smooth", toggle=True)
+            col.operator("codenodes.profile_to_curve", icon='OUTLINER_OB_CURVE')
         elif s.kind == 'PARTICLES':
             col.prop(s, "count")
             col.prop(s, "substeps")

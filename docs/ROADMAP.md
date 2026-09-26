@@ -138,10 +138,27 @@ drive real solvers and CAD, not stand in for them.
    sharp corners kept, quads that follow the form, real UVs. `api.code_to_shape`,
    `agent.make("shape", …)`, Add › Mesh › Code Shape. 63 checks without Blender, 19 with.
 
-   Still to add, in rough order: **sweep along a path** and **loft between profiles**; **shell /
-   solidify**; **bevel and fillet**; **booleans** (Blender's exact solver) so parts can cut each
-   other; **helix/screw** for threads; a **Shape node** for the editor; and **exporting the profile
-   as a curve** so it can be edited by hand and read back.
+   ~~Still to add: sweep, loft, shell, bevel, booleans, helix, a Shape node, profile as curve.~~
+   **All done.** `sweep` carries a profile along a `path` (with parallel-transport frames, so it
+   doesn't twist); `helix` makes springs and screw threads; `loft` blends profile to profile;
+   `shell` gives an open profile thickness; `bevel` rounds edges (bmesh) per part or in a `finish`
+   block; `part … subtract|intersect` cuts one part with another; there is a Shape node in the
+   editor; and **Profile as Curve** draws the outlines as a real curve object to judge by eye.
+
+   Found and fixed while building these:
+   - **A lathe profile touching the axis** produced one vertex per segment at each pole, leaving a
+     non-manifold solid that booleans refused. The poles are welded now, and those quads become
+     triangles.
+   - **Winding**: the cap fans were wound against the sides, so the solid was inside out in places.
+     A bevel then grew outward instead of cutting in. Caps now match the sides, the whole solid is
+     flipped once if its volume is negative, and Blender recalculates normals as a backstop.
+   - **Blender 5's Manifold boolean solver** refuses these solids ("non-manifold inputs") even when
+     every edge has exactly two faces — the pole fans seem to be enough to put it off. EXACT works,
+     so that is what is used.
+   - A hidden cutter object is left out of the depsgraph, so the boolean silently does nothing.
+
+   Next for shapes: text as a profile; fillets between parts rather than on edges; a proper offset
+   that handles self-intersection; reading an edited curve back into a description.
 7. **Look-good pass.** CC0 materials and HDRIs (Poly Haven, ambientCG) fetched and cached; lighting
    rigs per scene type (exterior: HDRI + sun; interior: area lights + portals); AgX; a camera tool
    with framing rules (24–35 mm interiors, eye level or three-quarter).

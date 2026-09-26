@@ -370,8 +370,68 @@ class CN_NodePointsOutput(CN_Node, bpy.types.Node):
             layout.label(text=self.stats)
 
 
+class CN_NodeShape(CN_Node, bpy.types.Node):
+    """A model built from a parametric description: profiles, revolve, extrude, sweep"""
+    bl_idname = "CN_NodeShape"
+    bl_label = "Shape"
+    bl_icon = 'MESH_CYLINDER'
+
+    text: PointerProperty(type=bpy.types.Text, name="Description", update=_text_changed)
+    target: PointerProperty(type=bpy.types.Object, name="Object", update=_changed, poll=_is_mesh)
+    smooth: BoolProperty(name="Smooth", default=True, update=_changed)
+    live: BoolProperty(name="Live", default=True)
+    animate: BoolProperty(name="Animate", default=False)     # shapes have no time
+    error: StringProperty()
+    stats: StringProperty()
+    code_hash: StringProperty()
+
+    def init(self, context):
+        self.width = 250
+
+    def draw_buttons(self, context, layout):
+        row = layout.row(align=True)
+        row.prop(self, "text", text="")
+        op = row.operator("codenodes.node_text", text="", icon='ADD' if self.text is None else 'TEXT')
+        op.tree, op.node = self.id_data.name, self.name
+        layout.prop(self, "target", text="")
+        row = layout.row(align=True)
+        row.prop(self, "live", toggle=True)
+        row.prop(self, "smooth", toggle=True)
+        op = layout.operator("codenodes.node_build", text="Build", icon='FILE_REFRESH')
+        op.tree, op.node = self.id_data.name, self.name
+        op = layout.operator("codenodes.profile_to_curve", icon='OUTLINER_OB_CURVE')
+        op.tree, op.node = self.id_data.name, self.name
+        if self.error:
+            self.draw_error(layout)
+        elif self.stats:
+            layout.label(text=self.stats)
+
+    def sync_sockets(self):
+        """Match the inputs to the description's `param` lines."""
+        if self.text is None:
+            return
+        from .shapes import ShapeError, parse
+        try:
+            wanted = parse(self.text.as_string()).params
+        except ShapeError as exc:
+            self.error = str(exc)
+            return
+        names = [p[0] for p in wanted]
+        for sock in list(self.inputs):
+            if sock.name not in names:
+                self.inputs.remove(sock)
+        for i, (name, default, _lo, _hi) in enumerate(wanted):
+            sock = self.inputs.get(name)
+            if sock is None:
+                sock = self.inputs.new('NodeSocketFloat', name)
+                sock.default_value = default
+            cur = list(self.inputs).index(sock)
+            if cur != i:
+                self.inputs.move(cur, i)
+
+
 NODE_CLASSES = (CN_NodeCode, CN_NodeCombine, CN_NodeTransform, CN_NodeOffset, CN_NodeMeshOutput,
-                CN_NodeParticles, CN_NodePointsOutput)
+                CN_NodeParticles, CN_NodePointsOutput, CN_NodeShape)
 
 
 # ---- gathering the graph -------------------------------------------------------------
@@ -422,7 +482,7 @@ def gather(tree):
 def _code_hash(tree):
     h = hashlib.sha1()
     for node in sorted(tree.nodes, key=lambda n: n.name):
-        if node.bl_idname in ("CN_NodeCode", "CN_NodeParticles") and node.text is not None:
+        if node.bl_idname in ("CN_NodeCode", "CN_NodeParticles", "CN_NodeShape") and node.text is not None:
             h.update(node.name.encode() + b"\0" + node.text.as_string().encode() + b"\0")
     return h.hexdigest()
 
@@ -448,6 +508,8 @@ def build_output(tree, out):
     """Bring an output node up to date. Returns "" or an error message."""
     _building.add(tree.name)       # changes made while building (sockets, target) don't queue a rebuild
     try:
+        if out.bl_idname == "CN_NodeShape":
+            return _build_shape_node(tree, out)
         if out.bl_idname == "CN_NodePointsOutput":
             return _build_points_output(tree, out)
         return _build_output(tree, out)
@@ -506,7 +568,40 @@ def _build_output(tree, out):
     return ""
 
 
-OUTPUT_KINDS = ("CN_NodeMeshOutput", "CN_NodePointsOutput")
+OUTPUT_KINDS = ("CN_NodeMeshOutput", "CN_NodePointsOutput", "CN_NodeShape")
+
+
+def _build_shape_node(tree, node):
+    """Build a Shape node's description into its object."""
+    from . import shape_build
+    try:
+        if node.text is None:
+            raise SdfCodeError(f"node '{node.name}' has no description: pick a text block")
+        node.sync_sockets()
+        node.code_hash = _code_hash(tree)
+        source = node.text.as_string()
+        values = {s.name: s.default_value for s in node.inputs}
+        target = node.target
+        if target is None:
+            name = f"{tree.name} Shape"
+            target = bpy.data.objects.new(name, bpy.data.meshes.new(name))
+            bpy.context.scene.collection.objects.link(target)
+            node.target = target
+        if target.mode == 'EDIT':
+            raise SdfCodeError(f"'{target.name}' is in Edit Mode; leave it to rebuild")
+        shape_build.build_into(target.data, source, values, node.smooth)
+        st = shape_build.mesh_stats(target.data)
+    except SdfCodeError as exc:
+        node.error = str(exc)
+        return node.error
+    except Exception as exc:
+        traceback.print_exc()
+        node.error = f"internal error ({type(exc).__name__}): {exc}"
+        return node.error
+    node.error = ""
+    node.stats = (f"{st['quads']:,} quads + {st['tris']:,} tris · {st['sharp_edges']:,} sharp · "
+                  f"{st['size'][0]:g} × {st['size'][1]:g} × {st['size'][2]:g} m")
+    return ""
 
 
 def outputs(tree):

@@ -65,11 +65,10 @@ def build_shape(obj):
     source = s.text.as_string()
     s.code_hash = hashlib.sha1(source.encode()).hexdigest()
     values = props.sync_params(s, source, 'SHAPE')
-    solid = shape_build.build(source, values)
     if obj.mode == 'EDIT':
         raise SdfCodeError(f"'{obj.name}' is in Edit Mode; leave Edit Mode to rebuild it")
-    shape_build.fill_mesh(obj.data, solid, s.smooth)
-    return solid, shape_build.stats(solid)
+    shape_build.build_into(obj.data, source, values, s.smooth)
+    return None, shape_build.mesh_stats(obj.data)
 
 
 def rebuild(obj):
@@ -77,10 +76,10 @@ def rebuild(obj):
     s = obj.codenodes
     try:
         if s.kind == 'SHAPE':
-            solid, st = build_shape(obj)
+            _solid, st = build_shape(obj)
             s.last_error = ""
             s.stats = (f"{st['quads']:,} quads + {st['tris']:,} tris · "
-                       f"{st['sharp_edges']:,} sharp edges · "
+                       f"{st['sharp_edges']:,} sharp · "
                        f"{st['size'][0]:g} × {st['size'][1]:g} × {st['size'][2]:g} m")
             return ""
         if s.kind == 'PARTICLES':
