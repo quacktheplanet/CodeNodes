@@ -224,8 +224,19 @@ class CN_NodeMeshOutput(CN_Node, bpy.types.Node):
         row.prop(self, "live", toggle=True)
         row.prop(self, "animate", toggle=True)
         row.prop(self, "smooth", toggle=True)
-        op = layout.operator("codenodes.node_build", icon='FILE_REFRESH')
+        from . import cache
+        baked = self.target is not None and cache.is_baked(self.target)
+        row = layout.row(align=True)
+        row.enabled = not baked
+        op = row.operator("codenodes.node_build", icon='FILE_REFRESH')
         op.tree, op.node = self.id_data.name, self.name
+        if baked:
+            box = layout.box()
+            box.label(text="Playing the baked cache", icon='FILE_CACHE')
+            box.operator("codenodes.unbake", icon='X').object_name = self.target.name
+        else:
+            op = layout.operator("codenodes.bake", icon='FILE_CACHE')
+            op.tree, op.node = self.id_data.name, self.name
         if self.error:
             self.draw_error(layout)
         elif self.stats:
@@ -316,32 +327,40 @@ def build_output(tree, out):
         _pending.discard(tree.name)
 
 
+def compute_output(tree, out):
+    """(MeshResult, stats) for the graph feeding `out` at the current frame.
+
+    Raises SdfCodeError, with any compile error already pointed back at the node it
+    came from. Also refreshes each code node's sockets and clears old errors.
+    """
+    from . import live
+    for node in tree.nodes:
+        if node.bl_idname == "CN_NodeCode":
+            node.error = ""
+            node.sync_sockets()
+    out.code_hash = _code_hash(tree)
+    root = _source(out.inputs["SDF"])
+    if root is None:
+        raise SdfCodeError("connect a shape to the Mesh Output's SDF input")
+    prog = graph.compile_graph(gather(tree), root.name)
+    seconds, frame = live.scene_time()
+    try:
+        return build.compute(prog.source, tuple(out.bounds_min), tuple(out.bounds_max), out.resolution,
+                             time_s=seconds, frame=frame, values=prog.values)
+    except SdfCodeError as exc:
+        raise SdfCodeError(_attribute(str(exc), prog, tree)) from None
+
+
 def _build_output(tree, out):
     if not tree.use_fake_user:
         tree.use_fake_user = True
     try:
-        for node in tree.nodes:
-            if node.bl_idname == "CN_NodeCode":
-                node.error = ""
-                node.sync_sockets()
-        out.code_hash = _code_hash(tree)
-        root = _source(out.inputs["SDF"])
-        if root is None:
-            raise SdfCodeError("connect a shape to the Mesh Output's SDF input")
-        prog = graph.compile_graph(gather(tree), root.name)
-        scene = bpy.context.scene
-        fps = scene.render.fps / (scene.render.fps_base or 1.0)
-        try:
-            result, st = build.compute(prog.source, tuple(out.bounds_min), tuple(out.bounds_max), out.resolution,
-                                       time_s=(scene.frame_current - scene.frame_start) / fps,
-                                       frame=scene.frame_current, values=prog.values)
-        except SdfCodeError as exc:
-            raise SdfCodeError(_attribute(str(exc), prog, tree)) from None
+        result, st = compute_output(tree, out)
         target = out.target
         if target is None:
             name = f"{tree.name} Mesh"
             target = bpy.data.objects.new(name, bpy.data.meshes.new(name))
-            scene.collection.objects.link(target)
+            bpy.context.scene.collection.objects.link(target)
             out.target = target
         build.swap_mesh(target, result, out.smooth)
     except SdfCodeError as exc:

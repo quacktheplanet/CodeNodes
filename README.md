@@ -54,6 +54,25 @@ functions and parameters get a per-node prefix, so two nodes can both define `bu
 names the node and the line inside it, and that node shows the error too. Reroutes and muted nodes pass
 shapes through, and graphs can have up to 256 sliders.
 
+## Animation, and making it render
+
+There are three phases; the first two are built (see `docs/ROADMAP.md`).
+
+1. **Live.** Turn on **Animate** and the mesh rebuilds on every frame change, using `uTime`. This is
+   for working, not for rendering: running GPU code from a frame handler during an F12 render crashes
+   Blender, and background Blender has no GPU at all.
+2. **Baked.** Press **Bake to Disk**, pick a frame range, and CodeNodes writes one file per frame next
+   to your .blend and builds a small node group — Scene Time → Format String → Import PLY — that plays
+   it back. From then on it is ordinary Geometry Nodes geometry: it renders in F12, it renders on a
+   machine with no GPU and without this add-on, and every other Geometry Nodes node can work on it.
+   **Remove Cache** goes back to live.
+3. **Bake to nodes** (planned): compile the maths into a real Geometry Nodes network, so there are no
+   files at all.
+
+```python
+api.bake("Blob", 1, 48)     # same thing from a script or from Claude
+```
+
 ## What keeps it from crashing
 
 - A shader that doesn't compile is a message, not a crash. The driver's log is captured and mapped
@@ -70,11 +89,14 @@ shapes through, and graphs can have up to 256 sliders.
 ```bash
 python tests/test_mesher.py                                    # mesher, no Blender (17 checks)
 python tests/test_graph.py                                     # graph compiler, no Blender (16 checks)
-blender --factory-startup --python tests/test_blender.py       # needs a window: the GPU isn't available with -b (27 checks)
-blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (20 checks)
+blender --factory-startup --python tests/test_blender.py       # needs a window: the GPU isn't available with -b (27)
+blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (20)
+blender --factory-startup --python tests/test_bake.py          # baking, and playback through stock nodes (18)
+blender -b --factory-startup --python tests/test_farm.py       # the bake renders with no GPU and no add-on (10)
 ```
 
-Both pass on Blender 5.0.1 and 5.1.2 (NVIDIA RTX A4500, OpenGL).
+Run `test_bake.py` before `test_farm.py`: the first saves the .blend the second opens.
+All of them pass on Blender 5.0.1 and 5.1.2 (NVIDIA RTX A4500, OpenGL).
 
 ## Limits right now
 

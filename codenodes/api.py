@@ -70,6 +70,27 @@ def set_params(name, **values):
     return {"ok": not err, "error": err or None, "faces": len(obj.data.polygons), "stats": obj.codenodes.stats}
 
 
+def bake(name, frame_start=None, frame_end=None):
+    """Bake an object's animation to disk and play it back with plain Geometry Nodes.
+
+    After this the object renders in F12 and on machines with no GPU, and every other
+    Geometry Nodes node can work on the result.
+    """
+    obj = bpy.data.objects.get(name)
+    if obj is None or not obj.codenodes.enabled:
+        return {"ok": False, "error": f"no Code -> Mesh object named '{name}'"}
+    scene = bpy.context.scene
+    res = bpy.ops.codenodes.bake(
+        'EXEC_DEFAULT', object_name=name,
+        frame_start=int(frame_start if frame_start is not None else scene.frame_start),
+        frame_end=int(frame_end if frame_end is not None else scene.frame_end))
+    ok = 'FINISHED' in res
+    from . import cache
+    return {"ok": ok, "object": name, "baked": cache.is_baked(obj),
+            "dir": cache.cache_dir(name, create=False), "stats": obj.codenodes.stats,
+            "error": None if ok else obj.codenodes.last_error or "bake failed"}
+
+
 def reference():
     """What sdf code can use: a cheat sheet to hand to Claude."""
     return (sdf_code.__doc__ + "\nHelpers available:\n" + "\n".join(

@@ -14,7 +14,7 @@ bl_info = {
     "category": "Mesh",
 }
 
-_modules = ("props", "live", "ops", "nodes", "ui")
+_modules = ("props", "live", "ops", "bake_ops", "nodes", "ui")
 
 
 def register():

@@ -28,9 +28,14 @@ def compute(source, lo, hi, resolution, time_s=0.0, frame=0.0, values=None):
     return result, stats
 
 
-def make_mesh(name, result, smooth=True):
-    import bpy
-    me = bpy.data.meshes.new(name)
+def fill_mesh(me, result, smooth=True):
+    """Replace a mesh datablock's geometry in place.
+
+    In place, not a new datablock: the mesh keeps its name, materials and users,
+    so caches (Alembic, Mesh Sequence Cache) see one shape changing over time
+    rather than a new shape per frame.
+    """
+    me.clear_geometry()
     v, f = len(result.verts), len(result.quads)
     if f:
         me.vertices.add(v)
@@ -42,21 +47,20 @@ def make_mesh(name, result, smooth=True):
         me.update(calc_edges=True)
         if smooth:
             me.shade_smooth()
+    else:
+        me.update()
     return me
 
 
-def swap_mesh(obj, result, smooth=True):
-    """Give `obj` a new mesh built from `result`, keeping its materials."""
+def make_mesh(name, result, smooth=True):
     import bpy
+    return fill_mesh(bpy.data.meshes.new(name), result, smooth)
+
+
+def swap_mesh(obj, result, smooth=True):
+    """Rebuild `obj`'s mesh from `result`, keeping its materials and modifiers."""
     if obj.type != 'MESH':
         raise SdfCodeError(f"'{obj.name}' is not a mesh object")
     if obj.mode == 'EDIT':
         raise SdfCodeError(f"'{obj.name}' is in Edit Mode; leave Edit Mode to rebuild it")
-    old = obj.data
-    me = make_mesh(old.name, result, smooth)
-    for mat in old.materials:
-        me.materials.append(mat)
-    obj.data = me
-    if old.users == 0:
-        bpy.data.meshes.remove(old)
-    return me
+    return fill_mesh(obj.data, result, smooth)

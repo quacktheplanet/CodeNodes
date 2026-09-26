@@ -18,21 +18,31 @@ POLL_S = 0.5
 _pending: set[str] = set()
 
 
+def scene_time(scene=None):
+    """(seconds since the start frame, frame number) — what uTime and uFrame get."""
+    scene = scene or bpy.context.scene
+    fps = scene.render.fps / (scene.render.fps_base or 1.0)
+    return (scene.frame_current - scene.frame_start) / fps, scene.frame_current
+
+
+def compute_object(obj):
+    """(MeshResult, stats) for this object at the current frame. Raises SdfCodeError."""
+    s = obj.codenodes
+    if s.text is None:
+        raise SdfCodeError("no code: pick a text block")
+    source = s.text.as_string()
+    s.code_hash = hashlib.sha1(source.encode()).hexdigest()
+    values = props.sync_params(s, source)
+    seconds, frame = scene_time()
+    return build.compute(source, tuple(s.bounds_min), tuple(s.bounds_max), s.resolution,
+                         time_s=seconds, frame=frame, values=values)
+
+
 def rebuild(obj):
     """Rebuild one object now. Returns "" or an error message (also stored on the object)."""
     s = obj.codenodes
-    if s.text is None:
-        s.last_error = "no code: pick a text block"
-        return s.last_error
-    source = s.text.as_string()
-    s.code_hash = hashlib.sha1(source.encode()).hexdigest()
-    scene = bpy.context.scene
-    fps = scene.render.fps / (scene.render.fps_base or 1.0)
     try:
-        values = props.sync_params(s, source)
-        result, st = build.compute(source, tuple(s.bounds_min), tuple(s.bounds_max), s.resolution,
-                                   time_s=(scene.frame_current - scene.frame_start) / fps,
-                                   frame=scene.frame_current, values=values)
+        result, st = compute_object(obj)
         build.swap_mesh(obj, result, s.smooth)
     except SdfCodeError as exc:
         s.last_error = str(exc)

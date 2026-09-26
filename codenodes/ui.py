@@ -37,7 +37,18 @@ class CODENODES_PT_main(bpy.types.Panel):
             box.label(text="Parameters (from the code)")
             for p in s.params:
                 box.prop(p, "value", text=p.name, slider=False)
-        layout.operator("codenodes.rebuild", icon='FILE_REFRESH')
+        from . import cache
+        baked = cache.is_baked(obj)
+        row = layout.row(align=True)
+        row.enabled = not baked
+        row.operator("codenodes.rebuild", icon='FILE_REFRESH')
+        if baked:
+            box = layout.box()
+            box.label(text="Playing the baked cache", icon='FILE_CACHE')
+            box.label(text="Renders without a GPU.")
+            box.operator("codenodes.unbake", icon='X').object_name = obj.name
+        else:
+            layout.operator("codenodes.bake", icon='FILE_CACHE').object_name = obj.name
         if s.last_error:
             box = layout.box()
             box.alert = True
