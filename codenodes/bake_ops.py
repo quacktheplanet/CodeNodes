@@ -26,9 +26,12 @@ def _target(context, object_name, tree_name, node_name):
         tree = bpy.data.node_groups.get(tree_name)
         out = tree.nodes.get(node_name) if tree else None
         if out is None:
-            raise SdfCodeError("that Mesh Output node is gone")
+            raise SdfCodeError("that output node is gone")
         if out.target is None:
-            raise SdfCodeError("build the mesh once before baking, so there is an object to bake to")
+            raise SdfCodeError("build it once before baking, so there is an object to bake to")
+        if out.bl_idname == "CN_NodePointsOutput":
+            return Job(out.target, out, lambda f: nodes.simulate_points(tree, out)[0], tree.name,
+                       writer=cache.write_points_ply, as_points=True)
         return Job(out.target, out, lambda f: nodes.compute_output(tree, out)[0], tree.name)
     obj = bpy.data.objects.get(object_name) if object_name else context.active_object
     if obj is None or not obj.codenodes.enabled:

@@ -11,13 +11,15 @@ import re
 import traceback
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatVectorProperty, IntProperty, PointerProperty, StringProperty
+from bpy.props import (BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty,
+                       PointerProperty, StringProperty)
 
 from . import build, graph, sdf_code
 from .sdf_code import SdfCodeError
 
 TREE = "CodeNodesTreeType"
 SDF = "CN_SocketSDF"
+POINTS = "CN_SocketPoints"
 DEBOUNCE_S = 0.15
 POLL_S = 0.5
 _pending: set[str] = set()
@@ -54,8 +56,36 @@ class CN_SocketSDF(bpy.types.NodeSocket):
         return (0.95, 0.55, 0.2, 1.0)
 
 
+class CN_SocketPoints(bpy.types.NodeSocket):
+    """A particle system"""
+    bl_idname = POINTS
+    bl_label = "Points"
+
+    def draw(self, context, layout, node, text):
+        layout.label(text=text)
+
+    def draw_color(self, context, node):
+        return (0.35, 0.75, 0.95, 1.0)
+
+    @classmethod
+    def draw_color_simple(cls):
+        return (0.35, 0.75, 0.95, 1.0)
+
+
 def _changed(self, context):
     request(self.id_data)
+
+
+def _sim_changed(self, context):
+    """A particle setting changed: restart so the change is visible."""
+    from . import particles
+    tree = self.id_data
+    particles.forget(sim_key(tree, self))
+    request(tree)
+
+
+def sim_key(tree, node):
+    return f"{tree.name}/{node.name}"
 
 
 def _text_changed(self, context):
@@ -244,13 +274,110 @@ class CN_NodeMeshOutput(CN_Node, bpy.types.Node):
                 layout.label(text=part)
 
 
-NODE_CLASSES = (CN_NodeCode, CN_NodeCombine, CN_NodeTransform, CN_NodeOffset, CN_NodeMeshOutput)
+class CN_NodeParticles(CN_Node, bpy.types.Node):
+    """A particle solver you write: spawn() places a particle, update() moves it"""
+    bl_idname = "CN_NodeParticles"
+    bl_label = "Particles"
+    bl_icon = 'PARTICLES'
+
+    text: PointerProperty(type=bpy.types.Text, name="Code", update=_text_changed)
+    count: IntProperty(name="Particles", default=20000, min=1, max=2_000_000, soft_max=500_000,
+                       update=_sim_changed)
+    substeps: IntProperty(name="Substeps", default=1, min=1, max=20, update=_sim_changed,
+                          description="Solver steps per frame; raise it if fast particles jitter")
+    stagger: FloatProperty(name="Stagger", default=1.0, min=0.0, max=1.0, update=_sim_changed,
+                           description="Spread starting ages so particles don't all die at once")
+    error: StringProperty()
+
+    def init(self, context):
+        self.outputs.new(POINTS, "Points")
+        self.width = 240
+
+    def draw_buttons(self, context, layout):
+        row = layout.row(align=True)
+        row.prop(self, "text", text="")
+        op = row.operator("codenodes.node_text", text="", icon='ADD' if self.text is None else 'TEXT')
+        op.tree, op.node = self.id_data.name, self.name
+        col = layout.column(align=True)
+        col.prop(self, "count")
+        col.prop(self, "substeps")
+        col.prop(self, "stagger", slider=True)
+        self.draw_error(layout)
+
+    def sync_sockets(self):
+        """Match the inputs to the code's @param lines, keeping the values that stay."""
+        if self.text is None:
+            return
+        try:
+            wanted = sdf_code.parse_params(self.text.as_string())
+        except SdfCodeError as exc:
+            self.error = str(exc)
+            return
+        names = [p.name for p in wanted]
+        for sock in list(self.inputs):
+            if sock.name not in names:
+                self.inputs.remove(sock)
+        for i, prm in enumerate(wanted):
+            sock = self.inputs.get(prm.name)
+            if sock is None:
+                sock = self.inputs.new('NodeSocketFloat', prm.name)
+                sock.default_value = prm.default
+            cur = list(self.inputs).index(sock)
+            if cur != i:
+                self.inputs.move(cur, i)
+
+
+class CN_NodePointsOutput(CN_Node, bpy.types.Node):
+    """Show a particle system as a real point cloud on an object"""
+    bl_idname = "CN_NodePointsOutput"
+    bl_label = "Points Output"
+    bl_icon = 'OUTLINER_OB_POINTCLOUD'
+
+    target: PointerProperty(type=bpy.types.Object, name="Object", update=_changed, poll=_is_mesh)
+    point_radius: FloatProperty(name="Point Size", default=0.02, min=0.0, soft_max=0.5, update=_changed)
+    live: BoolProperty(name="Live", default=True)
+    animate: BoolProperty(name="Animate", default=True)
+    error: StringProperty()
+    stats: StringProperty()
+    code_hash: StringProperty()
+
+    def init(self, context):
+        self.inputs.new(POINTS, "Points")
+        self.width = 240
+
+    def draw_buttons(self, context, layout):
+        from . import cache
+        layout.prop(self, "target", text="")
+        layout.prop(self, "point_radius")
+        row = layout.row(align=True)
+        row.prop(self, "live", toggle=True)
+        row.prop(self, "animate", toggle=True)
+        baked = self.target is not None and cache.is_baked(self.target)
+        row = layout.row(align=True)
+        row.enabled = not baked
+        op = row.operator("codenodes.node_build", text="Simulate", icon='FILE_REFRESH')
+        op.tree, op.node = self.id_data.name, self.name
+        if baked:
+            box = layout.box()
+            box.label(text="Playing the baked cache", icon='FILE_CACHE')
+            box.operator("codenodes.unbake", icon='X').object_name = self.target.name
+        else:
+            op = layout.operator("codenodes.bake", icon='FILE_CACHE')
+            op.tree, op.node = self.id_data.name, self.name
+        if self.error:
+            self.draw_error(layout)
+        elif self.stats:
+            layout.label(text=self.stats)
+
+
+NODE_CLASSES = (CN_NodeCode, CN_NodeCombine, CN_NodeTransform, CN_NodeOffset, CN_NodeMeshOutput,
+                CN_NodeParticles, CN_NodePointsOutput)
 
 
 # ---- gathering the graph -------------------------------------------------------------
 
-def _source(sock):
-    """The node feeding an SDF input, following reroutes and muted nodes; None if nothing."""
+def _source(sock, kind=SDF):
+    """The node feeding an input, following reroutes and muted nodes; None if nothing."""
     seen = set()
     while sock is not None and sock.is_linked:
         link = sock.links[0]
@@ -263,8 +390,8 @@ def _source(sock):
         if node.bl_idname == 'NodeReroute':
             sock = node.inputs[0] if node.inputs else None
             continue
-        if node.mute:                      # a muted node passes its first shape input through
-            sock = next((s for s in node.inputs if s.bl_idname == SDF), None)
+        if node.mute:                      # a muted node passes its first matching input through
+            sock = next((s for s in node.inputs if s.bl_idname == kind), None)
             continue
         return node
     return None
@@ -295,7 +422,7 @@ def gather(tree):
 def _code_hash(tree):
     h = hashlib.sha1()
     for node in sorted(tree.nodes, key=lambda n: n.name):
-        if node.bl_idname == "CN_NodeCode" and node.text is not None:
+        if node.bl_idname in ("CN_NodeCode", "CN_NodeParticles") and node.text is not None:
             h.update(node.name.encode() + b"\0" + node.text.as_string().encode() + b"\0")
     return h.hexdigest()
 
@@ -318,9 +445,11 @@ _building: set[str] = set()
 
 
 def build_output(tree, out):
-    """Compile the graph feeding `out` and rebuild its mesh. Returns "" or an error message."""
+    """Bring an output node up to date. Returns "" or an error message."""
     _building.add(tree.name)       # changes made while building (sockets, target) don't queue a rebuild
     try:
+        if out.bl_idname == "CN_NodePointsOutput":
+            return _build_points_output(tree, out)
         return _build_output(tree, out)
     finally:
         _building.discard(tree.name)
@@ -377,8 +506,59 @@ def _build_output(tree, out):
     return ""
 
 
+OUTPUT_KINDS = ("CN_NodeMeshOutput", "CN_NodePointsOutput")
+
+
 def outputs(tree):
-    return [n for n in tree.nodes if n.bl_idname == "CN_NodeMeshOutput"]
+    return [n for n in tree.nodes if n.bl_idname in OUTPUT_KINDS]
+
+
+def simulate_points(tree, out):
+    """Step the particle system feeding `out` to the current frame. (state, stats)."""
+    from . import live, particles
+    src = _source(out.inputs["Points"], POINTS)
+    if src is None or src.bl_idname != "CN_NodeParticles":
+        raise SdfCodeError("connect a Particles node to the Points Output")
+    if src.text is None:
+        raise SdfCodeError(f"node '{src.name}' has no code: pick a text block")
+    src.error = ""
+    src.sync_sockets()
+    source = src.text.as_string()
+    out.code_hash = _code_hash(tree)
+    values = {s.name: s.default_value for s in src.inputs}
+    scene = bpy.context.scene
+    fps = scene.render.fps / (scene.render.fps_base or 1.0)
+    try:
+        return particles.simulate(sim_key(tree, src), source, src.count, scene.frame_current,
+                                  scene.frame_start, fps, values, src.substeps, src.stagger)
+    except SdfCodeError as exc:
+        src.error = str(exc).split("didn't compile:\n")[-1]
+        raise SdfCodeError(f"node '{src.name}': {exc}") from None
+
+
+def _build_points_output(tree, out):
+    from . import particles
+    try:
+        state, st = simulate_points(tree, out)
+        target = out.target
+        if target is None:
+            name = f"{tree.name} Points"
+            target = bpy.data.objects.new(name, bpy.data.meshes.new(name))
+            bpy.context.scene.collection.objects.link(target)
+            out.target = target
+        particles.ensure_points_modifier(target, out.point_radius)
+        particles.fill_points(target.data, state)
+    except SdfCodeError as exc:
+        out.error = str(exc)
+        return out.error
+    except Exception as exc:
+        traceback.print_exc()
+        out.error = f"internal error ({type(exc).__name__}): {exc}"
+        return out.error
+    out.error = ""
+    out.stats = (f"{st['count']:,} particles · frame {st['frame']} · "
+                 f"{st['steps']} step{'s' if st['steps'] != 1 else ''} · {st['sim_s'] * 1000:.0f} ms")
+    return ""
 
 
 # ---- live rebuilding -----------------------------------------------------------------
@@ -549,10 +729,48 @@ def _add_menu(self, context):
         op = layout.operator("node.add_node", text=cls.bl_label, icon=cls.bl_icon)
         op.type = cls.bl_idname
         op.use_transform = True
+    layout.operator("codenodes.new_particle_graph", text="Particles Starter", icon='PARTICLES')
 
 
-classes = (CodeNodesTree, CN_SocketSDF) + NODE_CLASSES + (
-    CODENODES_OT_node_build, CODENODES_OT_node_text, CODENODES_OT_new_graph)
+def new_particle_graph(name="CodeNodes Particles"):
+    """A starting graph: a Particles node feeding a Points Output."""
+    from . import particles
+    tree = bpy.data.node_groups.new(name, TREE)
+    tree.use_fake_user = True
+    text = bpy.data.texts.new("Particles.sdf")
+    text.from_string(particles.TEMPLATE)
+    node = tree.nodes.new("CN_NodeParticles")
+    node.name = node.label = "Solver"
+    node.location = (-300, 0)
+    node.text = text
+    out = tree.nodes.new("CN_NodePointsOutput")
+    out.location = (60, 0)
+    tree.links.new(node.outputs["Points"], out.inputs["Points"])
+    return tree, out
+
+
+class CODENODES_OT_new_particle_graph(bpy.types.Operator):
+    bl_idname = "codenodes.new_particle_graph"
+    bl_label = "New Particle Graph"
+    bl_description = "Create a starter particle graph and simulate it"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        tree, out = new_particle_graph()
+        err = build_output(tree, out)
+        editors = [a for a in context.screen.areas if a.type == 'NODE_EDITOR']
+        if editors:
+            space = editors[0].spaces.active
+            space.tree_type = TREE
+            space.node_tree = tree
+        if err:
+            self.report({'WARNING'}, err.splitlines()[0])
+        return {'FINISHED'}
+
+
+classes = (CodeNodesTree, CN_SocketSDF, CN_SocketPoints) + NODE_CLASSES + (
+    CODENODES_OT_node_build, CODENODES_OT_node_text, CODENODES_OT_new_graph,
+    CODENODES_OT_new_particle_graph)
 
 
 def register():

@@ -336,6 +336,18 @@ def fill_points(me, state, extra=("velocity", "speed", "age", "life")):
     return me
 
 
+def ensure_points_modifier(obj, radius=0.02):
+    """Give an object the modifier that turns its vertices into renderable points."""
+    mod = obj.modifiers.get(POINTS_MODIFIER)
+    if mod is None:
+        mod = obj.modifiers.new(POINTS_MODIFIER, 'NODES')
+        mod.node_group = points_group(radius)
+        while obj.modifiers[0] != mod:          # before anything the user added
+            obj.modifiers.move(len(obj.modifiers) - 1, 0)
+    apply_settings(obj, mod, radius)
+    return mod
+
+
 def ensure_object(name, radius=0.02):
     import bpy
     obj = bpy.data.objects.get(name)
@@ -344,9 +356,5 @@ def ensure_object(name, radius=0.02):
     if obj is None:
         obj = bpy.data.objects.new(name, bpy.data.meshes.new(name))
         bpy.context.scene.collection.objects.link(obj)
-    mod = obj.modifiers.get(POINTS_MODIFIER)
-    if mod is None:
-        mod = obj.modifiers.new(POINTS_MODIFIER, 'NODES')
-        mod.node_group = points_group(radius)
-    apply_settings(obj, mod, radius)
+    ensure_points_modifier(obj, radius)
     return obj

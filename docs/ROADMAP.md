@@ -102,11 +102,33 @@ drive real solvers and CAD, not stand in for them.
    closed-form answer to 3 decimal places.
    Still to do: a Particles node in the editor, forces/colliders as nodes, and sampling a CodeNodes
    SDF as a collider.
-4. **Claude connection (MCP).** **Decided: Blender's own Lab MCP** (projects.blender.org/lab/blender_mcp,
-   official, experimental, needs 5.1+). Read it before installing — it runs arbitrary Python inside
-   Blender. On top of it, give CodeNodes a structured tool surface: `code_to_mesh`, `code_to_particles`,
-   `code_to_volume`, `build_graph`, `bake`, `render_preview`, `screenshot`, so Claude works in your open
-   Blender and checks its own results by looking at renders.
+4. **Claude connection (MCP).** ~~The tool surface~~ **done**: `codenodes.agent` (help, make, scene,
+   code, set_params, bake, frame, look_at, light, render, viewport, remove), 29 checks. Everything
+   returns a dict and never raises for a fixable mistake.
+
+   **Still to build: our own small MCP server.** Decided 2026-09-26 after reviewing both options.
+
+   *Why not the third-party blender-mcp:* [issue #339](https://github.com/ahujasid/blender-mcp/issues/339)
+   reports it hanging on Blender 5.1.1 / Windows 11 — this exact setup; telemetry to a hosted backend
+   with disputed defaults ([#232](https://github.com/ahujasid/blender-mcp/issues/232)); and CVEs
+   including arbitrary code execution (CVE-2026-10688, closed "not planned"). No socket auth.
+
+   *Why not Blender's Lab MCP yet:* official and GPL-3.0-or-later like us, but experimental, and its
+   premise is arbitrary `exec` behind a self-described "weak sandbox".
+
+   *What to copy from Lab MCP (its architecture is good):*
+   - **No worker thread at all.** The listening socket is non-blocking and everything — accept, read,
+     run, reply — happens inside a `bpy.app.timers` callback, which is already the main thread. That
+     removes the whole thread/queue/lock problem rather than solving it.
+   - Timer backoff: poll at 0.05 s while busy, 1 s when idle.
+   - Long jobs use a deferred "is it finished yet?" check polled on later ticks, never a thread.
+   - Background mode needs a separate blocking `select` loop, because timers don't fire without a UI.
+   - Tools as pairs: the MCP-side declaration and the code that runs inside Blender.
+   - Images come back as base64 PNG in the result.
+   - Errors become real MCP tool errors so the model sees them.
+
+   *What we do differently:* expose only `codenodes.agent`'s fixed functions — no arbitrary `exec` —
+   bind to localhost with a shared secret, and no telemetry.
 5. **Bake to Nodes (Phase 3).** See above.
 
 **P2 — beyond organic shapes**

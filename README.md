@@ -88,6 +88,8 @@ Open a Node Editor and switch its type to **CodeNodes** (or View3D › Sidebar �
 | **Transform** | move, rotate, scale a shape |
 | **Offset** | grow or shrink a shape |
 | **Mesh Output** | Code → Mesh: target object, resolution, bounds, Live, Animate |
+| **Particles** | a solver in code; its `@param` lines become input sockets |
+| **Points Output** | simulates and shows the points on an object, with the same Live / Animate / Bake |
 
 The whole graph compiles into one GPU program (`codenodes/graph.py`, pure Python). Each code node's
 functions and parameters get a per-node prefix, so two nodes can both define `bump()`. A compile error

@@ -1,4 +1,4 @@
-"""The CodeNodes node editor inside real Blender (needs a window for the GPU):
+﻿"""The CodeNodes node editor inside real Blender (needs a window for the GPU):
 
     blender --factory-startup --python tests/test_nodes.py
 """
@@ -15,7 +15,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import codenodes  # noqa: E402
-from codenodes import nodes  # noqa: E402
+from codenodes import cache, nodes  # noqa: E402
 
 _checks = 0
 
@@ -162,7 +162,7 @@ def run_checks(state):
     o4 = t4.nodes.new("CN_NodeMeshOutput")
     t4.links.new(prev.outputs[0], o4.inputs[0])
     err = nodes.build_output(t4, o4)
-    check(not err, f"a 40-node graph with 200 sliders builds ({o4.stats.split(' · ')[0] if not err else err})")
+    check(not err, f"a 40-node graph with 200 sliders builds ({o4.stats.split(' Â· ')[0] if not err else err})")
     extra = code_node(t4, "Extra", "".join(f"// @param e{j} 0\n" for j in range(60)) + "float sdf(vec3 p){ return 1.0; }")
     u = t4.nodes.new("CN_NodeCombine")
     t4.links.new(prev.outputs[0], u.inputs["A"])
@@ -170,6 +170,36 @@ def run_checks(state):
     t4.links.new(u.outputs[0], o4.inputs[0])
     err = nodes.build_output(t4, o4)
     check("at most 256" in err, "going over 256 sliders is refused with a clear message")
+
+    # --- particles in the node editor ---------------------------------------------------
+    pt, pout = nodes.new_particle_graph("T_Particles")
+    err = nodes.build_output(pt, pout)
+    check(not err and pout.target is not None, f"the particle starter graph simulates ({err or pout.stats})")
+    solver = pt.nodes["Solver"]
+    check([s.name for s in solver.inputs] == ["speed", "swirl", "drag"],
+          f"the solver's @param lines became sockets ({[s.name for s in solver.inputs]})")
+    pobj = pout.target
+    check(len(pobj.data.vertices) == solver.count, f"{solver.count:,} points exist")
+    scene = bpy.context.scene
+    scene.frame_set(1)
+    first = verts(pobj).copy()
+    scene.frame_set(15)
+    check(np.abs(verts(pobj) - first).max() > 1e-3, "the points move as the frame changes")
+    solver.count = 3000
+    nodes.build_output(pt, pout)
+    check(len(pobj.data.vertices) == 3000, "changing the count restarts with the new number")
+    good = solver.text.as_string()
+    solver.text.from_string(good.replace("p.position += p.velocity * dt;", "p.position += p.velcity * dt;"))
+    err = nodes.build_output(pt, pout)
+    check("node 'Solver'" in err and "velcity" in err, f"a solver typo names the node ({err.splitlines()[0]})")
+    check("velcity" in solver.error, "and the node itself shows it")
+    solver.text.from_string(good)
+    check(not nodes.build_output(pt, pout), "fixing the code clears it")
+    unplugged = pt.nodes.new("CN_NodePointsOutput")
+    check("connect a Particles node" in nodes.build_output(pt, unplugged),
+          "an unconnected Points Output explains itself")
+    bpy.ops.codenodes.bake('EXEC_DEFAULT', tree=pt.name, node=pout.name, frame_start=1, frame_end=3)
+    check(cache.is_baked(pobj), "a particle graph bakes from its output node")
 
     # --- animation -------------------------------------------------------------------
     blob.inputs["wobble"].default_value = 0.25
