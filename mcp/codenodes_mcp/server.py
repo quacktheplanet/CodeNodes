@@ -114,6 +114,24 @@ def material(name: str, color: list, roughness: float = 0.5, metallic: float = 0
 
 
 @mcp.tool()
+def web_page(path: str, sliders: list | None = None, objects: list | None = None,
+             static: list | None = None, overrides: dict | None = None,
+             title: str = "Level", subtitle: str = "") -> dict:
+    """Write the scene as one self-contained web page (three.js, orbit controls) with
+    sliders for modifier inputs, e.g. [{"object": "Courtyard", "input": "Doorways",
+    "values": [0, 1, 2, 3]}, {"object": "Trail", "input": "Width", "values": [2, 3, 4],
+    "unit": "m"}].
+
+    Each slider position is built in Blender first. Objects a slider changes indirectly
+    (trees that keep clear of a path) are detected and baked with it; sliders that change
+    the same objects are baked as combinations. static: objects to export once anyway.
+    overrides: inputs set only for the export, e.g. {"Ground": {"Resolution": 150}}.
+    """
+    return _call("web_page", path=path, sliders=sliders or [], objects=objects,
+                 static=static or [], overrides=overrides, title=title, subtitle=subtitle)
+
+
+@mcp.tool()
 def collect(name: str, objects: list, parent: str = "", keep_in_scene: bool = False) -> dict:
     """Put objects in a collection — assets to scatter from (keep_in_scene=False takes the
     originals out of the scene so they do not render), or a named group such as everything

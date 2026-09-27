@@ -278,6 +278,111 @@ def dynamic_tests():
           "nodes that do not reach the output are found")
 
 
+def review_tests():
+    """Regressions for what a code review found, each as the scenario it described."""
+    from codenodes import agent
+    from codenodes.gn import edit
+
+    # a failed rewrite leaves the existing group exactly as it was
+    tree = bpy.data.node_groups["Reference"]
+    obj = bpy.data.objects.new("Keeper", bpy.data.meshes.new("Keeper"))
+    bpy.context.scene.collection.objects.link(obj)
+    mod = obj.modifiers.new("GN", 'NODES')
+    mod.node_group = tree
+    density = next(i.identifier for i in tree.interface.items_tree
+                   if i.item_type == 'SOCKET' and i.name == "Density")
+    mod[density] = 33.0
+    before_nodes, before = len(tree.nodes), evaluate(tree)
+    broken = serialize.read(tree)
+    broken["links"].append({"from": ["Grid", "Nope"], "to": ["Group Output", "Geometry"]})
+    try:
+        serialize.write(broken)
+        check(False, "a broken rewrite should be refused")
+    except serialize.BuildError:
+        check(len(tree.nodes) == before_nodes and evaluate(tree) == before
+              and abs(mod[density] - 33.0) < 1e-6,
+              "a rewrite with a mistake in it leaves the group, and the values tuned on it, alone")
+    bpy.data.objects.remove(obj, do_unlink=True)
+
+    # a dependency that shares a name with a different group does not overwrite it
+    mine = serialize.write({"nodes": [{"name": "c", "type": "GeometryNodeMeshCube"}]},
+                           name="Shared Name")
+    theirs = {"name": "Shared Name", "interface": [
+        {"socket": "Geometry", "in_out": "OUTPUT", "type": "NodeSocketGeometry"}],
+        "nodes": [{"name": "s", "type": "GeometryNodeMeshUVSphere"},
+                  {"name": "out", "type": "NodeGroupOutput"}],
+        "links": [{"from": ["s", "Mesh"], "to": ["out", "Geometry"]}]}
+    user = serialize.write({"groups": [theirs], "nodes": [
+        {"name": "g", "type": "GeometryNodeGroup", "group": "Shared Name"}]}, name="Uses Shared")
+    check(mine.nodes[0].bl_idname == "GeometryNodeMeshCube"
+          and user.nodes["g"].node_tree.name != "Shared Name"
+          and user.nodes["g"].node_tree.nodes.get("s") is not None,
+          f"a group brought along under a taken name is added beside it "
+          f"({user.nodes['g'].node_tree.name}), not written over it")
+
+    # changing a node's items keeps its existing wiring
+    dyn = bpy.data.node_groups["DynamicCopy"]
+    cap = next(n for n in dyn.nodes if n.bl_idname == "GeometryNodeCaptureAttribute")
+    wired = sum(1 for l in dyn.links if l.to_node == cap or l.from_node == cap)
+    edit.apply(dyn, [{"op": "set", "node": cap.name, "items": {"capture_items": [
+        {"name": "Height", "data_type": "FLOAT"}, {"name": "Where", "data_type": "FLOAT_VECTOR"},
+        {"name": "Extra", "data_type": "FLOAT"}]}}])
+    check(sum(1 for l in dyn.links if l.to_node == cap or l.from_node == cap) == wired,
+          f"adding a capture item keeps the existing links ({wired})")
+
+    # removing a node joins up sockets of the same type, not whichever was linked first
+    t = serialize.write({"interface": [
+        {"socket": "Geometry", "type": "NodeSocketGeometry"},
+        {"socket": "Geometry", "in_out": "OUTPUT", "type": "NodeSocketGeometry"}],
+        "nodes": [{"name": "in", "type": "NodeGroupInput"},
+                  {"name": "xyz", "type": "ShaderNodeCombineXYZ"},
+                  {"name": "move", "type": "GeometryNodeSetPosition"},
+                  {"name": "out", "type": "NodeGroupOutput"}],
+        "links": [{"from": ["xyz", "Vector"], "to": ["move", "Offset"]},
+                  {"from": ["in", "Geometry"], "to": ["move", "Geometry"]},
+                  {"from": ["move", "Geometry"], "to": ["out", "Geometry"]}]}, name="Bridging")
+    edit.apply(t, [{"op": "remove", "node": "move", "bridge": True}])
+    fed = [l.from_node.name for l in t.links if l.to_node.name == "out"]
+    check(fed == ["in"], f"removing a node bridges geometry to geometry ({fed})")
+
+    # two inputs with the same name keep their own tuned values through a rewrite
+    twin = serialize.write({"interface": [
+        {"panel": "Wall"}, {"socket": "Size", "type": "NodeSocketFloat", "in_panel": "Wall"},
+        {"panel": "Posts"}, {"socket": "Size", "type": "NodeSocketFloat", "in_panel": "Posts"},
+        {"socket": "Geometry", "in_out": "OUTPUT", "type": "NodeSocketGeometry"}],
+        "nodes": [{"name": "out", "type": "NodeGroupOutput"}]}, name="Twins")
+    obj = bpy.data.objects.new("TwinUser", bpy.data.meshes.new("TwinUser"))
+    bpy.context.scene.collection.objects.link(obj)
+    mod = obj.modifiers.new("GN", 'NODES')
+    mod.node_group = twin
+    ids = [i.identifier for i in twin.interface.items_tree if i.item_type == 'SOCKET'
+           and i.name == "Size"]
+    mod[ids[0]], mod[ids[1]] = 1.5, 7.0
+    serialize.write(serialize.read(twin))
+    ids = [i.identifier for i in twin.interface.items_tree if i.item_type == 'SOCKET'
+           and i.name == "Size"]
+    check([round(mod[i], 3) for i in ids] == [1.5, 7.0],
+          "two inputs with the same name keep their own values through a rewrite")
+
+    # checking a group on an object that does not have it measures it with the group on
+    cube_tree = serialize.write({"interface": [
+        {"socket": "Geometry", "in_out": "OUTPUT", "type": "NodeSocketGeometry"}],
+        "nodes": [{"name": "c", "type": "GeometryNodeMeshCube"},
+                  {"name": "out", "type": "NodeGroupOutput"}],
+        "links": [{"from": ["c", "Mesh"], "to": ["out", "Geometry"]}]}, name="CheckMe")
+    got = agent.nodes_check("CheckMe", on="TwinUser")
+    check(got["verts"] == 8 and len(obj.modifiers) == 1,
+          "nodes_check on an object tries the group on it, and takes it off again")
+    bpy.data.objects.remove(obj, do_unlink=True)
+
+    # a shader node group reads without falling over
+    shader = bpy.data.node_groups.new("Shady", "ShaderNodeTree")
+    shader.interface.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    got = agent.nodes_read("Shady")
+    check(got["ok"] and got["interface"][0]["type"] == "NodeSocketShader",
+          "a shader group with a shader input can be read")
+
+
 def main():
     # --- the catalog -------------------------------------------------------------------
     s = catalog.summary()
@@ -390,6 +495,7 @@ def main():
     check(copies and copies[0].paired_output is not None, "and the rebuilt zone is paired again")
 
     dynamic_tests()
+    review_tests()
 
     # --- through the tools an assistant actually calls ----------------------------------------
     import codenodes

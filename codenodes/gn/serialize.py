@@ -195,17 +195,20 @@ def dependencies(tree):
 _iface_defaults = {}
 
 
-def _fresh_socket_defaults(socket_type, in_out):
+def _fresh_socket_defaults(socket_type, in_out, kind="GeometryNodeTree"):
     """What a brand-new interface socket of this type looks like, so only differences
-    need recording."""
-    key = (socket_type, in_out)
+    need recording. Made in a tree of the same kind: a shader socket does not exist in
+    a geometry tree."""
+    key = (socket_type, in_out, kind)
     if key not in _iface_defaults:
-        scratch = bpy.data.node_groups.new("__codenodes_iface__", "GeometryNodeTree")
+        scratch = bpy.data.node_groups.new("__codenodes_iface__", kind)
         try:
             s = scratch.interface.new_socket("x", in_out=in_out, socket_type=socket_type)
             _iface_defaults[key] = {p.identifier: _plain(getattr(s, p.identifier))
                                     for p in s.bl_rna.properties
                                     if not p.is_readonly and p.identifier not in IFACE_FIXED}
+        except Exception:
+            _iface_defaults[key] = {}          # record everything rather than fail the read
         finally:
             bpy.data.node_groups.remove(scratch)
     return _iface_defaults[key]
@@ -225,7 +228,7 @@ def read_interface(tree):
             continue
         entry = {"socket": item.name, "in_out": item.in_out, "type": item.socket_type,
                  "identifier": item.identifier}
-        fresh = _fresh_socket_defaults(item.socket_type, item.in_out)
+        fresh = _fresh_socket_defaults(item.socket_type, item.in_out, tree.bl_idname)
         for prop in item.bl_rna.properties:
             if prop.is_readonly or prop.identifier in IFACE_FIXED:
                 continue
@@ -254,30 +257,69 @@ def write(data, tree=None, name=None, replace=True, warnings=None):
         raise BuildError("a tree description needs at least a 'nodes' list")
     warnings = warnings if warnings is not None else []
 
+    # groups it uses come first; one that clashes with a different group of the same
+    # name is written under a new name rather than over the other one
+    renames = {}
     for inner in data.get("groups") or []:
-        _write_dependency(inner, warnings)
+        _write_dependency(inner, warnings, renames)
+    if renames:
+        data = _renamed(data, renames)
 
     name = name or data.get("name") or "Geometry Nodes"
     kind = data.get("kind") or "GeometryNodeTree"
     if tree is None:
         tree = bpy.data.node_groups.get(name)
-    users = None
     if tree is None:
         tree = bpy.data.node_groups.new(name, kind)
-    elif replace:
-        users = _snapshot_users(tree)
-        tree.nodes.clear()
-        tree.interface.clear()
+        tree.use_fake_user = True
+        try:
+            _build(data, tree, warnings)
+        except Exception:
+            bpy.data.node_groups.remove(tree)
+            raise
+        return tree
+    if not replace:
+        _build(data, tree, warnings)
+        return tree
+
+    # Replacing a tree people already use: build the description somewhere else first,
+    # so a mistake in it leaves their tree exactly as it was rather than emptied.
+    trial = bpy.data.node_groups.new("__codenodes_trial__", tree.bl_idname)
+    try:
+        _build(data, trial, [])
+    finally:
+        bpy.data.node_groups.remove(trial)
+    users = _snapshot_users(tree)
+    tree.nodes.clear()
+    tree.interface.clear()
     tree.use_fake_user = True
+    _build(data, tree, warnings)
+    _restore_users(tree, users, warnings)
+    return tree
+
+
+def _renamed(data, renames):
+    data = dict(data)
+    nodes = []
+    for entry in data["nodes"]:
+        if entry.get("group") in renames:
+            entry = dict(entry, group=renames[entry["group"]])
+        nodes.append(entry)
+    data["nodes"] = nodes
+    return data
+
+
+def _build(data, tree, warnings):
+    """Everything that turns a description into the nodes of an empty tree."""
+    names = [e.get("name") for e in data["nodes"]]
+    dup = next((n for n in names if n and names.count(n) > 1), None)
+    if dup:
+        raise BuildError(f"two nodes are both called '{dup}'")
 
     # Rebuilding the interface hands out fresh socket identifiers; this maps what was
     # recorded onto what now exists.
     iface_remap = write_interface(tree, data.get("interface") or [], warnings)
 
-    names = [e.get("name") for e in data["nodes"]]
-    dup = next((n for n in names if names.count(n) > 1), None)
-    if dup:
-        raise BuildError(f"two nodes are both called '{dup}'")
     made = {}
     for entry in data["nodes"]:
         node = _make_node(tree, entry, warnings)
@@ -321,34 +363,65 @@ def write(data, tree=None, name=None, replace=True, warnings=None):
         layout(tree, only=None if not placed else
                [n for e, n in by_entry if e.get("at") is None])
 
-    if users:
-        _restore_users(tree, users, warnings)
     warnings.extend(validate(tree))
     return tree
 
 
-def _write_dependency(inner, warnings):
-    """Build a group the description depends on, unless an identical one is already here.
-    Rebuilding a group that other trees use would needlessly disturb them."""
-    existing = bpy.data.node_groups.get(inner.get("name", ""))
-    if existing is not None and _same(read(existing, groups=False), inner):
+def _write_dependency(inner, warnings, renames):
+    """Make sure a group the description depends on exists. An identical one already here
+    is used as it is; a *different* group that happens to share the name is left alone
+    and this one is written beside it under a new name."""
+    inner = _renamed(inner, renames) if renames else inner
+    wanted = inner.get("name") or "Group"
+    existing = bpy.data.node_groups.get(wanted)
+    if existing is None:
+        return write(inner, name=wanted, warnings=warnings)
+    if _same(read(existing, groups=False), inner):
         return existing
-    return write(inner, tree=existing, name=inner.get("name"), warnings=warnings)
+    n = 1
+    while bpy.data.node_groups.get(f"{wanted}.{n:03d}") is not None:
+        candidate = bpy.data.node_groups[f"{wanted}.{n:03d}"]
+        if _same(read(candidate, groups=False), inner):
+            renames[wanted] = candidate.name
+            return candidate
+        n += 1
+    tree = write(inner, name=f"{wanted}.{n:03d}", warnings=warnings)
+    renames[wanted] = tree.name
+    return tree
 
 
 def _same(a, b):
-    def strip(d):
-        d = dict(d)
-        for key in ("at",):
-            d.pop(key, None)
-        return d
+    """Whether two descriptions build the same tree: nodes, settings, values, interface
+    and every link — ignoring positions and the identifiers a rebuild renumbers."""
     if len(a.get("nodes", [])) != len(b.get("nodes", [])):
         return False
-    na = sorted((strip(n) for n in a["nodes"]), key=lambda n: n["name"])
-    nb = sorted((strip(n) for n in b["nodes"]), key=lambda n: n["name"])
-    ia = [{k: v for k, v in i.items() if k != "identifier"} for i in a.get("interface", [])]
-    ib = [{k: v for k, v in i.items() if k != "identifier"} for i in b.get("interface", [])]
-    return na == nb and ia == ib and len(a.get("links", [])) == len(b.get("links", []))
+
+    def nodes(d):
+        return sorted(({k: v for k, v in n.items() if k not in ("at", "sockets", "values")}
+                       for n in d["nodes"]), key=lambda n: n["name"])
+
+    def iface(d):
+        return [{k: v for k, v in i.items() if k != "identifier"} for i in d.get("interface", [])]
+
+    def links(d):
+        # group sockets are renumbered on a rebuild, so name them by interface position
+        order = {i.get("identifier"): n for n, i in enumerate(d.get("interface", []))}
+        kinds = {n["name"]: n["type"] for n in d["nodes"]}
+
+        def end(node, socket):
+            if kinds.get(node) in ('NodeGroupInput', 'NodeGroupOutput'):
+                return (node, order.get(socket, socket))
+            return (node, socket)
+        return sorted((end(*l["from"]), end(*l["to"])) for l in d.get("links", []))
+
+    def values(d):
+        return sorted((n["name"], sorted(n.get("values", {}).items(), key=str))
+                      for n in d["nodes"] if n["type"] not in ('NodeGroupInput', 'NodeGroupOutput'))
+    try:
+        return (nodes(a) == nodes(b) and iface(a) == iface(b) and links(a) == links(b)
+                and str(values(a)) == str(values(b)))
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def _make_node(tree, entry, warnings):
@@ -625,24 +698,38 @@ def _copy_idprop(value):
     return value
 
 
+def _keyed(things):
+    """(key, thing) with the key a name plus which occurrence of that name it is, so two
+    inputs both called "Material" (one per panel, say) keep their own values."""
+    seen, out = {}, []
+    for thing in things:
+        n = seen.get(thing.name, 0)
+        seen[thing.name] = n + 1
+        out.append((f"{thing.name}#{n}", thing))
+    return out
+
+
+def _group_inputs(tree):
+    return [i for i in tree.interface.items_tree
+            if i.item_type == 'SOCKET' and i.in_out == 'INPUT']
+
+
 def _snapshot_users(tree):
     """Before a rebuild: the modifier values set on this group, and how other groups had
-    it wired, keyed by socket *name* since identifiers are about to change."""
-    names = {i.identifier: i.name for i in tree.interface.items_tree
-             if i.item_type == 'SOCKET' and i.in_out == 'INPUT'}
+    it wired, keyed by socket name and occurrence since identifiers are about to change."""
     mods = []
     for obj in bpy.data.objects:
         for mod in obj.modifiers:
             if mod.type != 'NODES' or mod.node_group != tree:
                 continue
             values = {}
-            for ident, label in names.items():
+            for key, item in _keyed(_group_inputs(tree)):
                 record = {}
                 for suffix in ("", "_use_attribute", "_attribute_name"):
-                    if ident + suffix in mod.keys():
-                        record[suffix] = _copy_idprop(mod[ident + suffix])
+                    if item.identifier + suffix in mod.keys():
+                        record[suffix] = _copy_idprop(mod[item.identifier + suffix])
                 if record:
-                    values.setdefault(label, record)
+                    values[key] = record
             mods.append((obj.name, mod.name, values))
     parents = []
     for other in bpy.data.node_groups:
@@ -651,11 +738,13 @@ def _snapshot_users(tree):
         for node in other.nodes:
             if getattr(node, "node_tree", None) != tree:
                 continue
-            ins = [(l.from_node.name, l.from_socket.identifier, l.to_socket.name)
+            in_keys = {s.as_pointer(): k for k, s in _keyed(node.inputs)}
+            out_keys = {s.as_pointer(): k for k, s in _keyed(node.outputs)}
+            ins = [(l.from_node.name, l.from_socket.identifier, in_keys[l.to_socket.as_pointer()])
                    for l in other.links if l.to_node == node]
-            outs = [(l.from_socket.name, l.to_node.name, l.to_socket.identifier)
+            outs = [(out_keys[l.from_socket.as_pointer()], l.to_node.name, l.to_socket.identifier)
                     for l in other.links if l.from_node == node]
-            values = {s.name: _socket_value(s) for s in node.inputs
+            values = {k: _socket_value(s) for k, s in _keyed(node.inputs)
                       if not s.is_linked and hasattr(s, "default_value")}
             parents.append((other.name, node.name, ins, outs, values))
     return mods, parents
@@ -663,17 +752,14 @@ def _snapshot_users(tree):
 
 def _restore_users(tree, users, warnings):
     mods, parents = users
-    by_name = {}
-    for i in tree.interface.items_tree:
-        if i.item_type == 'SOCKET' and i.in_out == 'INPUT':
-            by_name.setdefault(i.name, i.identifier)
+    by_key = {k: i.identifier for k, i in _keyed(_group_inputs(tree))}
     for obj_name, mod_name, values in mods:
         obj = bpy.data.objects.get(obj_name)
         mod = obj.modifiers.get(mod_name) if obj else None
         if mod is None:
             continue
-        for label, record in values.items():
-            ident = by_name.get(label)
+        for key, record in values.items():
+            ident = by_key.get(key)
             if ident is None:
                 continue
             for suffix, value in record.items():
@@ -687,21 +773,22 @@ def _restore_users(tree, users, warnings):
         node = other.nodes.get(node_name) if other else None
         if node is None:
             continue
-        for from_node, from_id, to_name in ins:
+        inputs, outputs = dict(_keyed(node.inputs)), dict(_keyed(node.outputs))
+        for from_node, from_id, key in ins:
             src = other.nodes.get(from_node)
             a = next((s for s in src.outputs if s.identifier == from_id), None) if src else None
-            b = next((s for s in node.inputs if s.name == to_name), None)
+            b = inputs.get(key)
             if a and b:
                 other.links.new(a, b)
-        for from_name, to_node, to_id in outs:
+        for key, to_node, to_id in outs:
             dst = other.nodes.get(to_node)
-            a = next((s for s in node.outputs if s.name == from_name), None)
+            a = outputs.get(key)
             b = next((s for s in dst.inputs if s.identifier == to_id), None) if dst else None
             if a and b:
                 other.links.new(a, b)
-        for label, value in values.items():
-            socket = next((s for s in node.inputs if s.name == label and not s.is_linked), None)
-            if socket is not None and value is not None:
+        for key, value in values.items():
+            socket = inputs.get(key)
+            if socket is not None and not socket.is_linked and value is not None:
                 try:
                     socket.default_value = _resolve(value)
                 except Exception:

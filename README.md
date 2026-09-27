@@ -216,6 +216,24 @@ agent.nodes_check("MyGroup")              # what came out: mesh, curves, points,
 The same tools are MCP tools, alongside `material`, `collect`, `curve`, `light("outdoor")`,
 `look_at` and `render`, so an assistant can build a scene, look at it and fix what it sees.
 
+## To the web, with sliders
+
+`agent.web_page` writes a scene as one self-contained page (three.js, orbit controls) with a
+slider for any modifier input, and it runs headless:
+
+```python
+agent.web_page("level.html", title="Canyon Crossing", sliders=[
+    {"object": "Courtyard", "input": "Doorways", "values": [0, 1, 2, 3, 4]},
+    {"object": "Trail", "input": "Gap Depth", "values": [1.2, 4, 20], "unit": "m"}])
+```
+
+Geometry Nodes cannot run in a browser, so every slider position is built in Blender first and
+exported as glTF. Each slider is tried at every value to find what it *really* changes (the
+lamps along a trail move when the bridge threshold does, because they follow the walkway), and
+sliders that change the same objects are baked as combinations, so the page never shows a mix
+that could not exist. Everything else is exported once. [`examples/web_demo.py`](examples/web_demo.py)
+turns the level above into a 5.8 MB page with four sliders, and [`examples/web_simple.py`](examples/web_simple.py) makes a small one: a single courtyard wall with two.
+
 ## Animation, and making it render
 
 There are three phases; the first two are built (see `docs/ROADMAP.md`).
@@ -262,8 +280,9 @@ blender --factory-startup --python tests/test_particles.py     # GPU particle so
 blender --factory-startup --python tests/test_agent.py         # the assistant-facing surface (30)
 blender --factory-startup --python tests/test_shape_blender.py # shapes as Blender objects (36)
 blender --factory-startup --python tests/test_server.py        # a real socket client against Blender (26)
-blender -b --factory-startup --python tests/test_gn.py         # Geometry Nodes as data, both ways (53)
-blender -b --factory-startup --python tests/test_gn_library.py # every capability; editing real trees (40)
+blender -b --factory-startup --python tests/test_gn.py         # Geometry Nodes as data, both ways (60)
+blender -b --factory-startup --python tests/test_gn_library.py # every capability; editing real trees (43)
+blender -b --factory-startup --python tests/test_web.py        # a scene as a web page with sliders (12)
 ```
 
 Run `test_bake.py` before `test_farm.py`: the first saves the .blend the second opens.

@@ -111,7 +111,20 @@ def _set(tree, op, warnings, added):
     node = _node(tree, op.get("node"))
     changed = []
     if "items" in op:
+        # Rebuilding items renumbers their sockets, which drops their links; note each
+        # link by socket name and reconnect whatever still has a socket of that name.
+        tree_links = node.id_data.links
+        ins = [(l.from_socket, l.to_socket.name) for l in tree_links if l.to_node == node]
+        outs = [(l.from_socket.name, l.to_socket) for l in tree_links if l.from_node == node]
         serialize._make_items(node, {"items": op["items"]})
+        for source, label in ins:
+            target = find_socket(node, label, "in")
+            if target is not None:
+                tree_links.new(source, target)
+        for label, target in outs:
+            source = find_socket(node, label, "out")
+            if source is not None:
+                tree_links.new(source, target)
         changed.append("items")
     if "settings" in op:
         serialize._apply_settings(node, {"name": node.name, "settings": op["settings"]}, warnings)
@@ -191,12 +204,18 @@ def _remove(tree, op, warnings, added):
     node = _node(tree, op.get("node"))
     name = node.name
     if op.get("bridge"):
-        source = next((l.from_socket for l in tree.links
-                       if l.to_node == node and l.to_socket.enabled), None)
-        targets = [l.to_socket for l in tree.links if l.from_node == node]
-        if source is not None:
-            for target in targets:
-                tree.links.new(source, target)
+        # join each outgoing link to an incoming one of the same type — a Set Position's
+        # Geometry, never its Offset — preferring an input with the output's name
+        incoming = [l for l in tree.links if l.to_node == node and l.to_socket.enabled]
+        pairs = []
+        for out_link in [l for l in tree.links if l.from_node == node]:
+            same = [l for l in incoming if l.to_socket.type == out_link.from_socket.type]
+            named = [l for l in same if l.to_socket.name == out_link.from_socket.name]
+            pick = (named or same or [None])[0]
+            if pick is not None:
+                pairs.append((pick.from_socket, out_link.to_socket))
+        for source, target in pairs:
+            tree.links.new(source, target)
     tree.nodes.remove(node)
     return f"removed '{name}'" + (" and joined up the flow around it" if op.get("bridge") else "")
 

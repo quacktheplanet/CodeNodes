@@ -234,9 +234,23 @@ with declared parameters**, so the page can expose exactly those as sliders. Two
 - **re-evaluate** in the browser — needs the generator ported to JS, which is realistic for the
   shape language (it is our own small language) and not for Geometry Nodes.
 
-So: shapes first, with real sliders; node setups exported as glTF with a turntable and a few baked
-variants. The pieces we need — an evaluator that is already data-driven, and a way to publish a
-page — both exist.
+- ~~**Baked sliders for node setups**~~ **done (v1).** `codenodes/web.py`, `agent.web_page`. Every
+  slider value is built and exported as glTF (instances stay instances: a 450-tree forest is
+  0.12 MB). Each slider is tried at every value to find which objects it really changes, and
+  sliders that overlap are baked as combinations (capped at 64). One self-contained HTML file,
+  three.js 0.147 as classic scripts from jsdelivr, materials rebuilt by name from Blender's
+  values, sun and camera carried over, errors shown on the page. Runs headless.
+  `tests/test_web.py`; pages checked in headless Edge, including moving sliders.
+
+  The first published version used ES modules and an import map and did not work on the
+  artifact host, though it worked in a local browser; the cause was not pinned down (an import
+  map after a host module script was ruled out). Not yet: procedural material variation is lost
+  (flat colours on the web); no Draco compression (the sandbox blocks fetching the decoder, so
+  it would need inlining); a wall that follows the ground carries many points, so variants are
+  ~250 KB each.
+- **Live sliders for shapes** — next: port the shape language evaluator to JavaScript so a
+  shape re-evaluates in the browser at any slider value, not only baked ones.
+- **webblend** can take the exporter as its core.
 
 **P3 — bigger simulations**
 11. **Field output** (vector grids that GN simulations and hair can sample).

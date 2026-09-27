@@ -42,11 +42,30 @@ def manifest():
     return [dict(graph(key).manifest(), key=key) for key in sorted(CAPABILITIES)]
 
 
-def build(key, name=None, warnings=None):
-    """Make (or refresh) the node group for a capability. Returns the tree."""
+TAG = "codenodes_capability"
+
+
+def build(key, name=None, warnings=None, refresh=True):
+    """Make the node group for a capability, or rebuild it (refresh). Returns the tree.
+
+    With refresh=False an existing group is used as it is, so changes someone made to it
+    with nodes_edit survive. A group of that name that the library did not make is never
+    touched.
+    """
     from . import serialize
     g = graph(key)
-    tree = serialize.write(g.data(), name=name or g.name, warnings=warnings)
+    name = name or g.name
+    import bpy
+    existing = bpy.data.node_groups.get(name)
+    if existing is not None:
+        if existing.get(TAG) not in (key, None) or (existing.get(TAG) is None and existing.nodes):
+            raise serialize.BuildError(
+                f"there is already a node group called '{name}' that is not the {key} "
+                "capability; pass another name")
+        if not refresh and existing.get(TAG) == key:
+            return existing
+    tree = serialize.write(g.data(), name=name, warnings=warnings)
+    tree[TAG] = key
     if hasattr(tree, "description"):
         tree.description = g.about
     return tree
@@ -358,8 +377,11 @@ def wall():
                                                   "Offset": g.xyz(0, 0, base)})["Geometry"]
     row = g.node("GeometryNodeInstanceOnPoints", {"Points": standing, "Instance": post,
                                                   "Rotation": turned})["Instances"]
+    # flat faces: smooth normals averaged round the corners make a wall look rounded,
+    # especially once exported to the web
+    flat = g.node("GeometryNodeSetShadeSmooth", {"Mesh": cut, "Shade Smooth": False})["Mesh"]
     g.output("Geometry", "geometry",
-             g.join(_material(g, cut, wall_mat), g.switch("GEOMETRY", posts, None, row)))
+             g.join(_material(g, flat, wall_mat), g.switch("GEOMETRY", posts, None, row)))
     return g
 
 

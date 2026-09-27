@@ -232,6 +232,8 @@ def collect(name, objects, parent=None, keep_in_scene=False):
     A collection inside another (parent=...) is picked as one piece by scatter and
     along_curve, so a tree made of a trunk and a crown stays together.
     """
+    if parent and parent == name:
+        return {"ok": False, "error": "a collection cannot be inside itself"}
     col = bpy.data.collections.get(name) or bpy.data.collections.new(name)
     missing = [n for n in objects if n not in bpy.data.objects]
     if missing:
@@ -264,7 +266,19 @@ def material(name, color=(0.8, 0.8, 0.8), roughness=0.5, metallic=0.0, emission=
         rgb = [float(c) for c in color][:3]
     except Exception:
         return {"ok": False, "error": "color should be [r, g, b] with each 0-1"}
-    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    try:
+        roughness, metallic = float(roughness), float(metallic)
+        emission_strength = float(emission_strength)
+        emission = [float(c) for c in emission][:3] if emission else None
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "roughness, metallic and emission_strength are numbers; "
+                                      "emission is [r, g, b]"}
+    existing = bpy.data.materials.get(name)
+    if existing is not None and existing.node_tree is not None and not any(
+            n.type == 'BSDF_PRINCIPLED' for n in existing.node_tree.nodes):
+        return {"ok": False, "error": f"'{name}' is someone's own shader (it has no Principled "
+                                      "BSDF); pick another name rather than replace it"}
+    mat = existing or bpy.data.materials.new(name)
     if not getattr(mat, "use_nodes", True):
         mat.use_nodes = True
     nodes, links = mat.node_tree.nodes, mat.node_tree.links
@@ -559,20 +573,24 @@ def _set_modifier_inputs(obj, mod, values):
     return problems
 
 
-def nodes_use(capability, object=None, values=None, name=None):
+def nodes_use(capability, object=None, values=None, name=None, refresh=False):
     """Build a ready-made capability and put it on an object, with its inputs set by name.
 
     With no object, a new empty one is made for it. Curve-following capabilities (wall,
-    path_bridge, along_curve) belong on a curve object — make one with `curve`.
+    path_bridge, along_curve) belong on a curve object — make one with `curve`. The
+    capability's group is shared: if it exists it is reused as it is (keeping any edits);
+    refresh=True rebuilds it from the library.
     """
     from .gn import library, serialize
     warnings = []
     try:
-        tree = library.build(capability, name=name, warnings=warnings)
+        tree = library.build(capability, name=name, warnings=warnings, refresh=refresh)
     except KeyError as exc:
         return {"ok": False, "error": str(exc.args[0])}
     except serialize.BuildError as exc:
         return {"ok": False, "error": f"the capability did not build: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "error": f"the capability did not build: {type(exc).__name__}: {exc}"}
     obj = bpy.data.objects.get(object) if object else None
     if object and obj is None:
         return {"ok": False, "error": f"no object called '{object}'. Make a curve with `curve`, "
@@ -620,7 +638,8 @@ def curve(name, points, cyclic=False, smooth=True):
     """Make or reshape a curve object through the given points — a path, the line of a
     wall, a river. smooth=True makes an auto-handled Bezier, False a straight polyline."""
     try:
-        pts = [tuple(float(c) for c in p) + (0.0,) * (3 - len(p)) for p in points]
+        pts = [tuple(float(c) for c in list(p)[:3]) + (0.0,) * (3 - len(list(p)[:3]))
+               for p in points]
     except Exception:
         return {"ok": False, "error": "points should be a list of [x, y] or [x, y, z]"}
     if len(pts) < 2:
@@ -651,6 +670,25 @@ def curve(name, points, cyclic=False, smooth=True):
                  for a, b in zip(pts, pts[1:] + (pts[:1] if cyclic else [])))
     return {"ok": True, "object": obj.name, "points": len(pts), "cyclic": bool(cyclic),
             "length": round(length, 3)}
+
+
+def web_page(path, sliders=None, objects=None, static=None, overrides=None, title="Level",
+             subtitle=""):
+    """Write the scene as a self-contained interactive web page (three.js), with sliders
+    for modifier inputs: [{"object", "input", "values": [...], "label"?, "unit"?}].
+
+    Every slider position is built here first; objects a slider changes indirectly are
+    found and baked with it. static lists objects to export once regardless;
+    overrides sets inputs only for the export (a lower terrain resolution, say).
+    """
+    from . import web
+    try:
+        return web.export_page(path, objects=objects, sliders=sliders or [], static=static or [],
+                               overrides=overrides, title=title, subtitle=subtitle)
+    except web.WebError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def measure(obj):
@@ -697,7 +735,7 @@ def nodes_check(group, on=None):
     tree = bpy.data.node_groups.get(group)
     if tree is None:
         return _no_group(group)
-    temporary = None
+    temporary, added = None, None
     obj = bpy.data.objects.get(on) if on else None
     if on and obj is None:
         return {"ok": False, "error": f"no object called '{on}'"}
@@ -707,6 +745,10 @@ def nodes_check(group, on=None):
         obj = temporary
         mod = obj.modifiers.new("check", 'NODES')
         mod.node_group = tree
+    elif not any(m.type == 'NODES' and m.node_group == tree for m in obj.modifiers):
+        # measure the group on that object, not the object without it
+        added = obj.modifiers.new("CodeNodes check", 'NODES')
+        added.node_group = tree
     try:
         info = measure(obj)
         empty = not any(info[k] for k in ("verts", "curves", "points", "instances"))
@@ -720,6 +762,8 @@ def nodes_check(group, on=None):
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     finally:
+        if added is not None:
+            obj.modifiers.remove(added)
         if temporary is not None:
             data = temporary.data
             bpy.data.objects.remove(temporary, do_unlink=True)

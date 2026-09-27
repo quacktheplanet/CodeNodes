@@ -235,6 +235,22 @@ def main():
     check(abs(tuned[height_id] - 5.0) < 1e-6 and abs(made("Courtyard")["size"][2] - 5.8) < 0.01,
           "editing keeps what was tuned on the modifier, and a removed node's flow is rejoined")
 
+    # using a capability again keeps edits made to its group; a foreign group is left alone
+    agent.nodes_edit("CN Wall Along Curve", [{"op": "add", "node": {
+        "name": "My Note", "type": "NodeFrame", "label": "edited by hand"}}])
+    agent.curve("Second", [[0, 30, 0], [10, 30, 0]], smooth=False)
+    again = agent.nodes_use("wall", "Second")
+    check(again["ok"] and "My Note" in bpy.data.node_groups["CN Wall Along Curve"].nodes,
+          "using a capability again keeps the edits made to its group")
+    refreshed = agent.nodes_use("wall", "Second", refresh=True)
+    check(refreshed["ok"] and "My Note" not in bpy.data.node_groups["CN Wall Along Curve"].nodes,
+          "and refresh=True rebuilds it from the library")
+    serialize.write({"nodes": [{"name": "c", "type": "GeometryNodeMeshCube"}]}, name="My Scatter")
+    clash = agent.nodes_use("scatter", name="My Scatter")
+    check(not clash["ok"] and "already a node group" in clash["error"]
+          and bpy.data.node_groups["My Scatter"].nodes[0].bl_idname == "GeometryNodeMeshCube",
+          "a group of someone else's with the requested name is never overwritten")
+
     print(("\nFAIL" if _failed else f"\nALL {_checks} CHECKS PASSED"), flush=True)
 
 
