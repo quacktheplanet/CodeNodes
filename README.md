@@ -282,7 +282,7 @@ api.bake_to_nodes("Ring")   # to nodes: {"ok": True, "sliders": [...]} or {"ok":
 python tests/test_mesher.py                                    # mesher, no Blender (17 checks)
 python tests/test_graph.py                                     # graph compiler, no Blender (16)
 python tests/test_shapes.py                                    # maths, the kernel, the language (97)
-python tests/test_rpc.py                                       # the MCP wire protocol, no Blender (29)
+python tests/test_rpc.py                                       # the MCP wire protocol, and the MCP server matches the add-on (31)
 blender --factory-startup --python tests/test_blender.py       # needs a window: the GPU isn't available with -b (27)
 blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (30)
 blender --factory-startup --python tests/test_bake.py          # baking, and playback through stock nodes (18)
