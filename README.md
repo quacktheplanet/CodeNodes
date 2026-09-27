@@ -388,7 +388,8 @@ left off.
 
 The `web/` folder has a few standalone graphics showcases (a raymarched citadel, a procedural planet,
 a million-particle simulation, a raster flythrough, a mesh editor) made alongside CodeNodes; open
-them in a browser with WebGL2.
+them in a browser with WebGL2. Two of them load three.js from a CDN, so they need an internet
+connection.
 
 ## Animation, and making it render
 
