@@ -236,7 +236,7 @@ turns the level above into a 5.8 MB page with four sliders, and [`examples/web_s
 
 ## Animation, and making it render
 
-There are three phases; the first two are built (see `docs/ROADMAP.md`).
+There are three phases, all built (see `docs/ROADMAP.md`).
 
 1. **Live.** Turn on **Animate** and the mesh rebuilds on every frame change, using `uTime`. This is
    for working, not for rendering: running GPU code from a frame handler during an F12 render crashes
@@ -246,11 +246,23 @@ There are three phases; the first two are built (see `docs/ROADMAP.md`).
    it back. From then on it is ordinary Geometry Nodes geometry: it renders in F12, it renders on a
    machine with no GPU and without this add-on, and every other Geometry Nodes node can work on it.
    **Remove Cache** goes back to live.
-3. **Bake to nodes** (planned): compile the maths into a real Geometry Nodes network, so there are no
-   files at all.
+3. **Bake to Nodes.** The code itself becomes a Geometry Nodes network: no files, no GPU, evaluated
+   natively every frame, sliders on the modifier. CodeNodes translates the GLSL into
+   [Expression Nodes](https://github.com/quacktheplanet/expression-nodes)' language, which builds the
+   node group; a Volume Cube (density = −sdf) and Volume to Mesh make the surface. Tested against the
+   GPU mesh from the same code: the **same vertices** (OpenVDB's mesher and ours both average the
+   edge crossings of the same grid), after a slider change and on an animated frame, and the saved
+   file builds the same mesh in a Blender with no add-ons at all. About 8 ms per rebuild at
+   resolution 96 and 28 ms at 160, on the CPU.
+
+   What translates: local variables, maths, `?:`, your own helper functions and CodeNodes' distance
+   helpers (`sdSphere`, `sdBox`, `smin`, `rotateZ`…), `uTime`/`uFrame`. Loops, `if` statements and
+   `noise3`/`fbm3` don't yet (CodeNodes' GPU noise has no exact twin in stock nodes): the button
+   says which line and suggests Bake to Disk. Needs the Expression Nodes add-on installed.
 
 ```python
-api.bake("Blob", 1, 48)     # same thing from a script or from Claude
+api.bake("Blob", 1, 48)     # to disk, from a script or from Claude
+api.bake_to_nodes("Ring")   # to nodes: {"ok": True, "sliders": [...]} or {"ok": False, "error": "line 9: a loop...", "fallback": "bake"}
 ```
 
 ## What keeps it from crashing
@@ -274,6 +286,7 @@ python tests/test_rpc.py                                       # the MCP wire pr
 blender --factory-startup --python tests/test_blender.py       # needs a window: the GPU isn't available with -b (27)
 blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (30)
 blender --factory-startup --python tests/test_bake.py          # baking, and playback through stock nodes (18)
+blender --factory-startup --python tests/test_bake_nodes.py    # code to nodes, against the GPU mesh; opens with no add-ons (11)
 blender -b --factory-startup --python tests/test_farm.py       # the bake renders with no GPU and no add-on (10)
 blender --factory-startup --python tests/test_volume.py        # density code -> OpenVDB -> Volume object (16)
 blender --factory-startup --python tests/test_particles.py     # GPU particle solver, incl. baking (22)

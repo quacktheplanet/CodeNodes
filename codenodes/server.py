@@ -62,7 +62,7 @@ def load_token(create=True):
 def dispatch_table():
     """Exactly what a client may call. Nothing here can run arbitrary code."""
     table = {name: getattr(agent, name) for name in
-             ("help", "make", "set_params", "bake", "scene", "frame", "look_at", "light",
+             ("help", "make", "set_params", "bake", "bake_to_nodes", "scene", "frame", "look_at", "light",
               "render", "viewport", "code", "remove",
               "nodes_help", "nodes_find", "nodes_describe", "nodes_list", "nodes_read",
               "nodes_write", "nodes_apply", "nodes_check", "nodes_explain", "nodes_edit",

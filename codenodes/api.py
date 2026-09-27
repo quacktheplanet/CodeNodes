@@ -91,6 +91,28 @@ def bake(name, frame_start=None, frame_end=None):
             "error": None if ok else obj.codenodes.last_error or "bake failed"}
 
 
+def bake_to_nodes(name):
+    """Turn a Code Mesh's code into a Geometry Nodes network: no files, no GPU, evaluated
+    natively every frame, sliders kept. Needs the Expression Nodes add-on.
+
+    Code with loops, `if` statements or noise can't convert yet; the answer says so and
+    suggests Bake to Disk, and the object is left as it was.
+    """
+    from . import bake_nodes
+    obj = bpy.data.objects.get(name)
+    if obj is None or obj.codenodes.text is None or obj.codenodes.kind != 'MESH':
+        return {"ok": False, "error": f"no Code -> Mesh object named '{name}'"}
+    try:
+        tree = bake_nodes.build(obj)
+    except bake_nodes.CannotConvert as exc:
+        return {"ok": False, "error": str(exc), "fallback": "bake"}
+    from .agent import measure
+    return {"ok": True, "object": name, "group": tree.name,
+            "sliders": [i.name for i in tree.interface.items_tree
+                        if i.item_type == 'SOCKET' and i.in_out == 'INPUT'],
+            "made": measure(obj)}
+
+
 def code_to_shape(source, name="CodeShape", params=None, live_update=True):
     """A model built from a parametric description: profiles, revolve, extrude.
 

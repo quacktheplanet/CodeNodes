@@ -103,6 +103,10 @@ def bake(name, frame_start=None, frame_end=None):
     return api.bake(name, frame_start, frame_end)
 
 
+def bake_to_nodes(name):
+    return api.bake_to_nodes(name)
+
+
 def scene():
     """What is in the scene right now, and how it will render."""
     s = bpy.context.scene
