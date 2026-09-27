@@ -184,11 +184,25 @@ node group with its controls as modifier sliders, seeded so the same seed gives 
 | `wall` | a solid wall along a curve with doorways and posts; follows uneven ground and stays vertical |
 | `path_bridge` | a walkway that hugs the ground and becomes a bridge — railings, posts, pillars — wherever the ground falls away |
 | `along_curve` | things beside a curve at a spacing — lamps, benches — one side, both, or alternating |
+| `wall_network` | walls along every spline of a curve, unioned into one solid where they meet at corners, T's and crossings; doorways that keep off the junctions |
+| `rooms` | a floor plan of closed outlines → floors, walls joined where rooms touch, one doorway between each pair of rooms, windows along outside walls, an entrance |
+| `stairs` | stairs (even steps no taller than Step Height) or a ramp along a curve, between its two end heights, solid to the ground, optional side walls; straight or curved |
+| `water` | a water surface along a curve — the river for terrain's **Carve** inputs, which cut a bed (or flatten a road) along a curve and ease the banks back |
+
+![A village from the newer capabilities](docs/village_demo.jpg)
+
+*A house from a three-room floor plan, a yard of walls meeting at a T and two corners on uneven
+ground, stairs, and a river carved into the terrain with water in it:
+[`examples/village_demo.py`](examples/village_demo.py).*
 
 ```python
 agent.curve("Trail", [[-9, -44, 1], [0, -8, 1.6], [12, 44, 1]])
 agent.nodes_use("path_bridge", "Trail", {"Ground": "Ground", "Gap Depth": 1.2})
 agent.nodes_set_inputs("Trail", {"Width": 3.0})          # later: "make it wider"
+
+agent.curve("House", splines=[[[0, 0], [7, 0], [7, 5], [0, 5]],     # rooms share corners
+                              [[7, 0], [11, 0], [11, 5], [7, 5]]], cyclic=True, smooth=False)
+agent.nodes_use("rooms", "House", {"Entrance": 0})
 ```
 
 **Any node setup, as data, both ways.** The catalog is read out of Blender itself (320 node types
@@ -281,7 +295,7 @@ blender --factory-startup --python tests/test_agent.py         # the assistant-f
 blender --factory-startup --python tests/test_shape_blender.py # shapes as Blender objects (36)
 blender --factory-startup --python tests/test_server.py        # a real socket client against Blender (26)
 blender -b --factory-startup --python tests/test_gn.py         # Geometry Nodes as data, both ways (60)
-blender -b --factory-startup --python tests/test_gn_library.py # every capability; editing real trees (43)
+blender -b --factory-startup --python tests/test_gn_library.py # every capability; editing real trees (67)
 blender -b --factory-startup --python tests/test_web.py        # a scene as a web page with sliders (12)
 ```
 

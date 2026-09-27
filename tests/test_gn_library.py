@@ -3,6 +3,7 @@ do something, it survives the round trip — and editing and explaining work on 
 
     blender -b --factory-startup --python tests/test_gn_library.py     (no GPU needed)
 """
+import math
 import os
 import sys
 
@@ -30,8 +31,9 @@ def made(obj_name):
     return agent.measure(bpy.data.objects[obj_name])
 
 
-def ray(obj_name, origin, direction):
-    """Distance to the first surface an object's result has along a ray, or None."""
+def ray(obj_name, origin, direction, digits=2):
+    """Distance to the first surface an object's result has along a ray, or None.
+    In the object's own space: these objects all sit at the origin."""
     from mathutils import Vector
     from mathutils.bvhtree import BVHTree
     obj = bpy.data.objects[obj_name]
@@ -41,7 +43,25 @@ def ray(obj_name, origin, direction):
     tree = BVHTree.FromPolygons([v.co.copy() for v in mesh.vertices],
                                 [tuple(p.vertices) for p in mesh.polygons])
     hit = tree.ray_cast(Vector(origin), Vector(direction))
-    return None if hit[0] is None else round(hit[3], 2)
+    return None if hit[0] is None else round(hit[3], digits)
+
+
+def solid(obj_name):
+    """(volume, edges that are not manifold) of an object's result."""
+    import bmesh
+    dg = bpy.context.evaluated_depsgraph_get()
+    geometry = bpy.data.objects[obj_name].evaluated_get(dg).evaluated_geometry()
+    bm = bmesh.new()
+    bm.from_mesh(geometry.mesh)
+    out = (round(bm.calc_volume(), 3), sum(1 for e in bm.edges if not e.is_manifold))
+    bm.free()
+    return out
+
+
+def top(obj_name, x, y):
+    """Height of the highest surface of an object's result above (x, y)."""
+    d = ray(obj_name, (x, y, 100.0), (0, 0, -1), digits=6)
+    return None if d is None else round(100.0 - d, 3)
 
 
 def signature(info):
@@ -53,7 +73,8 @@ def main():
     codenodes.register()
     listed = agent.nodes_library()
     keys = [c["key"] for c in listed["capabilities"]]
-    check(set(keys) >= {"terrain", "scatter", "wall", "path_bridge", "along_curve"},
+    check(set(keys) >= {"terrain", "scatter", "wall", "path_bridge", "along_curve",
+                        "wall_network", "rooms", "stairs", "water"},
           f"the library lists its capabilities ({', '.join(keys)})")
     check(all(c["about"] and c["inputs"] for c in listed["capabilities"]),
           "each one says what it does and what it takes")
@@ -177,9 +198,88 @@ def main():
     check(alternating == one_side == both // 2,
           f"alternating or one side gives half as many ({alternating}, {one_side})")
 
+
+    # --- a wall network: a T and an L from four splines, joined into one solid ----------
+    agent.curve("Net", splines=[[[-5, 60, 0], [5, 60, 0]], [[0, 60, 0], [0, 65, 0]],
+                                [[10, 60, 0], [15, 60, 0]], [[15, 60, 0], [15, 65, 0]]], smooth=False)
+    got = agent.nodes_use("wall_network", "Net", {"Doorways per Wall": 0, "Footing": 0.0})
+    volume, open_edges = solid("Net")
+    # T: 10.4 + 5.0 m of 0.4 m wall, L: 5.4 + 5.0 m (ends reach 0.2 m past the drawn points)
+    check(got["ok"] and abs(volume - 30.96) < 0.01 and open_edges == 0,
+          f"walls meeting at a T and a corner join into one closed solid, no overlap "
+          f"({volume} m3, expected 30.96; {open_edges} open edges)")
+    agent.nodes_set_inputs("Net", {"Doorways per Wall": 1})
+    volume, open_edges = solid("Net")
+    check(abs(volume - (30.96 - 3 * 1.4 * 0.4 * 2.3)) < 0.01 and open_edges == 0,
+          f"a doorway in the middle of each wall, except the one that would land on the T "
+          f"({volume} m3)")
+    check(ray("Net", (-3, 62.5, 1.0), (1, 0, 0)) is None and ray("Net", (-3, 61.0, 1.0), (1, 0, 0)) == 2.8,
+          "the stem's doorway goes right through it")
+
+    # --- rooms from a floor plan: two rooms sharing a wall ------------------------------
+    agent.curve("Plan", splines=[[[0, 80, 0], [6, 80, 0], [6, 84, 0], [0, 84, 0]],
+                                 [[6, 80, 0], [10, 80, 0], [10, 84, 0], [6, 84, 0]]],
+                cyclic=True, smooth=False)
+    got = agent.nodes_use("rooms", "Plan", {"Windows": False, "Entrance": -1})
+    through = ray("Plan", (3, 82, 1.0), (1, 0, 0))
+    edges = [ray("Plan", (3, y, 1.0), (1, 0, 0)) for y in (81.54, 81.56, 82.44, 82.46)]
+    check(got["ok"] and through == 6.9 and edges == [2.9, 6.9, 6.9, 2.9],
+          f"a 0.9 m doorway through the wall the rooms share (ray {through} m; edges {edges})")
+    check(top("Plan", 3, 82) == 0.0 and top("Plan", 8, 82) == 0.0, "each room has a floor")
+    dg = bpy.context.evaluated_depsgraph_get()
+    geometry = bpy.data.objects["Plan"].evaluated_get(dg).evaluated_geometry()
+    flat = [p for p in geometry.mesh.polygons if abs(p.center.z) < 0.01 and p.area > 4.0]  # not wall bottoms
+    check(flat and all(p.normal.z > 0 for p in flat), "and the floors face up however the rooms were drawn")
+    agent.nodes_set_inputs("Plan", {"Windows": True, "Entrance": 0})
+    north = [ray("Plan", (x, 87, 1.5), (0, -1, 0)) for x in (1.5, 3.0, 4.5)]
+    check(north == [6.9, 2.9, 6.9], f"two windows along the 6 m outside wall, wall between ({north})")
+    front = ray("Plan", (3, 77, 0.5), (0, 1, 0))
+    check(front == 6.9 and ray("Plan", (1.5, 77, 1.5), (0, 1, 0)) == 2.9,
+          "the entrance replaces the windows on the first outside wall")
+
+    # --- stairs and a ramp ----------------------------------------------------------------
+    agent.curve("Flight", [[0, 100, 0], [6, 100, 3]], smooth=False)
+    got = agent.nodes_use("stairs", "Flight")
+    treads = [top("Flight", x, 100) for x in (0.1, 1.0, 3.0, 5.9)]
+    # 3 m in steps of at most 0.18 m: 17 steps of 3/17 m
+    check(got["ok"] and treads == [0.176, 0.529, 1.588, 3.0] and solid("Flight")[1] == 0,
+          f"17 even steps up to the top of the curve ({treads})")
+    agent.nodes_set_inputs("Flight", {"Ramp": True, "Side Walls": True})
+    slope = [top("Flight", x, 100) for x in (0.5, 3.0, 5.5)]
+    check(slope == [0.25, 1.5, 2.75] and abs(solid("Flight")[0] - 16.92) < 0.01,
+          f"a ramp climbs evenly, solid down to the start, with side walls ({slope}, "
+          f"{solid('Flight')[0]} m3)")
+    agent.curve("Turn", [[4 * math.cos(a / 10), 120 + 4 * math.sin(a / 10), 3.0 * a / 31] for a in range(32)],
+                smooth=False)
+    got = agent.nodes_use("stairs", "Turn")
+    check(got["ok"] and solid("Turn")[1] == 0 and abs(got["made"]["size"][2] - 3.0) < 0.01,
+          "a curved flight works too")
+
+    # --- a river carved into the ground, with water ---------------------------------------
+    land = agent.nodes_use("terrain", values={"Size": 60, "Resolution": 121, "Height": 4, "Seed": 2},
+                           name="CN Terrain")["object"]
+    before = [top(land, x, 0) for x in (-20, 0, 20)]
+    far_before = top(land, 0, 20)
+    agent.curve("River", [[-30, 0, 0], [0, 0, 0.5], [30, 0, 1.0]], smooth=False)
+    got = agent.nodes_set_inputs(land, {"Carve Along": "River", "Carve Width": 4, "Carve Depth": 1.5,
+                                        "Bank Width": 3})
+    bed = [top(land, x, 0) for x in (-20, 0, 20)]
+    check(got["ok"] and bed == [-1.333, -1.0, -0.667],
+          f"the bed follows the river's curve, 1.5 m below it ({before} -> {bed})")
+    check(top(land, 0, 20) == far_before, "and the ground away from it is untouched")
+    got = agent.nodes_use("water", "River", {"Width": 5, "Level": -1.0})
+    check(got["ok"] and top("River", 0, 0) == -0.5, "water lies along the river at its level")
+    check([top(land, x, 0) for x in (-20, 0, 20)] == bed,
+          "and the ground still finds the river's curve under its water")
+    agent.nodes_set_inputs(land, {"Carve Along": None})
+    check([top(land, x, 0) for x in (-20, 0, 20)] == before, "with no curve the ground is as it was")
+    agent.nodes_set_inputs(land, {"Carve Along": "River"})
+
     # every capability's tree survives the round trip, geometry for geometry
     hosts = {"CN Terrain": ground, "CN Scatter": "Carpet", "CN Wall Along Curve": "Courtyard",
-             "CN Path and Bridge": "Trail", "CN Props Along Curve": "Lamps"}
+             "CN Path and Bridge": "Trail", "CN Props Along Curve": "Lamps",
+             "CN Wall Network": "Net", "CN Rooms": "Plan", "CN Stairs": "Flight",
+             "CN Water Along Curve": "River"}
     for group, host in hosts.items():
         before = signature(made(host))
         tree = bpy.data.node_groups[group]

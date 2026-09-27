@@ -189,9 +189,11 @@ def nodes_help() -> dict:
 
 @mcp.tool()
 def nodes_library() -> dict:
-    """Ready-made, tested world-building capabilities — terrain, scatter, walls with
-    doorways, paths that become bridges over gaps, props along a curve — with every
-    input, its range and what it does. Compose these before writing nodes from scratch."""
+    """Ready-made, tested world-building capabilities — terrain (with river and road
+    carving), scatter, walls with doorways, wall networks joined at corners and T's, rooms
+    from a floor plan, stairs and ramps, paths that become bridges over gaps, props along a
+    curve, water — with every input, its range and what it does. Compose these before
+    writing nodes from scratch."""
     return _call("nodes_library")
 
 
@@ -201,8 +203,8 @@ def nodes_use(capability: str, object: str = "", values: dict | None = None,
     """Build a capability from nodes_library and put it on an object, inputs set by name,
     e.g. nodes_use("wall", "Courtyard", {"Height": 4, "Doorways": 2}).
 
-    Leave object empty for a new object. Curve-following ones (wall, path_bridge,
-    along_curve) go on a curve object — make one with `curve`. Object, collection and
+    Leave object empty for a new object. Curve-following ones (wall, wall_network, rooms,
+    stairs, water, path_bridge, along_curve) go on a curve object — make one with `curve`. Object, collection and
     material inputs take a name. Reports what geometry came out.
     """
     args = {"capability": capability, "values": values or {}}
@@ -224,10 +226,20 @@ def nodes_set_inputs(object: str, values: dict, modifier: str = "") -> dict:
 
 
 @mcp.tool()
-def curve(name: str, points: list, cyclic: bool = False, smooth: bool = True) -> dict:
+def curve(name: str, points: list | None = None, cyclic: bool = False, smooth: bool = True,
+          splines: list | None = None) -> dict:
     """Make or reshape a curve object through points [[x, y, z], ...] — the line of a
-    path, a wall, a river. smooth=False gives straight segments with sharp corners."""
-    return _call("curve", name=name, points=points, cyclic=cyclic, smooth=smooth)
+    path, a wall, a river. smooth=False gives straight segments with sharp corners.
+
+    splines=[[[x, y, z], ...], [[x, y, z], ...]] puts several in one object instead: a
+    network of walls for wall_network, or room outlines for rooms (cyclic=True,
+    smooth=False; rooms that share a wall share its two corner points)."""
+    args = {"name": name, "cyclic": cyclic, "smooth": smooth}
+    if splines is not None:
+        args["splines"] = splines
+    else:
+        args["points"] = points
+    return _call("curve", **args)
 
 
 @mcp.tool()
