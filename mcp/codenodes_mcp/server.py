@@ -132,6 +132,25 @@ def web_page(path: str, sliders: list | None = None, objects: list | None = None
 
 
 @mcp.tool()
+def web_shape(path: str, object: str = "", source: str = "", title: str = "", subtitle: str = "",
+              colors: dict | None = None, color: list | None = None, roughness: float = 0.45,
+              metalness: float = 0.0) -> dict:
+    """Write a Code Shape as one web page that rebuilds it in the browser as its sliders
+    move — any value, nothing baked. Give the shape object (its code and tuned sliders)
+    or the shape-language source. colors: {part name: [r, g, b]} (0-1).
+
+    A shape whose parts cut other parts (subtract, intersect) needs Blender, so it is
+    refused: use web_page for that. Bevels are left off on the page.
+    """
+    args = {"path": path, "subtitle": subtitle, "roughness": roughness, "metalness": metalness}
+    for key, value in (("object", object), ("source", source), ("title", title),
+                       ("colors", colors), ("color", color)):
+        if value:
+            args[key] = value
+    return _call("web_shape", **args)
+
+
+@mcp.tool()
 def collect(name: str, objects: list, parent: str = "", keep_in_scene: bool = False) -> dict:
     """Put objects in a collection — assets to scatter from (keep_in_scene=False takes the
     originals out of the scene so they do not render), or a named group such as everything

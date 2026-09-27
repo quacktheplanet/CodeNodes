@@ -47,6 +47,7 @@ The server process finds the token by itself from Blender's config folder. Overr
 | `look_at`, `light`, `set_frame` | aim the camera, light the scene, move the timeline |
 | `render`, `viewport` | **a picture back**, so the assistant can judge its own work |
 | `bake` | write the animation to disk so it renders anywhere |
+| `web_shape` | a Code Shape as a page that rebuilds it live in the browser, at any slider value |
 | `remove`, `status` | delete an object; check the link |
 
 ## What it cannot do

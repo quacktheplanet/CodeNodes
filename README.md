@@ -234,6 +234,24 @@ sliders that change the same objects are baked as combinations, so the page neve
 that could not exist. Everything else is exported once. [`examples/web_demo.py`](examples/web_demo.py)
 turns the level above into a 5.8 MB page with four sliders, and [`examples/web_simple.py`](examples/web_simple.py) makes a small one: a single courtyard wall with two.
 
+**Code Shapes go live instead.** A shape is our own small language, so the browser can build it
+itself: `agent.web_shape` (MCP `web_shape`) writes a page carrying the shape's text and a
+JavaScript copy of the builder, and every slider rebuilds the mesh as it moves, at any value —
+nothing baked, about 60 KB. The lamp template rebuilds in 5-10 ms.
+
+```python
+agent.make("shape", TEMPLATE, name="Lamp")
+agent.web_shape("lamp.html", object="Lamp", colors={"shade": [0.9, 0.55, 0.2]})
+```
+
+![The lamp template as a live page](docs/shape_page.jpg)
+
+The JavaScript (`codenodes/shapes/shapes.js`) is a line-for-line port, and
+`tests/test_shape_js.py` holds it to the Python: every command, at several slider values, gives
+the same vertices to float32 precision and the same faces in the same order, and mistakes are
+reported on the same line. Parts that cut other parts (`subtract`, `intersect`) need Blender's
+boolean solver, so those shapes are refused (bake them with `web_page`); bevels are left off.
+
 ## Animation, and making it render
 
 There are three phases; the first two are built (see `docs/ROADMAP.md`).
@@ -269,7 +287,8 @@ api.bake("Blob", 1, 48)     # same thing from a script or from Claude
 ```bash
 python tests/test_mesher.py                                    # mesher, no Blender (17 checks)
 python tests/test_graph.py                                     # graph compiler, no Blender (16)
-python tests/test_shapes.py                                    # maths, the kernel, the language (97)
+python tests/test_shapes.py                                    # maths, the kernel, the language (98)
+python tests/test_shape_js.py                                  # the browser's copy builds exactly what Python does (23)
 python tests/test_rpc.py                                       # the MCP wire protocol, no Blender (29)
 blender --factory-startup --python tests/test_blender.py       # needs a window: the GPU isn't available with -b (27)
 blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (30)
@@ -282,7 +301,8 @@ blender --factory-startup --python tests/test_shape_blender.py # shapes as Blend
 blender --factory-startup --python tests/test_server.py        # a real socket client against Blender (26)
 blender -b --factory-startup --python tests/test_gn.py         # Geometry Nodes as data, both ways (60)
 blender -b --factory-startup --python tests/test_gn_library.py # every capability; editing real trees (43)
-blender -b --factory-startup --python tests/test_web.py        # a scene as a web page with sliders (12)
+blender -b --factory-startup --python tests/test_web.py        # a scene as a web page with sliders; a live shape page (16)
+node tests/web_shape_check.mjs <page folder>                   # that page in headless Edge: builds and rebuilds as Python does (7)
 ```
 
 Run `test_bake.py` before `test_farm.py`: the first saves the .blend the second opens.
