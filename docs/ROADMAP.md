@@ -169,6 +169,44 @@ drive real solvers and CAD, not stand in for them.
     emissive geometry, and a light-meter reading Cycles passes (design guidance, not certified
     photometry).
 
+**P2.5 — the Geometry Nodes agent** (started 2026-09-26; see `docs/RESEARCH.md`)
+
+The goal in the user's words: *"talk to Claude and have it build me a geometry node setup,
+understand it entirely, and edit it on the fly."*
+
+- ~~**Catalog**~~ **done.** `codenodes/gn/catalog.py` reads every node type out of Blender itself
+  (320 here: 245 geometry, 49 function, 26 shader), with each socket's type, **whether it takes a
+  field** (`display_shape` is a diamond) and what each dropdown accepts. Nothing hand-maintained.
+- ~~**Round trip**~~ **done.** `gn/serialize.py` reads a tree to plain JSON-able data and writes it
+  back: settings, unconnected values, links by socket identifier, frames, the group interface with
+  panels and ranges, and zone pairing. Verified by rebuilding a tree and getting *identical*
+  geometry, and by read → write → read being stable.
+- ~~**Tools**~~ **done.** `nodes_help`, `nodes_find`, `nodes_describe`, `nodes_list`, `nodes_read`,
+  `nodes_write`, `nodes_apply`, `nodes_check` — in `agent.py`, the socket server and the MCP server.
+  `nodes_check` reports what geometry actually came out, and says so when nothing did.
+
+  Next: a **capability library** (hoverrace-prockit's pattern — one function per capability, typed
+  sockets, a mandatory `seed`, smoke and golden tests), starting with the three the research
+  picked out: curve-to-modular-wall with a junction socket, a path system that tells a gap from
+  ground, and a seeded scatter with stable-ID variation. Then a generated **manifest** so the agent
+  can discover what exists.
+
+**P2.6 — headless Blender to the web** (the user's idea, 2026-09-26)
+
+Run Blender with no window, build the geometry, and publish it as an interactive page — three.js,
+with sliders for the parameters. His **webblend** repo is the start of this (a scene → HTML/CSS
+exporter, currently a skeleton).
+
+Worth noting how close it already is: a shape description and a node tree are both **plain data
+with declared parameters**, so the page can expose exactly those as sliders. Two honest routes:
+- **bake** each parameter combination to glTF and switch between them — simple, limited;
+- **re-evaluate** in the browser — needs the generator ported to JS, which is realistic for the
+  shape language (it is our own small language) and not for Geometry Nodes.
+
+So: shapes first, with real sliders; node setups exported as glTF with a turntable and a few baked
+variants. The pieces we need — an evaluator that is already data-driven, and a way to publish a
+page — both exist.
+
 **P3 — bigger simulations**
 11. **Field output** (vector grids that GN simulations and hair can sample).
 12. **GPU smoke solver** (advect, pressure solve, project; sources, forces and SDF obstacles as nodes).

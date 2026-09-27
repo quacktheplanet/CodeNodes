@@ -247,6 +247,137 @@ def viewport(path=None):
     return {"ok": True, "path": out, "exists": os.path.exists(out)}
 
 
+# ---- Geometry Nodes ---------------------------------------------------------------------
+# Blender's own nodes, read and written as plain data, so a setup can be built, understood
+# and edited rather than only generated.
+
+def nodes_help():
+    """How many node types there are, where the stateful ones are, and how to read a tree."""
+    from .gn import catalog
+    info = catalog.summary()
+    info["how"] = ("nodes_find(words) to look up node types; nodes_read(group) for an existing "
+                   "tree as plain data; change that data and pass it to nodes_write to edit it; "
+                   "nodes_check(group) to see what geometry comes out.")
+    return info
+
+
+def nodes_find(words="", detail=False, limit=40):
+    """Look up node types by plain words — 'distribute points', 'curve to mesh', 'noise'.
+
+    With detail=True each one comes back with its sockets, which of them take a field,
+    and what its dropdowns accept.
+    """
+    from .gn import catalog
+    return catalog.search(words, limit=limit, detail=detail)
+
+
+def nodes_describe(name):
+    """One node type in full: every socket, whether it takes a field, and its settings."""
+    from .gn import catalog
+    return {"ok": "error" not in catalog.describe(name), **catalog.describe(name)}
+
+
+def nodes_list():
+    """The node groups in this file."""
+    groups = []
+    for tree in bpy.data.node_groups:
+        groups.append({"name": tree.name, "kind": tree.bl_idname, "nodes": len(tree.nodes),
+                       "users": tree.users,
+                       "inputs": [i.name for i in tree.interface.items_tree
+                                  if i.item_type == 'SOCKET' and i.in_out == 'INPUT']})
+    return {"ok": True, "groups": groups}
+
+
+def nodes_read(group):
+    """An existing node tree as plain data — every node, setting, value and link."""
+    from .gn import serialize
+    tree = bpy.data.node_groups.get(group)
+    if tree is None:
+        return {"ok": False, "error": f"no node group called '{group}'. "
+                                      f"There is: {', '.join(t.name for t in bpy.data.node_groups) or 'nothing'}"}
+    return {"ok": True, **serialize.read(tree)}
+
+
+def nodes_write(description, name=None, apply_to=None):
+    """Build a node tree from plain data, replacing one of the same name.
+
+    To edit rather than replace: nodes_read it, change the part you want, pass it back.
+    """
+    from .gn import serialize
+    from .sdf_code import SdfCodeError
+    try:
+        tree = serialize.write(description, name=name)
+    except (serialize.BuildError, SdfCodeError) as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    result = {"ok": True, "group": tree.name, "nodes": len(tree.nodes), "links": len(tree.links)}
+    if apply_to:
+        result["applied"] = nodes_apply(apply_to, tree.name)
+    return result
+
+
+def nodes_apply(object_name, group):
+    """Put a node group on an object as a Geometry Nodes modifier."""
+    obj = bpy.data.objects.get(object_name)
+    tree = bpy.data.node_groups.get(group)
+    if obj is None:
+        return {"ok": False, "error": f"no object called '{object_name}'"}
+    if tree is None:
+        return {"ok": False, "error": f"no node group called '{group}'"}
+    mod = next((m for m in obj.modifiers if m.type == 'NODES' and m.node_group == tree), None)
+    if mod is None:
+        mod = obj.modifiers.new(group, 'NODES')
+        mod.node_group = tree
+    return {"ok": True, "object": obj.name, "group": tree.name, "modifier": mod.name}
+
+
+def nodes_check(group, on=None):
+    """Build the group on an object and report what geometry actually comes out.
+
+    The quickest way to tell whether a setup does anything at all.
+    """
+    from .gn import serialize
+    tree = bpy.data.node_groups.get(group)
+    if tree is None:
+        return {"ok": False, "error": f"no node group called '{group}'"}
+    temporary = None
+    obj = bpy.data.objects.get(on) if on else None
+    if obj is None:
+        temporary = bpy.data.objects.new(f"{group} check", bpy.data.meshes.new("check"))
+        bpy.context.scene.collection.objects.link(temporary)
+        obj = temporary
+        mod = obj.modifiers.new("check", 'NODES')
+        mod.node_group = tree
+    try:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        depsgraph.update()
+        evaluated = obj.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        verts, faces = len(mesh.vertices), len(mesh.polygons)
+        size = [0.0, 0.0, 0.0]
+        if verts:
+            import numpy as np
+            co = np.empty(verts * 3, np.float32)
+            mesh.vertices.foreach_get("co", co)
+            size = [round(float(v), 3) for v in np.ptp(co.reshape(-1, 3), axis=0)]
+        evaluated.to_mesh_clear()
+        note = None
+        if not verts:
+            note = ("nothing came out. Common causes: instances were never realized, a "
+                    "Group Output is not connected, or a selection removed everything.")
+        return {"ok": True, "group": group, "verts": verts, "faces": faces, "size": size,
+                "note": note}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    finally:
+        if temporary is not None:
+            data = temporary.data
+            bpy.data.objects.remove(temporary, do_unlink=True)
+            if data.users == 0:
+                bpy.data.meshes.remove(data)
+
+
 def code(name):
     """The code currently driving an object, so it can be edited rather than replaced."""
     obj = bpy.data.objects.get(name)

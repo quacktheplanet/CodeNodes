@@ -162,6 +162,25 @@ Assistant › Start) and point your MCP client at `mcp/` — see [mcp/README.md]
 It is localhost-only, needs a token, and **has no way to run arbitrary code in Blender**: the add-on
 answers only the names in its own tool table.
 
+## Blender's own Geometry Nodes, as data
+
+`codenodes.gn` lets an assistant work with ordinary Geometry Nodes — not just CodeNodes geometry:
+
+```python
+agent.nodes_find("distribute points")     # what node types exist, and what they take
+agent.nodes_read("MyGroup")               # an existing tree as plain JSON-able data
+agent.nodes_write(data, name="MyGroup")   # change that data and write it back
+agent.nodes_check("MyGroup")              # what geometry actually came out
+```
+
+The catalog is read out of Blender itself — 320 node types here — and records, for every socket,
+**whether it accepts a field or only a single value**. That distinction is the most common way a
+node setup goes wrong, and it turns out to be machine-readable.
+
+The round trip is lossless: settings, unconnected values, links, frames, the group interface with
+its panels and ranges, and simulation-zone pairing. Rebuilding a tree from its data produces
+identical geometry, which is what makes *editing* an existing setup safe rather than destructive.
+
 ## Animation, and making it render
 
 There are three phases; the first two are built (see `docs/ROADMAP.md`).

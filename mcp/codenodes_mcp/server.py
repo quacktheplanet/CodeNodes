@@ -136,6 +136,71 @@ def remove(name: str, delete_cache: bool = False) -> dict:
 
 
 @mcp.tool()
+def nodes_help() -> dict:
+    """Start here for Geometry Nodes: how many node types exist and how to work with them."""
+    return _call("nodes_help")
+
+
+@mcp.tool()
+def nodes_find(words: str = "", detail: bool = False, limit: int = 40) -> dict:
+    """Look up Blender node types by plain words — "distribute points", "curve to mesh".
+
+    With detail=True you get each one's sockets, which take a field, and what its
+    dropdowns accept. Use this instead of guessing socket names.
+    """
+    return _call("nodes_find", words=words, detail=detail, limit=limit)
+
+
+@mcp.tool()
+def nodes_describe(name: str) -> dict:
+    """One node type in full, e.g. "GeometryNodeDistributePointsOnFaces"."""
+    return _call("nodes_describe", name=name)
+
+
+@mcp.tool()
+def nodes_list() -> dict:
+    """The node groups in the open file."""
+    return _call("nodes_list")
+
+
+@mcp.tool()
+def nodes_read(group: str) -> dict:
+    """An existing node tree as plain data: every node, setting, value and link.
+
+    This is how to understand a setup before changing it.
+    """
+    return _call("nodes_read", group=group)
+
+
+@mcp.tool()
+def nodes_write(description: dict, name: str = "", apply_to: str = "") -> dict:
+    """Build a node tree from plain data, replacing any group of the same name.
+
+    To edit rather than replace: nodes_read it, change that data, pass it back here.
+    Mistakes come back as {"ok": false, "error": "... has no output 'X'. It has: ..."}.
+    """
+    args = {"description": description}
+    if name:
+        args["name"] = name
+    if apply_to:
+        args["apply_to"] = apply_to
+    return _call("nodes_write", **args)
+
+
+@mcp.tool()
+def nodes_apply(object_name: str, group: str) -> dict:
+    """Put a node group on an object as a Geometry Nodes modifier."""
+    return _call("nodes_apply", object_name=object_name, group=group)
+
+
+@mcp.tool()
+def nodes_check(group: str, on: str = "") -> dict:
+    """Build a group and report what geometry actually comes out — the quickest way to
+    tell whether it does anything."""
+    return _call("nodes_check", group=group, **({"on": on} if on else {}))
+
+
+@mcp.tool()
 def status() -> dict:
     """Check the link to Blender: whether it is listening, and what it has served."""
     return _call("status")
