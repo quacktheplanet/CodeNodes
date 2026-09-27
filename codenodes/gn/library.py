@@ -13,6 +13,7 @@ seeded (the same seed gives the same result) and documented through their inputs
     along_curve      things beside a curve at a steady spacing: lamps, benches, fences
     wall_network     walls along every spline of a curve, joined at corners and T's
     rooms            a floor plan of closed outlines -> floors, walls, doorways, windows
+    roof             flat, gable or hip, on top of whatever the object already has
     stairs           stairs or a ramp along a curve between its two end heights
     water            a water surface along a curve (a river carved with terrain's Carve)
 
@@ -1077,4 +1078,63 @@ def water():
     # still finds it (another object sees this one's result, not the curve it was drawn as)
     guide = g.node("GeometryNodeSetCurveRadius", {"Curve": curve, "Radius": 0.0})["Curve"]
     g.output("Geometry", "geometry", g.join(surface, guide))
+    return g
+
+
+@capability("roof")
+def roof():
+    g = Graph("CN Roof", "A roof over whatever the object already has — put it after rooms (or "
+                         "walls) on the same object and it sits on top: flat, gable, or hip with "
+                         "equal pitch all round, spanning the footprint's longer side, with an "
+                         "overhang. For rectangular footprints; an L-shaped plan gets one roof "
+                         "over its whole outline.")
+    geo = g.input("Geometry", "geometry")
+    style = g.input("Style", "int", 2, 0, 2, "0 flat, 1 gable, 2 hip")
+    pitch = g.input("Pitch", "float", 0.61, 0.05, 1.4, "how steep the slopes are", subtype="ANGLE")
+    over = g.input("Overhang", "float", 0.4, 0.0, 10.0, "how far the eaves reach past the walls",
+                   subtype="DISTANCE")
+    slab = g.input("Flat Thickness", "float", 0.25, 0.01, 5.0, "for the flat style", subtype="DISTANCE")
+    roof_mat = g.input("Material", "material")
+
+    box = g.node("GeometryNodeBoundBox", {"Geometry": geo})
+    lo, hi = g.separate(box["Min"]), g.separate(box["Max"])
+    sx, sy = g.math("SUBTRACT", hi["X"], lo["X"]), g.math("SUBTRACT", hi["Y"], lo["Y"])
+    along_x = g.compare("GREATER_EQUAL", sx, sy)
+    twice = g.math("MULTIPLY", over, 2.0)
+    length = g.math("ADD", g.math("MAXIMUM", sx, sy), twice)
+    width = g.math("ADD", g.math("MINIMUM", sx, sy), twice)
+    half_l, half_w = g.math("MULTIPLY", length, 0.5), g.math("MULTIPLY", width, 0.5)
+    rise = g.math("MULTIPLY", half_w, g.math("TANGENT", pitch))
+
+    line = _upright(g, g.node("GeometryNodeCurvePrimitiveLine",
+                              {"Start": g.xyz(g.math("MULTIPLY", half_l, -1.0), 0, 0),
+                               "End": g.xyz(half_l, 0, 0)})["Curve"])
+    # swept profiles point Y down (see `wall`), so the ridge is at y = -rise
+    gable = g.node("GeometryNodeCurvePrimitiveQuadrilateral",
+                   {"Point 1": g.xyz(g.math("MULTIPLY", half_w, -1.0), 0, 0),
+                    "Point 2": g.xyz(0, g.math("MULTIPLY", rise, -1.0), 0),
+                    "Point 3": g.xyz(half_w, 0, 0), "Point 4": (0.0, 0.0, 0.0)}, mode="POINTS")["Curve"]
+    flat = g.node("GeometryNodeTransform",
+                  {"Geometry": g.node("GeometryNodeCurvePrimitiveQuadrilateral",
+                                      {"Width": width, "Height": slab})["Curve"],
+                   "Translation": g.xyz(0, g.math("MULTIPLY", slab, -0.5), 0)})["Geometry"]
+    is_flat = g.compare("EQUAL", style, 0, "INT")
+    prism = g.node("GeometryNodeCurveToMesh",
+                   {"Curve": line, "Profile Curve": g.switch("GEOMETRY", is_flat, gable, flat),
+                    "Fill Caps": True})["Mesh"]
+    # hip: the ridge's two ends move in by half the width, so every slope has the same pitch
+    here = g.separate(g.position())
+    ridge = g.logic("AND", g.compare("EQUAL", style, 2, "INT"),
+                    g.compare("GREATER_THAN", here["Z"], g.math("MULTIPLY", rise, 0.999)))
+    hipped = g.node("GeometryNodeSetPosition",
+                    {"Geometry": prism, "Selection": ridge,
+                     "Offset": g.xyz(g.math("MULTIPLY", g.math("SIGN", here["X"]),
+                                            g.math("MULTIPLY", half_w, -1.0)), 0, 0)})["Geometry"]
+    merged = g.node("GeometryNodeMergeByDistance", {"Geometry": hipped, "Distance": 0.0001})["Geometry"]
+    placed = g.node("GeometryNodeTransform",
+                    {"Geometry": merged,
+                     "Translation": g.xyz(g.math("MULTIPLY", g.math("ADD", lo["X"], hi["X"]), 0.5),
+                                          g.math("MULTIPLY", g.math("ADD", lo["Y"], hi["Y"]), 0.5), hi["Z"]),
+                     "Rotation": g.xyz(0, 0, g.switch("FLOAT", along_x, 1.5707963, 0.0))})["Geometry"]
+    g.output("Geometry", "geometry", g.join(geo, _material(g, _flat_shaded(g, placed), roof_mat)))
     return g

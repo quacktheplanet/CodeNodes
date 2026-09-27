@@ -45,6 +45,8 @@ agent.curve("House", splines=[
     [[0, 5, z], [11, 5, z], [11, 9, z], [0, 9, z]]], cyclic=True, smooth=False)
 agent.nodes_use("rooms", "House", {"Wall Material": "Plaster", "Floor Material": "Planks",
                                    "Entrance": 0})
+agent.material("Tiles", [0.36, 0.13, 0.08], roughness=0.6, variation=0.3, variation_scale=6.0)
+agent.nodes_use("roof", "House", {"Style": 2, "Material": "Tiles"})
 
 # a yard wall: a network of walls meeting at corners and a T
 agent.curve("Yard", splines=[[[-12, -3, z], [-12, 12, z]], [[-12, 12, z], [-2, 12, z]],

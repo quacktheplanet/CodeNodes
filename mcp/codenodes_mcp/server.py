@@ -191,7 +191,7 @@ def nodes_help() -> dict:
 def nodes_library() -> dict:
     """Ready-made, tested world-building capabilities — terrain (with river and road
     carving), scatter, walls with doorways, wall networks joined at corners and T's, rooms
-    from a floor plan, stairs and ramps, paths that become bridges over gaps, props along a
+    from a floor plan, roofs, stairs and ramps, paths that become bridges over gaps, props along a
     curve, water — with every input, its range and what it does. Compose these before
     writing nodes from scratch."""
     return _call("nodes_library")

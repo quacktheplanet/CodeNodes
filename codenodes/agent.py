@@ -379,7 +379,7 @@ Working with Geometry Nodes here:
 
 1. Look before you build. nodes_library() lists ready-made, tested capabilities (terrain
    with river/road carving, scatter, walls and wall networks, rooms from a floor plan,
-   stairs, bridges over gaps, water…); nodes_use builds one. Prefer composing those over
+   roofs, stairs, bridges over gaps, water…); nodes_use builds one. Prefer composing those over
    writing everything from scratch. A floor plan or wall network is one curve object with
    several splines: curve(name, splines=[[...], [...]]).
 2. nodes_find("words") finds node types; nodes_describe(type) gives exact socket names,

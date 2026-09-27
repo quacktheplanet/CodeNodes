@@ -74,7 +74,7 @@ def main():
     listed = agent.nodes_library()
     keys = [c["key"] for c in listed["capabilities"]]
     check(set(keys) >= {"terrain", "scatter", "wall", "path_bridge", "along_curve",
-                        "wall_network", "rooms", "stairs", "water"},
+                        "wall_network", "rooms", "roof", "stairs", "water"},
           f"the library lists its capabilities ({', '.join(keys)})")
     check(all(c["about"] and c["inputs"] for c in listed["capabilities"]),
           "each one says what it does and what it takes")
@@ -237,6 +237,21 @@ def main():
     check(front == 6.9 and ray("Plan", (1.5, 77, 1.5), (0, 1, 0)) == 2.9,
           "the entrance replaces the windows on the first outside wall")
 
+    # --- a roof on top of the rooms: same object, the next modifier ----------------------
+    got = agent.nodes_use("roof", "Plan", {"Style": 1, "Pitch": math.radians(35), "Overhang": 0.4})
+    ridge = 2.8 + 2.5 * math.tan(math.radians(35))       # 4.2 m of walls + 0.8 m of eaves, halved
+    gable = [top("Plan", x, 82) for x in (5.0, 1.0, -0.3)]
+    check(got["ok"] and all(abs(z - ridge) < 0.002 for z in gable) and abs(got["made"]["size"][0] - 11.0) < 0.01,
+          f"a gable roof sits on the walls, its ridge at {ridge:.3f} m, eaves 0.4 m out ({gable})")
+    agent.nodes_set_inputs("Plan", {"Style": 2}, modifier=got["modifier"])
+    hip = [top("Plan", x, 82) for x in (5.0, 1.0, -0.3)]
+    want = [ridge, 2.8 + 1.5 * math.tan(math.radians(35)), 2.8 + 0.2 * math.tan(math.radians(35))]
+    check(all(abs(a - b) < 0.002 for a, b in zip(hip, want)),
+          f"a hip roof slopes at the same pitch at the ends ({hip})")
+    agent.nodes_set_inputs("Plan", {"Style": 0}, modifier=got["modifier"])
+    check(abs(top("Plan", 5.0, 82) - 3.05) < 0.002, "and a flat one is a slab on top")
+    agent.nodes_set_inputs("Plan", {"Style": 2}, modifier=got["modifier"])
+
     # --- stairs and a ramp ----------------------------------------------------------------
     agent.curve("Flight", [[0, 100, 0], [6, 100, 3]], smooth=False)
     got = agent.nodes_use("stairs", "Flight")
@@ -278,7 +293,7 @@ def main():
     # every capability's tree survives the round trip, geometry for geometry
     hosts = {"CN Terrain": ground, "CN Scatter": "Carpet", "CN Wall Along Curve": "Courtyard",
              "CN Path and Bridge": "Trail", "CN Props Along Curve": "Lamps",
-             "CN Wall Network": "Net", "CN Rooms": "Plan", "CN Stairs": "Flight",
+             "CN Wall Network": "Net", "CN Rooms": "Plan", "CN Roof": "Plan", "CN Stairs": "Flight",
              "CN Water Along Curve": "River"}
     for group, host in hosts.items():
         before = signature(made(host))
