@@ -162,24 +162,59 @@ Assistant › Start) and point your MCP client at `mcp/` — see [mcp/README.md]
 It is localhost-only, needs a token, and **has no way to run arbitrary code in Blender**: the add-on
 answers only the names in its own tool table.
 
-## Blender's own Geometry Nodes, as data
+## Geometry Nodes, built and edited by an assistant
 
-`codenodes.gn` lets an assistant work with ordinary Geometry Nodes — not just CodeNodes geometry:
+![A level built entirely through the tools](docs/level_demo.jpg)
+
+*Terrain with a canyon, a trail that turns into a bridge where it crosses, a walled courtyard that
+follows the ground, a forest that keeps clear of both, lamps along the trail — and the trees and
+lamps modelled in the shape language. Every step was one tool call:
+[`examples/level_demo.py`](examples/level_demo.py). Built in under a second, rendered in 11.*
+
+`codenodes.gn` lets an assistant work with ordinary Geometry Nodes — build a setup, understand
+one that already exists, and change part of it without disturbing the rest.
+
+**A library of tested capabilities** to compose rather than write from nothing. Each is an ordinary
+node group with its controls as modifier sliders, seeded so the same seed gives the same result:
+
+| capability | what it does |
+|---|---|
+| `terrain` | rolling ground from noise; an optional winding canyon; rock on anything steeper than Cliff Angle |
+| `scatter` | trees, rocks, props over a surface, kept off steep slopes and clear of paths and buildings, picked from a collection |
+| `wall` | a solid wall along a curve with doorways and posts; follows uneven ground and stays vertical |
+| `path_bridge` | a walkway that hugs the ground and becomes a bridge — railings, posts, pillars — wherever the ground falls away |
+| `along_curve` | things beside a curve at a spacing — lamps, benches — one side, both, or alternating |
 
 ```python
-agent.nodes_find("distribute points")     # what node types exist, and what they take
-agent.nodes_read("MyGroup")               # an existing tree as plain JSON-able data
-agent.nodes_write(data, name="MyGroup")   # change that data and write it back
-agent.nodes_check("MyGroup")              # what geometry actually came out
+agent.curve("Trail", [[-9, -44, 1], [0, -8, 1.6], [12, 44, 1]])
+agent.nodes_use("path_bridge", "Trail", {"Ground": "Ground", "Gap Depth": 1.2})
+agent.nodes_set_inputs("Trail", {"Width": 3.0})          # later: "make it wider"
 ```
 
-The catalog is read out of Blender itself — 320 node types here — and records, for every socket,
-**whether it accepts a field or only a single value**. That distinction is the most common way a
-node setup goes wrong, and it turns out to be machine-readable.
+**Any node setup, as data, both ways.** The catalog is read out of Blender itself (320 node types
+here) and says for every socket **whether it can take a field or only a single value** — the most
+common way a setup goes wrong — and, for Blender 5's menu sockets, what the choices are.
 
-The round trip is lossless: settings, unconnected values, links, frames, the group interface with
-its panels and ranges, and simulation-zone pairing. Rebuilding a tree from its data produces
-identical geometry, which is what makes *editing* an existing setup safe rather than destructive.
+```python
+agent.nodes_find("distribute points")     # what exists, and exactly what it takes
+agent.nodes_write(description)            # build a tree from plain data; sockets named plainly
+agent.nodes_explain("MyGroup")            # an existing tree in words, in flow order
+agent.nodes_edit("MyGroup", [{"op": "insert", "node": {...}, "between": {...}}])
+agent.nodes_check("MyGroup")              # what came out: mesh, curves, points, instances, size
+```
+
+- **The round trip is lossless**, including the parts that usually break: nodes whose sockets you
+  add yourself (Capture Attribute, Repeat and Simulation zones, Menu and Index Switch), whose
+  socket identifiers are *not* stable across a rebuild; groups inside groups; panels. Every
+  capability rebuilds from its own data to identical geometry.
+- **Edits are all or nothing** — tried on a copy first — and keep the group's socket identifiers,
+  so values tuned on the modifier survive. A full rewrite preserves them by name.
+- **Mistakes are explained in terms of the node**: *"'Value' is a field (it varies per element)
+  but 'Vertices X' on 'grid' takes a single value"*, or *"'grid' has no input 'Sise'. It has:
+  Size, Vertices X…"*.
+
+The same tools are MCP tools, alongside `material`, `collect`, `curve`, `light("outdoor")`,
+`look_at` and `render`, so an assistant can build a scene, look at it and fix what it sees.
 
 ## Animation, and making it render
 
@@ -215,18 +250,20 @@ api.bake("Blob", 1, 48)     # same thing from a script or from Claude
 
 ```bash
 python tests/test_mesher.py                                    # mesher, no Blender (17 checks)
-python tests/test_graph.py                                     # graph compiler, no Blender (16 checks)
+python tests/test_graph.py                                     # graph compiler, no Blender (16)
+python tests/test_shapes.py                                    # maths, the kernel, the language (97)
+python tests/test_rpc.py                                       # the MCP wire protocol, no Blender (29)
 blender --factory-startup --python tests/test_blender.py       # needs a window: the GPU isn't available with -b (27)
-blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (20)
+blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (30)
 blender --factory-startup --python tests/test_bake.py          # baking, and playback through stock nodes (18)
 blender -b --factory-startup --python tests/test_farm.py       # the bake renders with no GPU and no add-on (10)
 blender --factory-startup --python tests/test_volume.py        # density code -> OpenVDB -> Volume object (16)
 blender --factory-startup --python tests/test_particles.py     # GPU particle solver, incl. baking (22)
-blender --factory-startup --python tests/test_agent.py         # the assistant-facing surface (29)
-python tests/test_shapes.py                                    # maths, the kernel, the language (95)
-python tests/test_rpc.py                                       # the MCP wire protocol, no Blender (29)
-blender --factory-startup --python tests/test_shape_blender.py # shapes as Blender objects (19)
-blender --factory-startup --python tests/test_server.py        # a real socket client against Blender (25)
+blender --factory-startup --python tests/test_agent.py         # the assistant-facing surface (30)
+blender --factory-startup --python tests/test_shape_blender.py # shapes as Blender objects (36)
+blender --factory-startup --python tests/test_server.py        # a real socket client against Blender (26)
+blender -b --factory-startup --python tests/test_gn.py         # Geometry Nodes as data, both ways (53)
+blender -b --factory-startup --python tests/test_gn_library.py # every capability; editing real trees (40)
 ```
 
 Run `test_bake.py` before `test_farm.py`: the first saves the .blend the second opens.
@@ -234,9 +271,10 @@ All of them pass on Blender 5.0.1 and 5.1.2 (NVIDIA RTX A4500, OpenGL).
 
 ## Limits right now
 
-- Needs Blender with a window. Background mode (`-b`) has no GPU, so there's no Code → Mesh in
-  headless renders yet.
-- The node editor handles shapes only so far. Volumes are available through `api.code_to_volume`
-  but have no node or panel yet. Particles, float links between nodes and the live GPU viewport
+- GPU code (Code → Mesh, Volume, Particles) needs Blender with a window: background mode has no
+  GPU. Bake first for headless renders. Shapes and everything Geometry Nodes work headless.
+- Volumes have no node or panel yet; float links between code nodes and a live GPU viewport
   preview are next — see `docs/ROADMAP.md`.
 - Surface nets rounds off sharp edges and corners slightly.
+- The capability library is five capabilities so far. Walls have no junctions yet (two walls
+  meeting overlap rather than join), and a bridge's height over a gap is the curve's height there.

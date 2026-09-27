@@ -100,6 +100,184 @@ def build_reference():
     return tree
 
 
+def build_dynamic():
+    """A tree made of nodes whose sockets are added by hand: Capture Attribute (with an
+    item removed, so its identifiers no longer start at zero), a Repeat zone with an extra
+    item, a Menu Switch with a third entry, and an Index Switch."""
+    tree = bpy.data.node_groups.new("Dynamic", "GeometryNodeTree")
+    tree.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+    n, links = tree.nodes, tree.links
+    grid = n.new("GeometryNodeMeshGrid")
+    grid.inputs["Vertices X"].default_value = 20
+    grid.inputs["Vertices Y"].default_value = 20
+    noise = n.new("ShaderNodeTexNoise")
+    cap = n.new("GeometryNodeCaptureAttribute")
+    cap.capture_items.new('FLOAT', "Scrap")
+    cap.capture_items.new('FLOAT', "Height")
+    cap.capture_items.new('VECTOR', "Where")
+    cap.capture_items.remove(cap.capture_items[0])        # identifiers now start at Value_1
+    links.new(grid.outputs["Mesh"], cap.inputs["Geometry"])
+    links.new(noise.outputs["Fac"], cap.inputs[1])
+    links.new(n.new("GeometryNodeInputPosition").outputs[0], cap.inputs[2])
+
+    rin, rout = n.new("GeometryNodeRepeatInput"), n.new("GeometryNodeRepeatOutput")
+    rin.pair_with_output(rout)
+    rout.repeat_items.new('FLOAT', "Lift")
+    rin.inputs["Iterations"].default_value = 3
+    rin.inputs[2].default_value = 0.2                        # Lift starts at 0.2
+    links.new(cap.outputs["Geometry"], rin.inputs[1])
+    setpos = n.new("GeometryNodeSetPosition")
+    mul = n.new("ShaderNodeMath")
+    mul.operation = 'MULTIPLY'
+    xyz = n.new("ShaderNodeCombineXYZ")
+    links.new(rin.outputs[1], setpos.inputs["Geometry"])
+    links.new(rin.outputs[2], mul.inputs[0])
+    links.new(cap.outputs[1], mul.inputs[1])
+    links.new(mul.outputs[0], xyz.inputs["Z"])
+    links.new(xyz.outputs[0], setpos.inputs["Offset"])
+    add = n.new("ShaderNodeMath")
+    add.operation = 'ADD'
+    add.inputs[1].default_value = 0.1
+    links.new(rin.outputs[2], add.inputs[0])
+    links.new(setpos.outputs[0], rout.inputs[0])
+    links.new(add.outputs[0], rout.inputs[1])
+
+    cube = n.new("GeometryNodeMeshCube")
+    menu = n.new("GeometryNodeMenuSwitch")
+    menu.enum_items.new("Third")
+    links.new(cube.outputs[0], menu.inputs[1])
+    links.new(rout.outputs[0], menu.inputs[3])
+    menu.inputs[0].default_value = "Third"
+    index = n.new("GeometryNodeIndexSwitch")
+    index.data_type = 'GEOMETRY'                             # it starts out as Float
+    index.index_switch_items.new()
+    index.inputs["Index"].default_value = 2
+    links.new(cube.outputs[0], index.inputs[1])
+    links.new(menu.outputs[0], index.inputs[3])
+    out = n.new("NodeGroupOutput")
+    links.new(index.outputs[0], out.inputs[0])
+    return tree
+
+
+def dynamic_tests():
+    original = build_dynamic()
+    before = evaluate(original)
+    data = serialize.read(original)
+    cap = next(e for e in data["nodes"] if e["type"] == "GeometryNodeCaptureAttribute")
+    check([i["name"] for i in cap["items"]["capture_items"]] == ["Height", "Where"]
+          and "Value_1" in cap["sockets"]["in"],
+          f"items are recorded, with the identifiers they had ({cap['sockets']['in']})")
+    rebuilt = serialize.write(data, name="DynamicCopy")
+    after = evaluate(rebuilt)
+    check(before[0] == 400 and before[2][2] > 0 and before == after,
+          f"a tree of hand-added sockets rebuilds to identical geometry ({before} vs {after})")
+    check(len(rebuilt.links) == len(original.links),
+          f"with every link reconnected ({len(rebuilt.links)} of {len(original.links)})")
+
+    # written by hand: plain socket names, no positions
+    warnings = []
+    tree = serialize.write({
+        "interface": [{"socket": "Size", "type": "NodeSocketFloat", "default_value": 2.0},
+                      {"socket": "Geometry", "in_out": "OUTPUT", "type": "NodeSocketGeometry"}],
+        "nodes": [{"name": "in", "type": "NodeGroupInput"},
+                  {"name": "cube", "type": "GeometryNodeMeshCube"},
+                  {"name": "grow", "type": "ShaderNodeMath", "settings": {"operation": "MULTIPLY"},
+                   "values": {"Value_001": 1.5}},
+                  {"name": "out", "type": "NodeGroupOutput"}],
+        "links": [{"from": ["in", "Size"], "to": ["grow", "Value"]},
+                  {"from": ["grow", "Value"], "to": ["cube", "Size"]},
+                  {"from": ["cube", "Mesh"], "to": ["out", "Geometry"]}]},
+        name="ByHand", warnings=warnings)
+    got = evaluate(tree)
+    check(got[2] == [3.0, 3.0, 3.0], f"sockets can be named plainly ({got[2]})")
+    xs = sorted(n.location.x for n in tree.nodes)
+    check(len(set(xs)) == 4 and not warnings, f"and a tree with no positions is laid out ({xs})")
+
+    # a field into a single-value socket is built, but reported
+    warnings = []
+    serialize.write({"nodes": [
+        {"name": "rand", "type": "FunctionNodeRandomValue", "settings": {"data_type": "INT"}},
+        {"name": "grid", "type": "GeometryNodeMeshGrid"}],
+        "links": [{"from": ["rand", "Value"], "to": ["grid", "Vertices X"]}]},
+        name="FieldMistake", warnings=warnings)
+    check(any("field" in w and "single value" in w for w in warnings),
+          f"a field going into a single-value socket is reported ({warnings[:1]})")
+
+    for broken, wanted in [
+        ({"nodes": [{"name": "c", "type": "GeometryNodeMeshCube", "values": {"Sise": 2}}]},
+         "has no input 'Sise'. It has: Size"),
+        ({"nodes": [{"name": "m", "type": "ShaderNodeMath", "settings": {"operation": "TIMES"}}]},
+         "It accepts: ADD"),
+        ({"nodes": [{"type": "GeometryNodeMeshCube"}]}, "has no name"),
+        ({"nodes": [{"name": "a", "type": "GeometryNodeMeshCube"},
+                    {"name": "a", "type": "GeometryNodeMeshCube"}]}, "both called 'a'"),
+    ]:
+        try:
+            serialize.write(broken, name="Broken")
+            check(False, f"{wanted!r} should have been reported")
+        except serialize.BuildError as exc:
+            check(wanted in str(exc), f"and so is: {str(exc)[:80]}")
+
+    # a group inside a group travels with it
+    inner = serialize.write({
+        "interface": [{"socket": "Geometry", "type": "NodeSocketGeometry"},
+                      {"socket": "Lift", "type": "NodeSocketFloat", "default_value": 1.0},
+                      {"socket": "Geometry", "in_out": "OUTPUT", "type": "NodeSocketGeometry"}],
+        "nodes": [{"name": "in", "type": "NodeGroupInput"},
+                  {"name": "xyz", "type": "ShaderNodeCombineXYZ"},
+                  {"name": "move", "type": "GeometryNodeTransform"},
+                  {"name": "out", "type": "NodeGroupOutput"}],
+        "links": [{"from": ["in", "Geometry"], "to": ["move", "Geometry"]},
+                  {"from": ["in", "Lift"], "to": ["xyz", "Z"]},
+                  {"from": ["xyz", "Vector"], "to": ["move", "Translation"]},
+                  {"from": ["move", "Geometry"], "to": ["out", "Geometry"]}]}, name="Lifter")
+    outer = serialize.write({
+        "interface": [{"socket": "Geometry", "in_out": "OUTPUT", "type": "NodeSocketGeometry"}],
+        "nodes": [{"name": "cube", "type": "GeometryNodeMeshCube"},
+                  {"name": "lift", "type": "GeometryNodeGroup", "group": "Lifter",
+                   "values": {"Lift": 5.0}},
+                  {"name": "out", "type": "NodeGroupOutput"}],
+        "links": [{"from": ["cube", "Mesh"], "to": ["lift", "Geometry"]},
+                  {"from": ["lift", "Geometry"], "to": ["out", "Geometry"]}]}, name="Outer")
+    outer_before = evaluate(outer)
+    whole = serialize.read(outer)
+    check([g["name"] for g in whole.get("groups", [])] == ["Lifter"],
+          "a tree that uses a group brings that group along")
+    bpy.data.node_groups.remove(outer)
+    bpy.data.node_groups.remove(inner)
+    rebuilt_outer = serialize.write(whole)
+    check(evaluate(rebuilt_outer) == outer_before and "Lifter" in bpy.data.node_groups,
+          "so it can be rebuilt in a file that has neither")
+
+    # an edit to the inner group that adds an input leaves the outer one wired
+    inner_data = serialize.read(bpy.data.node_groups["Lifter"])
+    inner_data["interface"].insert(2, {"socket": "Spare", "type": "NodeSocketInt"})
+    serialize.write(inner_data)
+    lift_node = rebuilt_outer.nodes["lift"]
+    check(all(s.is_linked for s in lift_node.inputs if s.name == "Geometry")
+          and lift_node.outputs["Geometry"].is_linked
+          and abs(lift_node.inputs["Lift"].default_value - 5.0) < 1e-6,
+          "changing a group's inputs keeps the groups that use it wired, and their values")
+
+    # what someone tuned on the modifier survives a rebuild of the group
+    obj = bpy.data.objects.new("Tuned", bpy.data.meshes.new("Tuned"))
+    bpy.context.scene.collection.objects.link(obj)
+    mod = obj.modifiers.new("GN", 'NODES')
+    mod.node_group = bpy.data.node_groups["Reference"]
+    key = next(i.identifier for i in mod.node_group.interface.items_tree
+               if getattr(i, "name", "") == "Density")
+    mod[key] = 40.0
+    serialize.write(serialize.read(mod.node_group))
+    new_key = next(i.identifier for i in mod.node_group.interface.items_tree
+                   if getattr(i, "name", "") == "Density")
+    check(abs(mod[new_key] - 40.0) < 1e-6,
+          f"a value tuned on the modifier survives rebuilding its group ({key} -> {new_key})")
+    bpy.data.objects.remove(obj, do_unlink=True)
+
+    check(serialize.unused(bpy.data.node_groups["FieldMistake"]) == ["rand", "grid"],
+          "nodes that do not reach the output are found")
+
+
 def main():
     # --- the catalog -------------------------------------------------------------------
     s = catalog.summary()
@@ -118,6 +296,13 @@ def main():
           "a described node says which inputs take a field and which do not")
     check(d["settings"]["distribute_method"]["options"] == ['RANDOM', 'POISSON'],
           f"and what its dropdowns accept ({d['settings']['distribute_method']['options']})")
+    ray = {i["name"]: i for i in catalog.describe("GeometryNodeRaycast")["inputs"]}
+    grid_in = {i["name"]: i for i in catalog.describe("GeometryNodeMeshGrid")["inputs"]}
+    check(ray["Source Position"]["field"] and not grid_in["Vertices X"]["field"],
+          "a circle socket counts as taking a field; a line socket does not")
+    resample = {i["name"]: i for i in catalog.describe("GeometryNodeResampleCurve")["inputs"]}
+    check(resample["Mode"].get("options") == ["Evaluated", "Count", "Length"],
+          f"and a menu socket lists its choices ({resample['Mode'].get('options')})")
     check(catalog.describe("GeometryNodeNope").get("error"), "an unknown node type is reported")
 
     # --- reading -------------------------------------------------------------------------
@@ -203,6 +388,8 @@ def main():
     sim_copy = serialize.write(sim_data, name="SimCopy")
     copies = [n for n in sim_copy.nodes if n.bl_idname == "GeometryNodeSimulationInput"]
     check(copies and copies[0].paired_output is not None, "and the rebuilt zone is paired again")
+
+    dynamic_tests()
 
     # --- through the tools an assistant actually calls ----------------------------------------
     import codenodes

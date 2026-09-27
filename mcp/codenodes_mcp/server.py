@@ -92,8 +92,35 @@ def look_at(target: str = "", azimuth: float = 35.0, elevation: float = 22.0,
 
 @mcp.tool()
 def light(style: str = "studio", strength: float = 1.0) -> dict:
-    """Set up lighting: "studio", "dark" or "flat". Without it a render comes out black."""
+    """Set up lighting: "studio" (objects), "outdoor" (sun and sky, for landscapes and
+    levels), "dark" or "flat". Without it a render comes out black."""
     return _call("light", style=style, strength=strength)
+
+
+@mcp.tool()
+def material(name: str, color: list, roughness: float = 0.5, metallic: float = 0.0,
+             emission: list | None = None, emission_strength: float = 1.0,
+             variation: float = 0.0, variation_scale: float = 1.0,
+             objects: list | None = None) -> dict:
+    """Make or update a material by name — then pass that name to any material input, or
+    list objects to put it on them directly.
+
+    color is [r, g, b], 0-1. variation (0-1) breaks a flat colour up with soft noise:
+    ground, stone and wood look far better with 0.3-0.6. emission [r, g, b] makes it glow.
+    """
+    return _call("material", name=name, color=color, roughness=roughness, metallic=metallic,
+                 emission=emission, emission_strength=emission_strength,
+                 variation=variation, variation_scale=variation_scale, objects=objects or [])
+
+
+@mcp.tool()
+def collect(name: str, objects: list, parent: str = "", keep_in_scene: bool = False) -> dict:
+    """Put objects in a collection — assets to scatter from (keep_in_scene=False takes the
+    originals out of the scene so they do not render), or a named group such as everything
+    trees should keep clear of (keep_in_scene=True). A collection inside another
+    (parent=...) is picked as one piece, so a tree's trunk and crown stay together."""
+    return _call("collect", name=name, objects=objects, keep_in_scene=keep_in_scene,
+                 **({"parent": parent} if parent else {}))
 
 
 @mcp.tool()
@@ -137,8 +164,79 @@ def remove(name: str, delete_cache: bool = False) -> dict:
 
 @mcp.tool()
 def nodes_help() -> dict:
-    """Start here for Geometry Nodes: how many node types exist and how to work with them."""
+    """Start here for Geometry Nodes: the working guide, the ready-made capabilities, and
+    how big the node surface is. Read it before building a node setup."""
     return _call("nodes_help")
+
+
+@mcp.tool()
+def nodes_library() -> dict:
+    """Ready-made, tested world-building capabilities — terrain, scatter, walls with
+    doorways, paths that become bridges over gaps, props along a curve — with every
+    input, its range and what it does. Compose these before writing nodes from scratch."""
+    return _call("nodes_library")
+
+
+@mcp.tool()
+def nodes_use(capability: str, object: str = "", values: dict | None = None,
+              name: str = "") -> dict:
+    """Build a capability from nodes_library and put it on an object, inputs set by name,
+    e.g. nodes_use("wall", "Courtyard", {"Height": 4, "Doorways": 2}).
+
+    Leave object empty for a new object. Curve-following ones (wall, path_bridge,
+    along_curve) go on a curve object — make one with `curve`. Object, collection and
+    material inputs take a name. Reports what geometry came out.
+    """
+    args = {"capability": capability, "values": values or {}}
+    if object:
+        args["object"] = object
+    if name:
+        args["name"] = name
+    return _call("nodes_use", **args)
+
+
+@mcp.tool()
+def nodes_set_inputs(object: str, values: dict, modifier: str = "") -> dict:
+    """Change the sliders on an object's Geometry Nodes modifier by input name, e.g.
+    {"Height": 5, "Seed": 3}. Reports what geometry came out."""
+    args = {"object": object, "values": values}
+    if modifier:
+        args["modifier"] = modifier
+    return _call("nodes_set_inputs", **args)
+
+
+@mcp.tool()
+def curve(name: str, points: list, cyclic: bool = False, smooth: bool = True) -> dict:
+    """Make or reshape a curve object through points [[x, y, z], ...] — the line of a
+    path, a wall, a river. smooth=False gives straight segments with sharp corners."""
+    return _call("curve", name=name, points=points, cyclic=cyclic, smooth=smooth)
+
+
+@mcp.tool()
+def nodes_explain(group: str) -> dict:
+    """An existing node tree in plain words: inputs, what each node does in flow order,
+    where each connection comes from, what is unused, and anything that looks wrong."""
+    return _call("nodes_explain", group=group)
+
+
+@mcp.tool()
+def nodes_edit(group: str, ops: list) -> dict:
+    """Small changes to an existing tree without rewriting it — all or nothing.
+
+    ops is a list like:
+      {"op": "set", "node": "Grid", "values": {"Vertices X": 40}, "settings": {...}}
+      {"op": "add", "node": {"name": "Jitter", "type": "GeometryNodeSetPosition"}}
+      {"op": "link", "from": ["Jitter", "Geometry"], "to": ["Group Output", "Geometry"]}
+      {"op": "unlink", "to": ["Group Output", "Geometry"]}
+      {"op": "insert", "node": {...}, "between": {"from": [n, s], "to": [n, s]}}
+      {"op": "remove", "node": "Jitter", "bridge": true}
+      {"op": "rename", "node": "Grid", "to": "Ground"}
+      {"op": "input", "socket": "Seed", "type": "NodeSocketInt", "default_value": 0}
+      {"op": "set_socket", "socket": "Seed", "max_value": 100}
+      {"op": "remove_socket", "socket": "Seed"}
+    Values tuned on modifiers stay put.
+    """
+    return _call("nodes_edit", group=group, ops=ops)
 
 
 @mcp.tool()

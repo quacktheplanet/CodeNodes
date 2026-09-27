@@ -11,6 +11,8 @@ diamond accepts a field, a line socket does not.
 
 from __future__ import annotations
 
+import re
+
 import bpy
 
 _cache = {}
@@ -36,11 +38,52 @@ def _scratch_tree():
     return tree
 
 
+def menu_options(socket):
+    """The choices of a menu socket. Blender 5 moved many node modes from dropdowns to
+    menu sockets (Resample Curve's Count/Length, Set Curve Normal's Z Up…), and the API
+    does not list their options — but a refused value's error message does."""
+    if socket.bl_idname != 'NodeSocketMenu' or socket.is_output:
+        return None
+    old = socket.default_value
+    try:
+        socket.default_value = "\x01codenodes"
+    except Exception as exc:
+        found = re.search(r"not found in \((.*)\)", str(exc))
+        if found:
+            return [part.strip().strip("'\"") for part in found.group(1).split(",")
+                    if part.strip()]
+    finally:
+        try:
+            socket.default_value = old
+        except Exception:
+            pass
+    return None
+
+
+def _takes(socket):
+    """Blender draws three shapes: a diamond expects a field, a line takes one value only,
+    and a circle takes either — given a field, the node's outputs become fields too."""
+    shape = socket.display_shape
+    if shape in SHAPE_FIELD:
+        return "field"
+    if shape == 'LINE' or socket.type in ('GEOMETRY', 'OBJECT', 'COLLECTION', 'MATERIAL',
+                                          'IMAGE', 'TEXTURE'):
+        return "value"
+    return "either"
+
+
 def _socket_info(socket):
+    takes = _takes(socket)
     info = {"name": socket.name, "identifier": socket.identifier, "type": socket.bl_idname,
-            "field": socket.display_shape in SHAPE_FIELD}
+            "field": takes != "value"}
+    if not socket.is_output and takes != "field":
+        info["takes"] = ("a single value only" if takes == "value" else
+                         "a value or a field (a field makes the outputs fields)")
     if getattr(socket, "is_multi_input", False):
         info["multi"] = True
+    options = menu_options(socket)
+    if options:
+        info["options"] = options
     value = getattr(socket, "default_value", None)
     if value is not None and not hasattr(value, "id_data"):
         try:
@@ -73,7 +116,7 @@ def describe(idname, tree=None):
             settings[prop.identifier] = entry
         info = {
             "name": idname,
-            "label": getattr(type(node), "bl_label", idname),
+            "label": node.bl_label or idname,
             "inputs": [_socket_info(s) for s in node.inputs],
             "outputs": [_socket_info(s) for s in node.outputs],
             "settings": settings,
@@ -160,8 +203,10 @@ def summary():
             "function": sum(1 for t in types if t.startswith("FunctionNode")),
             "shader": sum(1 for t in types if t.startswith("ShaderNode")),
             "zones": zones,
-            "note": ("a socket with \"field\": true takes a field (a value that varies per "
-                     "element); one without takes a single value")}
+            "note": ("a socket with \"field\": true can take a field (a value that varies per "
+                     "element); \"field\": false means a single value only — wiring a field "
+                     "there is the classic mistake. A socket with \"options\" is a menu: set "
+                     "it to one of those names, e.g. {\"Mode\": \"Length\"}")}
 
 
 def clear():

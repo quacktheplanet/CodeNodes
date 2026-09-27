@@ -185,11 +185,42 @@ understand it entirely, and edit it on the fly."*
   `nodes_write`, `nodes_apply`, `nodes_check` — in `agent.py`, the socket server and the MCP server.
   `nodes_check` reports what geometry actually came out, and says so when nothing did.
 
-  Next: a **capability library** (hoverrace-prockit's pattern — one function per capability, typed
-  sockets, a mandatory `seed`, smoke and golden tests), starting with the three the research
-  picked out: curve-to-modular-wall with a junction socket, a path system that tells a gap from
-  ground, and a seeded scatter with stable-ID variation. Then a generated **manifest** so the agent
-  can discover what exists.
+- ~~**Round trip, the hard parts**~~ **done.** Nodes whose sockets are added by hand (Capture
+  Attribute, Repeat/Simulation zones, Menu and Index Switch, Bake, bundles, closures) record their
+  items, and because their socket identifiers come from a counter that survives deletions, each
+  such node records the identifiers it had and they are mapped onto the rebuilt ones by position.
+  Groups inside groups travel with the tree. A rewrite keeps values tuned on modifiers, and the
+  wiring of other groups that use the rewritten one, by socket name.
+- ~~**Validation**~~ **done.** `validate()` reads Blender's own link validity and says what is
+  wrong in terms of the node: a field into a single-value socket, a type that cannot convert, a
+  link to a socket the node is not using, an unconnected output. `unused()` lists nodes that do
+  not reach the output.
+- ~~**Editing and explaining**~~ **done.** `nodes_edit` applies small operations — set, add, link,
+  unlink, insert, remove (optionally joining the flow up around it), rename, group inputs — all or
+  nothing, tried on a copy first. `nodes_explain` describes a tree in words, in flow order,
+  showing only what differs from a fresh node.
+- ~~**Capability library**~~ **started: five.** `terrain`, `scatter`, `wall`, `path_bridge`,
+  `along_curve`, each a Python function over a small builder (`gn/builder.py`) that emits the same
+  plain data `nodes_write` takes; `nodes_library` is the generated manifest. Tested for building
+  cleanly, seed determinism, controls that do something, geometry checked by ray (a doorway is a
+  hole a ray passes through), and the round trip. `examples/level_demo.py` composes all five.
+
+  Next capabilities, in the order a level designer would reach for them:
+  - **wall junctions** — walls that meet at a T or a corner join instead of overlapping;
+  - **rooms from a floor plan** — closed curves become rooms with walls, floors, doorways where
+    two rooms share a wall;
+  - **stairs and ramps** between two heights along a curve;
+  - **river / road** along a curve that carves or flattens the terrain under it — this needs the
+    terrain to read other objects (a "deform by curve" pass), which is a design question first;
+  - **fence** (posts plus rails, following the ground) — mostly `along_curve` plus `path_bridge`'s
+    rails;
+  - **bridge height** over a gap from the two banks, not the curve.
+
+  Lessons that shaped these, worth keeping: Object Info sees another object's *evaluated*
+  geometry, so something that follows another object's curve needs that object to output its
+  curve (path_bridge does, with zero radius); a swept profile's Y points *down* along an
+  upright curve; profiles swept round sharp corners pinch unless the corners are filleted first;
+  the exact boolean solver collapsed a flat wall with doorways where Manifold did not.
 
 **P2.6 — headless Blender to the web** (the user's idea, 2026-09-26)
 
