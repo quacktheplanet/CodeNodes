@@ -107,6 +107,8 @@ def rebuild(obj):
 
 
 def _flush():
+    if _rendering():                       # never run GPU code while a render is going
+        return 0.5
     names = list(_pending)
     _pending.clear()
     for name in names:
@@ -123,7 +125,23 @@ def request(obj):
         bpy.app.timers.register(_flush, first_interval=DEBOUNCE_S)
 
 
+_render_active = [False]
+
+
+@bpy.app.handlers.persistent
+def _render_started(*_args):
+    _render_active[0] = True
+
+
+@bpy.app.handlers.persistent
+def _render_ended(*_args):
+    _render_active[0] = False
+
+
 def _rendering():
+    """True while any render runs: background jobs and blocking F12 / bpy.ops.render.render."""
+    if _render_active[0]:
+        return True
     try:
         return bpy.app.is_job_running('RENDER')
     except Exception:
@@ -159,12 +177,22 @@ def _on_frame(scene, depsgraph=None):
         traceback.print_exc()
 
 
+_RENDER_HANDLERS = (("render_init", _render_started), ("render_complete", _render_ended),
+                    ("render_cancel", _render_ended))
+
+
 def register():
+    for name, fn in _RENDER_HANDLERS:
+        getattr(bpy.app.handlers, name).append(fn)
     bpy.app.handlers.frame_change_post.append(_on_frame)
     bpy.app.timers.register(_poll_text, first_interval=POLL_S, persistent=True)
 
 
 def unregister():
+    for name, fn in _RENDER_HANDLERS:
+        lst = getattr(bpy.app.handlers, name)
+        if fn in lst:
+            lst.remove(fn)
     if _on_frame in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.remove(_on_frame)
     for fn in (_poll_text, _flush):

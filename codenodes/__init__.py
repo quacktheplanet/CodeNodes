@@ -7,14 +7,14 @@ samples it on the GPU and turns it into a real, editable, renderable mesh.
 bl_info = {
     "name": "CodeNodes",
     "author": "Lucas DeMeritt",
-    "version": (0, 1, 0),
+    "version": (0, 1, 1),
     "blender": (5, 0, 0),
-    "location": "View3D > Add > Mesh > Code Mesh; View3D > Sidebar > CodeNodes",
+    "location": "View3D > Add > Mesh > Code Mesh; Geometry Nodes > Add > CodeNodes; Sidebar > CodeNodes",
     "description": "Turn GPU code (signed distance functions) into real meshes",
     "category": "Mesh",
 }
 
-_modules = ("props", "live", "ops", "bake_ops", "nodes", "ui", "server")
+_modules = ("props", "live", "ops", "bake_ops", "nodes", "gn_ui", "ui", "server")
 
 
 def register():
