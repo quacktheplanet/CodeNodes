@@ -164,6 +164,14 @@ async def loop(t):
     check(wp.get("ok") and os.path.exists(page) and os.path.getsize(page) > 10000,
           f"web_page writes {os.path.getsize(page) if os.path.exists(page) else 0} bytes")
 
+    shape_page = os.path.join(OUT, "lamp.html")
+    ws = await t("web_shape", path=shape_page, object="Lamp", colors={"shade": [0.9, 0.55, 0.2]})
+    check(ws.get("ok") and os.path.exists(shape_page), f"web_shape writes a live shape page ({ws.get('bytes')} bytes)")
+    # a fresh profile has no Expression Nodes, so bake_to_nodes has to say so, not break
+    bn = await t("bake_to_nodes", name="Ring")
+    check(bn.get("ok") is False and "Expression Nodes" in bn.get("error", "") and bn.get("fallback") == "bake",
+          f"bake_to_nodes without Expression Nodes says what it needs ({bn.get('error', '')[:60]})")
+
     # --- limits ---------------------------------------------------------------------------
     nope = await t.raw("exec", {"code": "import os"})
     check(field(nope, "is_error", "isError"), "a tool that does not exist is refused")

@@ -370,7 +370,7 @@ blender -b --factory-startup --python tests/test_gn_library.py # every capabilit
 blender -b --factory-startup --python tests/test_web.py        # a scene as a web page with sliders; a live shape page (16)
 node tests/web_shape_check.mjs <page folder>                   # that page in headless Edge: builds and rebuilds as Python does (7)
 powershell -File tests/install_check.ps1 -Python <venv python> -Work <scratch folder>
-    # the zip installed as a user installs it, then the whole loop through the real MCP process (27 per version)
+    # the zip installed as a user installs it, then the whole loop through the real MCP process (29 per version)
 ```
 
 Run `test_bake.py` before `test_farm.py`: the first saves the .blend the second opens.
