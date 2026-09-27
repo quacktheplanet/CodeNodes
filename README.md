@@ -355,7 +355,7 @@ python tests/test_graph.py                                     # graph compiler,
 python tests/test_shapes.py                                    # maths, the kernel, the language (98)
 python tests/test_shape_js.py                                  # the browser's copy builds exactly what Python does (23)
 python tests/test_rpc.py                                       # the MCP wire protocol, no Blender (29)
-blender --factory-startup --python tests/test_blender.py       # needs a window: the GPU isn't available with -b (27)
+blender --factory-startup --python tests/test_blender.py       # needs a window: the GPU isn't available with -b (29)
 blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (30)
 blender --factory-startup --python tests/test_bake.py          # baking, and playback through stock nodes (18)
 blender --factory-startup --python tests/test_bake_nodes.py    # code to nodes, against the GPU mesh; opens with no add-ons (11)
