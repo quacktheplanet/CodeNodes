@@ -256,7 +256,13 @@ with declared parameters**, so the page can expose exactly those as sliders. Two
 out one by one")
 
 Rampart showed what a mesh editor with good lighting looks like; these push further, each a
-separate page:
+separate page. **All four built the same day** (`web/aerie.html`, `tellus.html`, `myriad.html`,
+`sanctum.html`), each checked on the GPU in headless Edge; frame rates on real machines are still
+to be measured (headless Edge fast-forwards its clock, so its numbers mean nothing). Lessons: a
+JavaScript copy of shader noise does not match the GPU (float precision in the hash), so ask the
+GPU (Tellus' probe); ground lit at sunlight x albedo / pi against scattered light, or the air
+swamps it; simulated galaxy discs wind up, density waves do not; pre-warm simulations so they
+open in shape.
 1. **Raymarched SDF world** — a citadel on a sea-stack above clouds, traced per pixel: no polygon
    budget, soft shadows, AO, volumetric clouds, reflective ocean. The castle is live GLSL in the
    same helper vocabulary as CodeNodes (Z up, `sdBox`, `smin`, `// @param`), so it copies
