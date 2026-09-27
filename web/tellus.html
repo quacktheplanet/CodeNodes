@@ -1,0 +1,555 @@
+<title>Tellus</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* One deliberate look: space is black whatever the theme, so the controls are smoked glass
+   over it and every colour is set here. */
+:root {
+  --glass: rgba(10, 12, 18, 0.6); --edge: rgba(200, 225, 255, 0.14);
+  --ink: #EAF0F7; --muted: #A5B2C2; --cyan: #8FD3FF; --cyan-ink: #06131D;
+  --display: "Cinzel", "Trajan Pro", Georgia, serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: #000; color: var(--ink); font-family: var(--body); overflow: hidden; font-size: 14px; }
+canvas#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+canvas#view:active { cursor: grabbing; }
+.glass { background: var(--glass); backdrop-filter: blur(14px) saturate(1.2); border: 1px solid var(--edge); border-radius: 12px; }
+#panel { position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: min(300px, calc(100% - 32px));
+  padding: 14px 16px; display: grid; gap: 12px; max-height: calc(100% - 32px); overflow: auto; }
+#panel h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 30px; letter-spacing: 0.14em; line-height: 1; }
+#panel .sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.field { display: grid; gap: 4px; }
+.field .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.field label { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; color: var(--muted); }
+.field output { font-family: var(--mono); font-size: 12px; color: var(--cyan); font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--cyan); margin: 0; }
+.buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+button, select { font: inherit; color: var(--ink); }
+.btn { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--edge); border-radius: 8px; padding: 6px 11px; cursor: pointer; font-weight: 500; }
+.btn:hover { background: rgba(255, 255, 255, 0.12); }
+.btn[aria-pressed="true"] { background: var(--cyan); color: var(--cyan-ink); border-color: transparent; }
+select { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--edge); border-radius: 8px; padding: 5px 8px; }
+select option { background: #11151d; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+#hud { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px; padding: 6px 10px; font-family: var(--mono);
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  #panel { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); left: 10px; width: calc(100% - 20px); max-height: 50%; padding: 12px; gap: 10px; }
+  #panel h1 { font-size: 24px; }
+  #panel .sub { display: none; }
+}
+</style>
+
+<canvas id="view" aria-label="A procedural planet with an atmosphere, oceans and clouds. Drag to turn it; scroll or use Altitude to descend."></canvas>
+<div id="hud" class="glass" role="status">Starting…</div>
+<section id="panel" class="glass" aria-label="Planet">
+  <div>
+    <h1>Tellus</h1>
+    <p class="sub">A whole world from noise and physics: continents, ranges, oceans, clouds and an atmosphere that scatters light like ours. Drag to turn it, scroll to descend.</p>
+  </div>
+  <div class="field"><div class="row"><label for="alt">Altitude</label><output id="altOut" for="alt"></output></div>
+    <input type="range" id="alt" min="0" max="1" step="0.001"></div>
+  <div class="field"><div class="row"><label for="sun">Sun</label><output id="sunOut" for="sun"></output></div>
+    <input type="range" id="sun" min="-180" max="180" step="0.5" value="105"></div>
+  <div class="field"><div class="row"><label for="clouds">Cloud cover</label><output id="cloudsOut" for="clouds"></output></div>
+    <input type="range" id="clouds" min="0" max="1" step="0.01" value="0.5"></div>
+  <div class="field"><div class="row"><label for="sea">Sea level</label><output id="seaOut" for="sea"></output></div>
+    <input type="range" id="sea" min="-3" max="3" step="0.05" value="0"></div>
+  <div class="field"><div class="row"><label for="quality">Quality</label></div>
+    <select id="quality"><option value="fast">Fast</option><option value="balanced" selected>Balanced</option><option value="best">Best</option></select></div>
+  <div class="buttons">
+    <button class="btn" id="spin" type="button" aria-pressed="false">Spin</button>
+    <button class="btn" id="reseed" type="button">New world</button>
+    <button class="btn" id="visit" type="button">Visit the mountains</button>
+  </div>
+</section>
+
+<script>
+(function () {
+"use strict";
+const hud = document.getElementById("hud");
+const canvas = document.getElementById("view");
+const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, powerPreference: "high-performance" });
+if (!gl) { hud.textContent = "This needs WebGL 2, which this browser does not offer."; return; }
+const floatTargets = !!gl.getExtension("EXT_color_buffer_float");
+
+const VERT = `#version 300 es
+in vec2 aPos; out vec2 vUv;
+void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const PLANET = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 fragColor;
+uniform vec2 uRes, uJitter;
+uniform vec3 uCamPos, uCamFwd, uCamRight, uCamUp, uSun;
+uniform float uFov, uTime, uSpin, uClouds, uSea, uSeed, uPixel;
+uniform int uSteps, uAtmo;
+
+// One unit is the planet's radius (6,371 km). The atmosphere and relief are exaggerated a
+// little so they read from orbit.
+const float PI = 3.14159265;
+const float R = 1.0, RA = 1.028, HMAX = 0.0036, RC = 1.0013;   // peaks to ~20 km, clouds at ~8 km
+const float HR = 0.0045, HM = 0.0011;
+const vec3 BETA_R = vec3(10.3, 24.0, 59.0) * 0.62;
+const float BETA_M = 18.0;
+const float SUN = 22.0;
+
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+vec3 spinDir(vec3 d) { float c = cos(uSpin), s = sin(uSpin); return vec3(c * d.x + s * d.y, -s * d.x + c * d.y, d.z); }
+
+// ------------------------------------------------------------------ the land
+float continent(vec3 s) { float c = 0.0, a = 0.5, f = 1.3; for (int i = 0; i < 7; i++) { c += a * noise(s * f); f *= 2.05; a *= 0.5; } return c; }
+// height above the default sea level, for a direction on the (spun) planet; lod is how
+// many octaves of ridged detail are worth adding at this distance
+float height(vec3 d, float lod) {
+  vec3 s = d * 1.0 + vec3(uSeed * 1.7, uSeed * 2.3, uSeed * 0.9);
+  // Earth-like proportions (relief exaggerated about twice): roughly 30% land, low coasts,
+  // plateaus inland, deep ocean basins, and mountains in ranges rather than everywhere
+  float c = continent(s);
+  float land = c - 0.555;
+  float h = land > 0.0 ? land * 0.0045 : land * 0.009;
+  float ranges = smoothstep(0.0, 0.06, land) * smoothstep(0.52, 0.72, noise(s * 2.2 + 17.0));
+  float r = 0.0, a = 0.5, f = 5.0, w = 1.0;
+  for (int i = 0; i < 12; i++) {
+    if (float(i) >= lod) break;
+    float n = 1.0 - abs(noise(s * f) * 2.0 - 1.0); n *= n;
+    r += a * n * w; w = clamp(n * 1.8, 0.0, 1.0);
+    f *= 2.1; a *= 0.5;
+  }
+  h += r * 0.0026 * ranges;
+  h += (r * 0.00025 + (noise(s * 60.0) - 0.5) * 0.00006 * step(8.0, lod)) * smoothstep(0.0, 0.02, land);   // hills
+  return h;
+}
+float lodAt(float t) { return clamp(log2(1.0 / max(t * uPixel * 5.0, 1e-7)) / log2(2.1), 2.0, 12.0); }
+
+bool sphere(vec3 ro, vec3 rd, float r, out float t0, out float t1) {
+  float b = dot(ro, rd), c = dot(ro, ro) - r * r, h = b * b - c;
+  if (h < 0.0) return false;
+  h = sqrt(h); t0 = -b - h; t1 = -b + h; return t1 > 0.0;
+}
+float marchLand(vec3 ro, vec3 rd, float t0, float t1) {
+  float t = max(t0, 0.0);
+  for (int i = 0; i < 400; i++) {
+    if (i >= uSteps) break;
+    vec3 p = ro + rd * t; float r = length(p), alt = r - R;
+    float d;
+    if (alt > HMAX + 0.0004) d = alt - HMAX;                       // above every peak: no need to look
+    else {
+      d = (alt - height(spinDir(p / r), lodAt(t))) * 0.55;
+      if (d < t * uPixel * 0.4) return t;
+    }
+    t += max(d, 2e-6 + t * 2e-5);
+    if (t > t1) break;
+  }
+  return -1.0;
+}
+vec3 landNormal(vec3 p, float t) {
+  vec3 n = normalize(p);
+  vec3 a = normalize(cross(n, abs(n.z) < 0.9 ? vec3(0, 0, 1) : vec3(1, 0, 0))), b = cross(n, a);
+  float e = max(t * uPixel * 1.5, 3e-6), lod = lodAt(t);
+  vec3 d0 = n, d1 = normalize(n + a * e), d2 = normalize(n + b * e);
+  vec3 p0 = d0 * (R + height(spinDir(d0), lod)), p1 = d1 * (R + height(spinDir(d1), lod)), p2 = d2 * (R + height(spinDir(d2), lod));
+  return normalize(cross(p1 - p0, p2 - p0));
+}
+
+// ------------------------------------------------------------------ the air
+float phaseR(float mu) { return 3.0 / (16.0 * PI) * (1.0 + mu * mu); }
+float phaseM(float mu) { float g = 0.76; return 3.0 / (8.0 * PI) * ((1.0 - g * g) * (1.0 + mu * mu)) / ((2.0 + g * g) * pow(1.0 + g * g - 2.0 * g * mu, 1.5)); }
+// how much sunlight survives the air on its way to p (zero behind the planet)
+vec3 sunlightAt(vec3 p) {
+  float a, b;
+  if (sphere(p, uSun, R, a, b) && a > 0.0) return vec3(0.0);
+  sphere(p, uSun, RA, a, b);
+  float ds = b / 6.0, odR = 0.0, odM = 0.0;
+  for (int j = 0; j < 6; j++) { float h = length(p + uSun * (float(j) + 0.5) * ds) - R; odR += exp(-h / HR) * ds; odM += exp(-h / HM) * ds; }
+  return exp(-(BETA_R * odR + BETA_M * 1.1 * odM));
+}
+void air(vec3 ro, vec3 rd, float t0, float t1, out vec3 light, out vec3 trans) {
+  float ds = (t1 - t0) / float(uAtmo), odR = 0.0, odM = 0.0;
+  vec3 sR = vec3(0.0), sM = vec3(0.0);
+  float jitter = fract(sin(dot(gl_FragCoord.xy + uJitter * 31.0, vec2(12.9898, 78.233))) * 43758.5453);
+  for (int i = 0; i < 64; i++) {
+    if (i >= uAtmo) break;
+    vec3 p = ro + rd * (t0 + (float(i) + jitter) * ds);
+    float h = length(p) - R;
+    float dR = exp(-h / HR) * ds, dM = exp(-h / HM) * ds;
+    odR += dR; odM += dM;
+    vec3 att = exp(-(BETA_R * odR + BETA_M * 1.1 * odM)) * sunlightAt(p);
+    sR += dR * att; sM += dM * att;
+  }
+  float mu = dot(rd, uSun);
+  light = SUN * (sR * BETA_R * phaseR(mu) + sM * BETA_M * phaseM(mu));
+  trans = exp(-(BETA_R * odR + BETA_M * 1.1 * odM));
+}
+
+// ------------------------------------------------------------------ clouds, cities, stars
+float cloudAt(vec3 d) {
+  vec3 q = spinDir(d) * 3.2 + vec3(uSeed * 3.1, uTime * 0.004, uSeed);
+  q += vec3(noise(q * 1.7), noise(q * 1.7 + 4.0), noise(q * 1.7 + 8.0)) * 0.6;                     // swirls
+  float c = 0.0, a = 0.5, f = 1.0;
+  for (int i = 0; i < 6; i++) { c += a * noise(q * f); f *= 2.2; a *= 0.5; }
+  float lat = abs(d.z);
+  float bands = 0.82 + 0.25 * smoothstep(0.1, 0.35, lat) * smoothstep(0.85, 0.55, lat);           // wetter mid-latitudes
+  return smoothstep(1.0 - uClouds * 0.72 - 0.08, 1.05 - uClouds * 0.6, c * bands);
+}
+vec3 stars(vec3 rd) {
+  vec3 g = rd * 300.0, cell = floor(g), f = fract(g) - 0.5;
+  float s = step(0.9965, hash(cell)) * smoothstep(0.1, 0.0, length(f));
+  float tint = hash(cell + 3.0);
+  return mix(vec3(1.0, 0.85, 0.7), vec3(0.75, 0.85, 1.0), tint) * s * 2.5;
+}
+
+vec3 landColour(vec3 d, float h, vec3 n, float sea) {
+  vec3 s = d * 1.0 + vec3(uSeed * 1.7, uSeed * 2.3, uSeed * 0.9);
+  float above = h - sea, lat = abs(d.z), slope = 1.0 - dot(n, normalize(d * (R + h)));
+  float wet = noise(s * 4.0) * 0.6 + noise(s * 11.0) * 0.4;
+  float desert = smoothstep(0.62, 0.8, 1.0 - abs(lat - 0.3) * 3.2) * smoothstep(0.45, 0.3, wet);
+  vec3 forest = vec3(0.028, 0.07, 0.02), grass = vec3(0.085, 0.12, 0.035), sand = vec3(0.36, 0.27, 0.15);
+  vec3 rock = vec3(0.2, 0.17, 0.14) * (0.8 + 0.4 * noise(s * 90.0)), snow = vec3(0.6, 0.63, 0.68);
+  vec3 c = mix(forest, grass, smoothstep(0.35, 0.7, wet + lat * 0.4));
+  c = mix(c, sand * (0.8 + 0.3 * noise(s * 30.0)), desert);
+  c = mix(c, vec3(0.3, 0.26, 0.17), smoothstep(0.00006, 0.0, above));                             // beaches
+  c = mix(c, rock, clamp(smoothstep(0.05, 0.14, slope) * smoothstep(0.0003, 0.0009, above) + smoothstep(0.0011, 0.0017, above) * 0.7, 0.0, 1.0));
+  float snowLine = mix(0.0018, 0.0, smoothstep(0.6, 0.88, lat));
+  c = mix(c, snow, smoothstep(snowLine, snowLine + 0.0006, above + (noise(s * 40.0) - 0.5) * 0.0003) * (1.0 - smoothstep(0.25, 0.5, slope)));
+  return c;
+}
+float cities(vec3 d, float above) {
+  vec3 s = d * 1.0 + vec3(uSeed * 5.3, uSeed, uSeed * 2.0);
+  float region = smoothstep(0.55, 0.75, noise(s * 6.0)) * smoothstep(0.0012, 0.0002, above) * smoothstep(0.75, 0.5, abs(d.z));
+  float lights = smoothstep(0.72, 0.92, noise(s * 460.0)) * (0.4 + 0.6 * noise(s * 60.0)) + smoothstep(0.84, 0.97, noise(s * 1500.0)) * 0.5;
+  return region * lights;
+}
+
+void main() {
+  vec2 frag = gl_FragCoord.xy + uJitter;
+  vec2 uv = (frag - 0.5 * uRes) / uRes.y;
+  float f = 1.0 / tan(radians(uFov) * 0.5);
+  vec3 rd = normalize(uCamFwd * f + uCamRight * uv.x + uCamUp * uv.y);
+  vec3 ro = uCamPos;
+  float sea = uSea * 0.001;
+
+  vec3 col = vec3(0.0);
+  float a0, a1;
+  bool inAir = sphere(ro, rd, RA, a0, a1);
+  if (!inAir) {
+    col = stars(rd) + vec3(1.0, 0.95, 0.85) * pow(max(dot(rd, uSun), 0.0), 3000.0) * 40.0;
+  } else {
+    a0 = max(a0, 0.0);
+    float b0, b1, tEnd = a1, tSurf = -1.0;
+    bool land = false, water = false;
+    // the land, down to the sea
+    float w0, w1; bool seaHit = sphere(ro, rd, R + sea, w0, w1) && w0 > 0.0;
+    float lim = seaHit ? w0 : a1;
+    if (sphere(ro, rd, R + HMAX, b0, b1)) {
+      float t = marchLand(ro, rd, max(b0, 0.0), min(b1, lim));
+      if (t > 0.0) { tSurf = t; land = true; }
+    }
+    if (!land && seaHit) { tSurf = w0; water = true; }
+    if (tSurf > 0.0) tEnd = tSurf;
+
+    vec3 surf = vec3(0.0);
+    if (land || water) {
+      vec3 p = ro + rd * tSurf, up = normalize(p);
+      vec3 sunAt = sunlightAt(p + up * 0.0002) * SUN / PI;
+      vec3 skyAmb = vec3(0.12, 0.2, 0.34) * 0.08 * SUN / PI * clamp(dot(up, uSun) * 2.0 + 0.3, 0.0, 1.0);
+      // shade from the cloud above this spot, along the sun
+      float cs = 0.0;
+      float cu = dot(up, uSun);
+      if (cu > 0.0) cs = cloudAt(normalize(p + uSun * (RC - length(p)) / max(cu, 0.15))) * 0.8;
+      if (land) {
+        vec3 n = landNormal(p, tSurf);
+        float h = length(p) - R;
+        vec3 alb = landColour(up, h, n, sea);
+        // mountains shadow the valleys: march towards the sun (only worth it close up)
+        float shade = 1.0;
+        if (tSurf < 0.35 && dot(n, uSun) > 0.0) {
+          vec3 q = p + up * 0.00002; float ts = 0.00006;
+          for (int i = 0; i < 32; i++) {
+            vec3 x = q + uSun * ts; float r = length(x);
+            if (r - R > HMAX) break;
+            float dd = r - R - height(spinDir(x / r), 7.0);
+            shade = min(shade, clamp(dd / (ts * 0.06), 0.0, 1.0));
+            if (shade < 0.01) break;
+            ts += max(dd * 0.6, 0.00004 + ts * 0.12);
+          }
+        }
+        surf = alb * (sunAt * max(dot(n, uSun), 0.0) * (1.0 - cs) * shade + skyAmb);
+        float night = smoothstep(0.02, -0.12, dot(up, uSun));
+        surf += vec3(1.0, 0.62, 0.28) * cities(spinDir(up), h - sea) * night * 0.45;
+      } else {
+        float depth = sea - height(spinDir(up), 4.0);  // metres of water, as a fraction of R
+        vec3 deep = vec3(0.004, 0.012, 0.03), shallow = vec3(0.02, 0.09, 0.1);
+        vec3 alb = mix(shallow, deep, smoothstep(0.0, 0.0012, depth));
+        // ripples: a small tilt of the normal, stronger far away where they blur into glitter
+        vec3 q = spinDir(up) * 900.0 + uTime * 0.2;
+        vec3 n = normalize(up + (vec3(noise(q), noise(q + 7.0), noise(q + 13.0)) - 0.5) * 0.06);
+        vec3 h = normalize(uSun - rd);
+        float fres = 0.02 + 0.98 * pow(1.0 - max(dot(-rd, n), 0.0), 5.0);
+        float glint = pow(max(dot(n, h), 0.0), 350.0) * 6.0 + pow(max(dot(n, h), 0.0), 40.0) * 0.12;
+        surf = alb * (sunAt * max(dot(up, uSun), 0.0) * (1.0 - cs) + skyAmb) + sunAt * glint * fres * (1.0 - cs);
+        surf += vec3(0.05, 0.1, 0.2) * fres * sunAt * 0.2;
+        float ice = smoothstep(0.86, 0.9, abs(up.z) + (noise(spinDir(up) * 12.0) - 0.5) * 0.08);        // sea ice
+        surf = mix(surf, vec3(0.8, 0.85, 0.9) * (sunAt * max(dot(up, uSun), 0.0) + skyAmb), ice);
+      }
+    }
+    // the clouds, when the ray passes their shell before the surface
+    vec4 cl = vec4(0.0);
+    float c0, c1;
+    if (sphere(ro, rd, RC, c0, c1)) {
+      float tc = c0 > 0.0 ? c0 : c1;
+      if (tc > 0.0 && (tSurf < 0.0 || tc < tSurf)) {
+        vec3 p = ro + rd * tc, up = normalize(p);
+        float dens = cloudAt(up);
+        vec3 lit = sunlightAt(p) * SUN / PI * 0.75;
+        float ndl = clamp(dot(up, uSun) * 0.8 + 0.25, 0.0, 1.0);
+        cl = vec4((lit * ndl * 0.95 + vec3(0.1, 0.14, 0.2) * 0.25 * clamp(dot(up, uSun) + 0.4, 0.0, 1.0)), dens);
+      }
+    }
+    vec3 inscatter, trans;
+    air(ro, rd, a0, tEnd, inscatter, trans);
+    if (tSurf < 0.0) surf = stars(rd) + vec3(1.0, 0.95, 0.85) * pow(max(dot(rd, uSun), 0.0), 3000.0) * 40.0;
+    surf = mix(surf, cl.rgb, cl.a);
+    col = surf * trans + inscatter;
+  }
+
+  col *= 0.75;
+  col = clamp((col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14), 0.0, 1.0);
+  fragColor = vec4(pow(col, vec3(1.0 / 2.2)), 1.0);
+}`;
+
+const SHOW = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 fragColor;
+uniform sampler2D uImage; uniform float uScale;
+void main() { fragColor = vec4(texture(uImage, vUv).rgb * uScale, 1.0); }`;
+
+function compile(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs)); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, "aPos"); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+let planet, show;
+try { planet = program(VERT, PLANET); show = program(VERT, SHOW); }
+catch (err) { hud.textContent = "The planet shader did not compile: " + String(err.message).split("\n")[0]; console.error(err); return; }
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+function target(w, h, float) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, float ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA, float ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { tex, fb, w, h };
+}
+
+// ------------------------------------------------------------------ state
+const QUALITY = {
+  fast: { min: 0.3, max: 0.6, steps: 160, atmo: 10, idle: 8 },
+  balanced: { min: 0.4, max: 0.85, steps: 240, atmo: 16, idle: 24 },
+  best: { min: 0.55, max: 1.0, steps: 360, atmo: 24, idle: 64 },
+};
+let quality = QUALITY.balanced, scale = 0.6, frameMs = 16;
+const MIN_ALT = 0.0006, MAX_ALT = 5.0;
+const cam = { yaw: 0.6, pitch: 0.35, alt: 1.9 };
+let sunAngle = 105, cover = 0.5, sea = 0, seed = 1.0, spin = 0, spinning = false;
+let dirty = true, lastMove = performance.now(), samples = 0, low = null, accum = null;
+const clock0 = performance.now();
+
+const norm = (a) => { const l = Math.hypot(...a) || 1; return a.map((v) => v / l); };
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+function rotateAbout(v, axis, ang) {         // Rodrigues
+  const c = Math.cos(ang), s = Math.sin(ang), d = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2], x = cross(axis, v);
+  return [v[0] * c + x[0] * s + axis[0] * d * (1 - c), v[1] * c + x[1] * s + axis[1] * d * (1 - c), v[2] * c + x[2] * s + axis[2] * d * (1 - c)];
+}
+function camera() {
+  const cp = Math.cos(cam.pitch), out = [Math.cos(cam.yaw) * cp, Math.sin(cam.yaw) * cp, Math.sin(cam.pitch)];
+  const pos = out.map((v) => v * (1 + cam.alt));
+  let fwd = out.map((v) => -v);
+  const right = norm(cross(fwd, [0, 0, 1]));
+  // near the ground, lift the view from straight down towards the horizon
+  const lift = 1.38 * smooth(0.45, 0.003, cam.alt);
+  fwd = norm(rotateAbout(fwd, right, lift));
+  const up = cross(right, fwd);
+  return { pos, fwd, right, up };
+}
+function smooth(a, b, x) { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+function sunDir() { const a = sunAngle * Math.PI / 180, tilt = 0.32; return norm([Math.cos(a) * Math.cos(tilt), Math.sin(a) * Math.cos(tilt), Math.sin(tilt)]); }
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(canvas.clientWidth * dpr); canvas.height = Math.round(canvas.clientHeight * dpr);
+  accum = floatTargets ? target(canvas.width, canvas.height, true) : null;
+  low = null; dirty = true;
+}
+function renderPlanet(fb, w, h, jitter, steps, atmo) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, w, h);
+  gl.useProgram(planet.p);
+  const u = planet.u, c = camera(), fov = 45;
+  const set = (name, fn, ...v) => { if (u[name]) gl[fn](u[name], ...v); };
+  set("uRes", "uniform2f", w, h); set("uJitter", "uniform2f", jitter[0], jitter[1]);
+  set("uCamPos", "uniform3fv", c.pos); set("uCamFwd", "uniform3fv", c.fwd); set("uCamRight", "uniform3fv", c.right); set("uCamUp", "uniform3fv", c.up);
+  set("uSun", "uniform3fv", sunDir()); set("uFov", "uniform1f", fov);
+  set("uTime", "uniform1f", (performance.now() - clock0) / 1000); set("uSpin", "uniform1f", spin);
+  set("uClouds", "uniform1f", cover); set("uSea", "uniform1f", sea); set("uSeed", "uniform1f", seed);
+  set("uPixel", "uniform1f", 2 * Math.tan(fov * Math.PI / 360) / h);
+  set("uSteps", "uniform1i", steps); set("uAtmo", "uniform1i", atmo);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+function present(tex, mul) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(show.p); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(show.u.uImage, 0); gl.uniform1f(show.u.uScale, mul);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
+let last = performance.now(), fpsFrames = 0, fpsTime = 0, fps = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = now - last; last = now;
+  fpsFrames++; fpsTime += dt; if (fpsTime > 500) { fps = fpsFrames * 1000 / fpsTime; fpsFrames = 0; fpsTime = 0; }
+  if (spinning) { spin += dt * 0.00005; dirty = true; }
+  const moving = dirty || spinning || now - lastMove < 220;
+  if (moving) {
+    dirty = false;
+    frameMs = frameMs * 0.85 + dt * 0.15;
+    if (frameMs > 26) scale = Math.max(quality.min, scale * 0.94); else if (frameMs < 18) scale = Math.min(quality.max, scale * 1.03);
+    const w = Math.max(64, Math.round(canvas.width * scale)), h = Math.max(36, Math.round(canvas.height * scale));
+    if (!low || low.w !== w || low.h !== h) low = target(w, h, false);
+    renderPlanet(low.fb, w, h, [0, 0], Math.round(quality.steps * 0.7), Math.max(8, Math.round(quality.atmo * 0.7)));
+    present(low.tex, 1); samples = 0;
+    hud.textContent = `${Math.round(fps)} fps · ${Math.round(scale * 100)}% resolution`;
+    return;
+  }
+  if (!accum) {
+    if (samples === 0) { low = target(canvas.width, canvas.height, false); renderPlanet(low.fb, canvas.width, canvas.height, [0, 0], quality.steps, quality.atmo); samples = 1; }
+    present(low.tex, 1); hud.textContent = "Full resolution"; return;
+  }
+  if (samples >= quality.idle) { present(accum.tex, 1 / samples); return; }
+  if (samples === 0) { gl.bindFramebuffer(gl.FRAMEBUFFER, accum.fb); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+  renderPlanet(accum.fb, canvas.width, canvas.height, [halton(samples + 1, 2) - 0.5, halton(samples + 1, 3) - 0.5], quality.steps, quality.atmo);
+  gl.disable(gl.BLEND);
+  samples++;
+  present(accum.tex, 1 / samples);
+  hud.textContent = `Refining · ${samples} of ${quality.idle} samples`;
+}
+
+// ------------------------------------------------------------------ controls
+function moved() { lastMove = performance.now(); dirty = true; }
+const altIn = document.getElementById("alt"), altOut = document.getElementById("altOut");
+const toSlider = (alt) => Math.log(alt / MIN_ALT) / Math.log(MAX_ALT / MIN_ALT);
+const fromSlider = (s) => MIN_ALT * Math.pow(MAX_ALT / MIN_ALT, s);
+function showAlt() {
+  const km = cam.alt * 6371;
+  altOut.textContent = km >= 1000 ? `${(km / 1000).toFixed(1)}k km` : `${Math.round(km)} km`;
+  altIn.value = toSlider(cam.alt);
+}
+altIn.addEventListener("input", () => { cam.alt = fromSlider(+altIn.value); showAlt(); moved(); });
+let dragging = null;
+canvas.addEventListener("pointerdown", (e) => { dragging = { x: e.clientX, y: e.clientY }; if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  const k = 0.005 * Math.min(1, cam.alt * 0.9 + 0.01);           // slower near the ground
+  cam.yaw -= (e.clientX - dragging.x) * k;
+  cam.pitch = Math.min(1.45, Math.max(-1.45, cam.pitch + (e.clientY - dragging.y) * k));
+  dragging = { x: e.clientX, y: e.clientY }; moved();
+});
+window.addEventListener("pointerup", () => { dragging = null; });
+canvas.addEventListener("wheel", (e) => { e.preventDefault(); cam.alt = Math.min(MAX_ALT, Math.max(MIN_ALT, cam.alt * Math.exp(e.deltaY * 0.0012))); showAlt(); moved(); }, { passive: false });
+const bind = (id, outId, fmt, setter) => {
+  const el = document.getElementById(id), out = document.getElementById(outId);
+  const update = () => { setter(+el.value); out.textContent = fmt(+el.value); moved(); };
+  el.addEventListener("input", update); out.textContent = fmt(+el.value);
+};
+bind("sun", "sunOut", (v) => `${Math.round(v)}°`, (v) => { sunAngle = v; });
+bind("clouds", "cloudsOut", (v) => `${Math.round(v * 100)}%`, (v) => { cover = v; });
+bind("sea", "seaOut", (v) => `${v > 0 ? "+" : ""}${(v * 1).toFixed(1)} km`, (v) => { sea = v; });
+document.getElementById("quality").addEventListener("change", (e) => { quality = QUALITY[e.target.value]; scale = (quality.min + quality.max) / 2; moved(); });
+const spinBtn = document.getElementById("spin");
+spinBtn.addEventListener("click", () => { spinning = !spinning; spinBtn.setAttribute("aria-pressed", String(spinning)); moved(); });
+document.getElementById("reseed").addEventListener("click", () => { seed = Math.round(Math.random() * 1000) / 10 + 2; moved(); });
+
+// Finding the mountains: a copy of the terrain in JavaScript does not agree with the GPU
+// (its hash multiplies numbers near 80,000 and keeps the fraction, which 32-bit and 64-bit
+// floats disagree on), so ask the GPU. A probe runs the shader's own height() over a
+// longitude-latitude grid and the page reads the answer back.
+const PROBE_W = 256, PROBE_H = 128;
+const PROBE = PLANET.slice(0, PLANET.indexOf("bool sphere(")) + `
+void main() {
+  vec2 uv = gl_FragCoord.xy / vec2(${PROBE_W}.0, ${PROBE_H}.0);
+  float lon = uv.x * 6.2831853 - 3.14159265, lat = (uv.y - 0.5) * 3.14159265;
+  vec3 d = vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
+  float v = clamp((height(d, 5.0) + 0.012) / 0.03, 0.0, 1.0);
+  fragColor = vec4(floor(v * 255.0) / 255.0, fract(v * 255.0), 0.0, 1.0);
+}`;
+let probe = null;
+function highestGround() {
+  if (!probe) probe = program(VERT, PROBE);
+  const t = target(PROBE_W, PROBE_H, false);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb); gl.viewport(0, 0, PROBE_W, PROBE_H);
+  gl.useProgram(probe.p);
+  if (probe.u.uSeed) gl.uniform1f(probe.u.uSeed, seed);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  const px = new Uint8Array(PROBE_W * PROBE_H * 4);
+  gl.readPixels(0, 0, PROBE_W, PROBE_H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(t.fb); gl.deleteTexture(t.tex);
+  let best = null;
+  for (let y = 0; y < PROBE_H; y++) {
+    const lat = ((y + 0.5) / PROBE_H - 0.5) * Math.PI;
+    if (Math.abs(lat) > 0.75) continue;                         // not the ice caps
+    for (let x = 0; x < PROBE_W; x++) {
+      const i = (y * PROBE_W + x) * 4, h = (px[i] / 255 + px[i + 1] / 255 / 255) * 0.03 - 0.012;
+      if (!best || h > best.h) best = { h, lat, lon: ((x + 0.5) / PROBE_W) * Math.PI * 2 - Math.PI };
+    }
+  }
+  return best;
+}
+function visitMountains() {
+  const top = highestGround();
+  const best = { d: [Math.cos(top.lat) * Math.cos(top.lon), Math.cos(top.lat) * Math.sin(top.lon), Math.sin(top.lat)] };
+  // the shader looks terrain up at spinDir(world); undo the spin to find it in the world
+  const c = Math.cos(spin), s = Math.sin(spin), d = best.d;
+  const w = [c * d[0] - s * d[1], s * d[0] + c * d[1], d[2]];
+  const lat = Math.asin(w[2]), lon = Math.atan2(w[1], w[0]);
+  // stand well above the peak (the ground round it can be higher than any fixed height),
+  // a couple of hundred kilometres south, looking north across the range
+  cam.yaw = lon; cam.pitch = lat - 0.03;
+  cam.alt = top.h + 0.0016;
+  cover = Math.min(cover, 0.25); document.getElementById("clouds").value = cover; document.getElementById("cloudsOut").textContent = `${Math.round(cover * 100)}%`;
+  sunAngle = lon * 180 / Math.PI + 72;          // a low sun across the range, for long shadows
+  if (sunAngle > 180) sunAngle -= 360;
+  document.getElementById("sun").value = sunAngle; document.getElementById("sunOut").textContent = `${Math.round(sunAngle)}°`;
+  showAlt(); moved();
+}
+document.getElementById("visit").addEventListener("click", visitMountains);
+
+window.addEventListener("resize", resize);
+resize(); showAlt();
+requestAnimationFrame(frame);
+window.tellus = { cam, visit: visitMountains, highestGround: () => highestGround(), set(o) { if (o.sun !== undefined) sunAngle = o.sun; if (o.clouds !== undefined) cover = o.clouds; if (o.sea !== undefined) sea = o.sea; if (o.seed !== undefined) seed = o.seed; if (o.spin !== undefined) spin = o.spin; showAlt(); moved(); } };
+})();
+</script>
