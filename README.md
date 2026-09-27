@@ -50,10 +50,11 @@ and smoke from a density function. All three come from the snippets below.*
    from a clone of this repo:
 
    ```
+   mkdir dist
    blender --command extension build --source-dir codenodes --output-dir dist
    ```
 
-   That writes `dist/codenodes-0.1.0.zip`.
+   That writes `dist/codenodes-0.1.0.zip` (Blender needs the `dist` folder to exist first).
 2. **Install it.** Edit › Preferences › Get Extensions › the ⌄ menu at the top right ›
    **Install from Disk…** › pick the zip. It's enabled straight away.
 3. **Optional: connect an assistant.**
