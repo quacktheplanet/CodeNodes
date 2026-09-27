@@ -2,8 +2,8 @@
 
     blender --factory-startup --python tests/test_bake_nodes.py
 
-Needs a window (the reference mesh comes from the GPU) and Expression Nodes: a sibling
-checkout at ../expression-nodes, or its path in CODENODES_EXPRESSION_NODES.
+Needs a window (the reference mesh comes from the GPU) and ExpressNode: a sibling
+checkout at ../ExpressNode, or its path in CODENODES_EXPRESSION_NODES.
 """
 import os
 import subprocess
@@ -18,7 +18,7 @@ from mathutils.bvhtree import BVHTree
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.environ.get("CODENODES_EXPRESSION_NODES",
-                                  os.path.join(os.path.dirname(ROOT), "expression-nodes")))
+                                  os.path.join(os.path.dirname(ROOT), "ExpressNode")))
 import codenodes  # noqa: E402
 from codenodes import api, sdf_code  # noqa: E402
 

@@ -148,7 +148,7 @@ class CODENODES_OT_bake_nodes(bpy.types.Operator):
     bl_idname = "codenodes.bake_nodes"
     bl_label = "Bake to Nodes"
     bl_description = ("Rebuild the code as a Geometry Nodes network: no files, no GPU, evaluated every "
-                      "frame, sliders kept (needs the Expression Nodes add-on)")
+                      "frame, sliders kept (needs the ExpressNode add-on)")
     bl_options = {'REGISTER', 'UNDO'}
 
     object_name: StringProperty(options={'HIDDEN'})

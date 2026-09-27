@@ -93,7 +93,7 @@ def bake(name, frame_start=None, frame_end=None):
 
 def bake_to_nodes(name):
     """Turn a Code Mesh's code into a Geometry Nodes network: no files, no GPU, evaluated
-    natively every frame, sliders kept. Needs the Expression Nodes add-on.
+    natively every frame, sliders kept. Needs the ExpressNode add-on.
 
     Code with loops, `if` statements or noise can't convert yet; the answer says so and
     suggests Bake to Disk, and the object is left as it was.

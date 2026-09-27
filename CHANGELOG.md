@@ -22,7 +22,7 @@ The first public version. Tested on Blender 5.0.1 and 5.1.2, Windows 11, NVIDIA 
 - **Bake to Disk:** per-frame files played back by stock Geometry Nodes, so bakes render in F12, on
   machines with no GPU and without the add-on.
 - **Bake to Nodes (experimental):** GLSL translated into a native Geometry Nodes network through the
-  Expression Nodes add-on (not public yet).
+  ExpressNode add-on (not public yet).
 
 ### Assistants
 - `codenodes.agent`: a dict-returning surface for assistants (make, set sliders, frame, light,

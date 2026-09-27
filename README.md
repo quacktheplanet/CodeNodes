@@ -28,7 +28,7 @@ and smoke from a density function. All three come from the snippets below.*
 | **Code → Particles** | your own GPU particle solver → a point cloud with velocity, age and life | works |
 | **Node editor** | code nodes with typed sockets that compile into one GPU program | works |
 | **Bake to Disk** | animations written to files that play back with stock nodes; renders with no GPU and no add-on | works |
-| **Bake to Nodes** | the GLSL itself becomes a Geometry Nodes network | experimental (needs the Expression Nodes add-on, not public yet) |
+| **Bake to Nodes** | the GLSL itself becomes a Geometry Nodes network | experimental (needs the ExpressNode add-on, not public yet) |
 | **Assistant link (MCP)** | lets an assistant such as Claude build, render and look at its work; fixed tool list, no arbitrary code | works |
 | **Geometry Nodes agent** | build, explain and edit any node tree as data; a library of tested capabilities (terrain, scatter, walls, rooms, roofs, stairs, water, paths) | works |
 | **Web pages** | a scene as one self-contained page with sliders; Code Shapes rebuild live in the browser | works |
@@ -404,7 +404,7 @@ There are three phases.
    GPU and without this add-on. **Remove Cache** goes back to live.
 3. **Bake to Nodes (experimental).** The code itself becomes a Geometry Nodes network: no files, no
    GPU, evaluated natively every frame, sliders on the modifier. CodeNodes translates the GLSL into
-   the language of Expression Nodes (a separate add-on, not public yet), which builds the node group;
+   the language of ExpressNode (a separate add-on, not public yet), which builds the node group;
    a Volume Cube (density = −sdf) and Volume to Mesh make the surface. Tested against the GPU mesh from
    the same code: the same vertices, after a slider change and on an animated frame. About 8 ms per
    rebuild at resolution 96.
@@ -440,7 +440,7 @@ api.bake_to_nodes("Ring")   # to nodes: {"ok": True, "sliders": [...]} or {"ok":
   mode is planned.
 - Roofs cover a plan's bounding box; L- and T-shaped plans don't get proper roofs yet.
 - Buildings from a spec and the `geonodes/` library are experimental (see above).
-- Bake to Nodes needs the Expression Nodes add-on, which isn't public yet.
+- Bake to Nodes needs the ExpressNode add-on, which isn't public yet.
 
 ## Tests
 
@@ -454,7 +454,7 @@ python tests/test_factory.py                                   # spec, planner, 
 blender --factory-startup --python tests/test_blender.py       # needs a window: the GPU isn't available with -b (29)
 blender --factory-startup --python tests/test_nodes.py         # node editor, incl. save/reload (30)
 blender --factory-startup --python tests/test_bake.py          # baking, and playback through stock nodes (18)
-blender --factory-startup --python tests/test_bake_nodes.py    # code to nodes, against the GPU mesh (11; needs Expression Nodes)
+blender --factory-startup --python tests/test_bake_nodes.py    # code to nodes, against the GPU mesh (11; needs ExpressNode)
 blender -b --factory-startup --python tests/test_farm.py       # the bake renders with no GPU and no add-on (10)
 blender --factory-startup --python tests/test_volume.py        # density code -> OpenVDB -> Volume object (16)
 blender --factory-startup --python tests/test_particles.py     # GPU particle solver, incl. baking (22)

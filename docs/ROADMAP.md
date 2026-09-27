@@ -14,7 +14,7 @@ all of them for a first public release:
 | `install-check` | the extension installed as a user installs it and driven through the real MCP process (27 checks); fixes: MCP SDK 2.x, a shadowed operator, a viewport grab covered by the splash; exact install steps in README |
 | `gn-capabilities` | `wall_network`, `rooms`, `roof`, `stairs`, `water`, terrain **Carve**; `curve(splines=...)`; the village demo |
 | `shape-sliders` | Code Shapes as live web pages: the shape language ported to JavaScript, held to the Python vertex for vertex |
-| `bake-to-nodes` | animation phase 3: the GLSL becomes a Geometry Nodes network through Expression Nodes |
+| `bake-to-nodes` | animation phase 3: the GLSL becomes a Geometry Nodes network through ExpressNode |
 | `roadmap-refresh` | this file |
 | `all-changes` | all of the above merged, for trying in one go |
 | `modeling-research` | `docs/MODELING_RESEARCH.md`: how others do language-to-buildings, and the plan |
@@ -61,8 +61,8 @@ Geometry Nodes network, so there are no files at all and the maths is evaluated 
 frame.
 
 > **Checked:** `codenodes/bake_nodes.py` translates the GLSL (local variables, maths, `?:`, user
-> helper functions, the distance helpers, `uTime`/`uFrame`) into the language of **Expression
-> Nodes** (quacktheplanet/expression-nodes, the renamed script-to-nodes repo), which builds the node
+> helper functions, the distance helpers, `uTime`/`uFrame`) into the language of **ExpressNode**
+> (quacktheplanet/ExpressNode, the renamed script-to-nodes repo), which builds the node
 > group; Volume Cube (density = −sdf, background far outside) → Volume to Mesh makes the surface.
 > Against the GPU mesh from the same code it gives *the same vertices* (both meshers average the
 > edge crossings of the same grid), after a slider change and on an animated frame, and the saved
@@ -73,7 +73,7 @@ frame.
 
 Original plan, kept for reference:
 
-- The **script-to-nodes** repo (now Expression Nodes) already compiles maths into
+- The **script-to-nodes** repo (now ExpressNode) already compiles maths into
   GN node trees, and Blender 5 has **Field to Grid → Grid to Mesh**, which is the same shape as what
   we do on the GPU.
 - Two routes: a **"Bake to Nodes"** button that emits a standalone GN group, and a **direct

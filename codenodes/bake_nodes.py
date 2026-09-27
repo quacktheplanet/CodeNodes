@@ -3,10 +3,10 @@
 No files and no GPU: the distance function is rebuilt from stock nodes and evaluated
 natively on every frame, so the object renders anywhere, animates, and keeps its sliders.
 
-    GLSL sdf(p)  --translate-->  a Python expression  --Expression Nodes-->  a node group
+    GLSL sdf(p)  --translate-->  a Python expression  --ExpressNode-->  a node group
     node group -> Volume Cube (density = -sdf) -> Volume to Mesh -> the surface
 
-The compiling is done by Expression Nodes (quacktheplanet/expression-nodes), which must be
+The compiling is done by ExpressNode (quacktheplanet/ExpressNode), which must be
 installed; this module translates CodeNodes' GLSL into its language. Only a part of GLSL
 translates: local variables, maths, `?:`, your own helper functions and CodeNodes' distance
 helpers. Loops, `if` statements and noise don't (CodeNodes' GPU noise has no exact twin in
@@ -25,7 +25,7 @@ class CannotConvert(SdfCodeError):
     """The code uses something that has no node version (yet). Bake to Disk instead."""
 
 
-# CodeNodes' helpers, written the way Expression Nodes takes them (component by component
+# CodeNodes' helpers, written the way ExpressNode takes them (component by component
 # where GLSL would lean on vector max/abs, which it doesn't have)
 HELPERS = {
     "sdSphere": "def sdSphere(p, r):\n    return length(p) - r",
@@ -54,7 +54,7 @@ FUNCTIONS = {"sin", "cos", "tan", "asin", "acos", "atan", "sqrt", "pow", "exp", 
              "floor", "ceil", "round", "mod", "sign", "min", "max", "clamp", "mix", "smoothstep",
              "fract", "step", "length", "dot", "cross", "normalize", "reflect", "vec2", "vec3", "vec4"}
 TYPES = {"float", "vec2", "vec3", "vec4", "int", "bool"}
-# names Expression Nodes gives a meaning of its own, and Python words
+# names ExpressNode gives a meaning of its own, and Python words
 TAKEN = {"P", "N", "i", "t", "frame", "dt", "and", "or", "not", "is", "in", "lambda", "def",
          "pass", "None", "True", "False", "from", "global", "with", "yield", "class", "del",
          "import", "as", "try", "except", "finally", "raise", "assert", "async", "await",
@@ -382,7 +382,7 @@ class _Translator:
 
 
 def translate(source, time_offset=0.0):
-    """GLSL sdf code -> (Expression Nodes source, params). Raises CannotConvert."""
+    """GLSL sdf code -> (ExpressNode source, params). Raises CannotConvert."""
     params = sdf_code.parse_params(source)
     tr = _Translator(source, params, time_offset)
     body = tr.program()
@@ -409,8 +409,8 @@ def _expression_nodes():
         from coding_nodes.backend.pipeline import build_in_blender
         return build_in_blender
     except ImportError:
-        raise CannotConvert("Bake to Nodes needs the Expression Nodes add-on "
-                            "(github.com/quacktheplanet/expression-nodes) installed and enabled") from None
+        raise CannotConvert("Bake to Nodes needs the ExpressNode add-on "
+                            "(github.com/quacktheplanet/ExpressNode) installed and enabled") from None
 
 
 def build(obj):
@@ -430,7 +430,7 @@ def build(obj):
     try:
         expr_tree = build_in_blender(source)
     except Exception as exc:
-        raise CannotConvert(f"Expression Nodes could not compile it: {exc}") from None
+        raise CannotConvert(f"ExpressNode could not compile it: {exc}") from None
     expr_tree.use_fake_user = True
 
     name = WRAPPER_PREFIX + obj.name

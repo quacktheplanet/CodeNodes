@@ -167,10 +167,10 @@ async def loop(t):
     shape_page = os.path.join(OUT, "lamp.html")
     ws = await t("web_shape", path=shape_page, object="Lamp", colors={"shade": [0.9, 0.55, 0.2]})
     check(ws.get("ok") and os.path.exists(shape_page), f"web_shape writes a live shape page ({ws.get('bytes')} bytes)")
-    # a fresh profile has no Expression Nodes, so bake_to_nodes has to say so, not break
+    # a fresh profile has no ExpressNode, so bake_to_nodes has to say so, not break
     bn = await t("bake_to_nodes", name="Ring")
-    check(bn.get("ok") is False and "Expression Nodes" in bn.get("error", "") and bn.get("fallback") == "bake",
-          f"bake_to_nodes without Expression Nodes says what it needs ({bn.get('error', '')[:60]})")
+    check(bn.get("ok") is False and "ExpressNode" in bn.get("error", "") and bn.get("fallback") == "bake",
+          f"bake_to_nodes without ExpressNode says what it needs ({bn.get('error', '')[:60]})")
 
     # --- limits ---------------------------------------------------------------------------
     nope = await t.raw("exec", {"code": "import os"})
