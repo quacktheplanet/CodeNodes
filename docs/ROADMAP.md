@@ -15,6 +15,9 @@ tested on both Blender versions and waiting for the user to try and merge:
 | `shape-sliders` | Code Shapes as live web pages: the shape language ported to JavaScript, held to the Python vertex for vertex |
 | `bake-to-nodes` | animation phase 3: the GLSL becomes a Geometry Nodes network through Expression Nodes |
 | `roadmap-refresh` | this file |
+| `all-changes` | all of the above merged, for trying in one go |
+| `modeling-research` | `docs/MODELING_RESEARCH.md`: how others do language-to-buildings, and the plan |
+| `factory-builder` | **the plan built (phases 0–7)**: spec → floor plan → building → equipment → verify, six MCP tools, the `geonodes/` library (on top of `modeling-research`, so it includes `all-changes`) |
 
 They were cut from `main` separately, so README.md and the MCP tool list will need a small hand
 merge where two branches both added lines.
@@ -320,6 +323,55 @@ open in shape.
 4. **Cinematic raster flythrough** — triangles pushed hard; the bridge to the game and to
    Solid Suzanne.
 
+**P2.8 — buildings from a spec: the factory builder** (the user, 2026-09-27: "make me a floor plan
+for a factory floor, given some specs, and actually go to work creating the building, the room,
+the robots inside it"; branch `factory-builder`, plan in `docs/MODELING_RESEARCH.md`)
+
+![the example factory](factory_demo.jpg)
+
+Done, phases 0–7, in `codenodes/factory/`, all tested on 5.0.1 and 5.1.2:
+- **Spec** (`spec.py`): site, spaces (16 types) with areas, SLP closeness A E I O U X, material
+  flow, equipment, rules with sourced defaults (forklift aisle 3.6 m, corridor 1.2 m, 76 m travel).
+  Problems come back as readable sentences with where they are. Six example specs: factory,
+  machine shop, warehouse, bakery, lab, two-storey house.
+- **Planner** (`planner.py`, no Blender): strips of spaces along the long side with an aisle
+  between every two, annealed on shape, outside-wall needs (docks, windows, a named side),
+  closeness, flow and (upstairs) areas; then walls, doors onto aisles, dock doors, windows,
+  exits at both aisle ends with a personnel door beside the drive-in door, a column grid kept
+  out of aisles, stairs and slab holes. Beats 30/30 random arrangements on its own score.
+  A text grid view and a PNG drawing (pure Python) for looking before building.
+- **Generators** (`kit.py`, `equipment.py`): 17 parametric parts written once as formulas of
+  their sliders, turned into a plain mesh (tests, the build) or a Geometry Nodes group (the
+  library) that match vertex for vertex. Robot arm with six joints (limits, parent/child links)
+  recorded for animation and URDF later. A floating-parts check (every part rests on the floor or
+  on another part) runs at every slider's ends and 324 arm poses; it found nine real defects.
+- **Layout** (`layout.py`): conveyors between neighbours on the floor and across aisles as
+  overhead bridges, fenced robot cells sized from reach + fence clearance with a fixture in
+  reach, rack rows at right angles to the aisle with forklift aisles on every face, rows / grids /
+  perimeter items with service clearances; door and dock approaches kept free; what does not fit
+  is reported. A constraint search, not annealing: fast (under 0.5 s) and exact.
+- **Verifier** (`verify.py`, `tools.scene_checks`): areas, shapes, outside walls, docks,
+  collisions, bounds, aisle clear widths, service clearance, the walk from every free spot to an
+  exit (8-connected on 0.25 m), robot reach and fences; in Blender also floating parts, real mesh
+  intersections (BVH) and a ray through every opening. Repair re-places offenders and rolls back
+  when it gets worse. Renders: plan, cut-away, aisle walk (EEVEE).
+- **Building** (`build.py`): slabs with painted zones and aisle lines, `wall_network` for the shell
+  and partitions with a new Openings input (a points object: size and angle per point), `roof`,
+  `stairs`, columns, doors swung into their rooms, windows, dock doors, lights. Only objects tagged
+  with the factory are ever replaced.
+- **MCP tools**: `plan_site`, `edit_plan`, `build_plan`, `place_equipment`, `verify`, `assets`
+  (pictures come back as images). A real MCP client took the plain request above to a verified
+  building, then added a paint booth and verified again (13/13 on both Blender versions).
+- **`geonodes/`**: the library as node-group assets with catalogs (27 groups, 0.5 MB) and three
+  example scenes; opens in plain Blender with no add-on (checked on both versions).
+
+Next (phase 8 and after): motion (conveyors running, arms on pick-and-place loops, AMRs on paths,
+checked frame by frame); URDF/USD export from the recorded joints; L-shaped footprints and
+straight-skeleton roofs; a module-swap layer for façades (bundles and closures); more generators
+(press, paint booth, mezzanine, racking with pallets on the floor); aisles that turn corners
+instead of only running end to end; a learned or rule-based route for house plans that read
+better than strips.
+
 **P3 — bigger simulations**
 11. **Field output** (vector grids that GN simulations and hair can sample).
 12. **GPU smoke solver** (advect, pressure solve, project; sources, forces and SDF obstacles as nodes).
@@ -336,11 +388,11 @@ edges (dual contouring), and use fewer faces where the surface is flat.
 ## Decisions waiting
 
 - ~~**MCP server**~~ decided and built: our own, with a fixed tool table and no exec (see P1.4).
-- **Where the house builder lives**: its own add-on using CodeNodes, or inside CodeNodes. Today
-  the pieces (`rooms`, `roof`, `stairs`, `wall_network`) are capabilities inside CodeNodes.
-  the user (2026-09-27): it is part of an all-round modeling system (spec → floor plan → building →
-  rooms → equipment and robots), and standalone pieces go in a Geometry Nodes project folder.
-  Research and a phased plan: `docs/MODELING_RESEARCH.md`.
+- ~~**Where the house builder lives**~~ decided (the user, 2026-09-27): part of the all-round modeling
+  system, inside CodeNodes (`codenodes/factory/`), with the standalone pieces shipped as node-group
+  assets in `geonodes/`. Built on branch `factory-builder` (P2.8).
+- **Robots first as what?** Static posed models are built; the joints are recorded. Animated
+  (showcases, the Unreal game) or simulation export (URDF/MJCF) next: the user to choose.
 - **License**: the manifest says GPL-3.0-or-later (placeholder). Infinigen is BSD-3 and Poly Haven
   assets are CC0, so both fit.
 - ~~**Merging `node-editor` and `bake` into `main`.**~~ Done. Still waiting: the five branches in

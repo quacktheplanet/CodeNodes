@@ -151,7 +151,16 @@ def apply(p, ops, seed=None):
     new = planner.plan(spec, seed=seed, assignment=None if fresh else assign, locked=arrangement_only)
     before = {sp["name"]: sp["rect"] for lvl in p["levels"] for sp in lvl["spaces"]}
     after = {sp["name"]: sp["rect"] for lvl in new.get("levels", []) for sp in lvl["spaces"]}
-    moved = sorted(n for n in after if n in before and after[n] != before[n])
-    report = {"applied": done, "kept_arrangement": arrangement_only and not fresh, "moved": moved,
+
+    def places(assignment):
+        """Each space's floor, strip and place along the strip: what "where it is" means here."""
+        return {n: (lvl, j, i) for lvl, strips in (assignment or {}).items()
+                for j, st in enumerate(strips) for i, n in enumerate(st)}
+    old_at, new_at = places(p.get("assignment")), places(new.get("assignment"))
+    common = [n for n in after if n in before]
+    moved = sorted(n for n in common if old_at.get(n) != new_at.get(n))
+    resized = sorted(n for n in common if n not in moved and after[n] != before[n])
+    report = {"applied": done, "kept_arrangement": arrangement_only and not fresh,
+              "moved": moved, "resized_only": resized,
               "added": sorted(set(after) - set(before)), "removed": sorted(set(before) - set(after))}
     return new, report

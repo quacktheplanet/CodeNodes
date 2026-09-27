@@ -269,6 +269,28 @@ agent.nodes_check("MyGroup")              # what came out: mesh, curves, points,
 The same tools are MCP tools, alongside `material`, `collect`, `curve`, `light("outdoor")`,
 `look_at` and `render`, so an assistant can build a scene, look at it and fix what it sees.
 
+## Buildings from a spec: factories, warehouses, labs, houses
+
+"Make me a 60 x 40 m factory floor with docks, racking, machining, two robot cells, QA and
+offices" becomes a spec (spaces with areas, closeness ratings, material flow, equipment), and
+six tools do the rest:
+
+```python
+agent.plan_site(spec, name="Plant")      # or example="factory"; a plan, a text grid, a picture
+agent.edit_plan("Plant", [{"op": "swap", "a": "QA", "b": "Offices"}])
+agent.build_plan("Plant")                # walls with every door and dock cut, roof, columns, lights
+agent.place_equipment("Plant")           # conveyors, fenced robot cells, rack rows, machine rows
+agent.verify("Plant")                    # collisions, aisles, egress walk, reach, floating parts,
+                                         # openings, mesh intersections; renders three views
+agent.assets("robot_arm")                # a generator's sliders, clearances and joints
+```
+
+The same six are MCP tools. Everything is built from the Geometry Nodes library and 17
+parametric generators; `geonodes/` ships them as node-group assets and example scenes that open
+without the add-on. How it works and why: `docs/MODELING_RESEARCH.md`, ROADMAP P2.8.
+
+![the example factory](docs/factory_demo.jpg)
+
 ## To the web, with sliders
 
 `agent.web_page` writes a scene as one self-contained page (three.js, orbit controls) with a
@@ -369,6 +391,11 @@ blender -b --factory-startup --python tests/test_gn.py         # Geometry Nodes 
 blender -b --factory-startup --python tests/test_gn_library.py # every capability; editing real trees (72)
 blender -b --factory-startup --python tests/test_web.py        # a scene as a web page with sliders; a live shape page (16)
 node tests/web_shape_check.mjs <page folder>                   # that page in headless Edge: builds and rebuilds as Python does (7)
+python tests/test_factory.py                                   # spec, planner, generators, layout, verifier, edits (129)
+blender -b --factory-startup --python tests/test_factory_blender.py   # building, equipment, scene checks, house (30)
+blender -b --factory-startup --python tests/test_geonodes_library.py  # geonodes/ in plain Blender, no add-on (15)
+powershell -File tests/install_check.ps1 -Python <venv python> -Work <scratch> -Client mcp_factory.py
+    # a factory from a plain request through the real MCP process (13 per version)
 powershell -File tests/install_check.ps1 -Python <venv python> -Work <scratch folder>
     # the zip installed as a user installs it, then the whole loop through the real MCP process (29 per version)
 ```

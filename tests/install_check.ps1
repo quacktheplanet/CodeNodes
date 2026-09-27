@@ -1,4 +1,4 @@
-# Install check: the extension zip, installed the way a user installs it, driven end to end
+﻿# Install check: the extension zip, installed the way a user installs it, driven end to end
 # through the real MCP server process by a real MCP client. Never touches your own Blender
 # profile: everything goes into a throwaway folder via BLENDER_USER_RESOURCES.
 #
@@ -8,6 +8,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Python,
     [Parameter(Mandatory = $true)][string]$Work,
+    [string]$Client = "mcp_e2e.py",
     [string[]]$Blenders = @(
         "C:/Users/you\blender-versions\blender-5.0.1-windows-x64\blender.exe",
         "C:\Program Files\Blender Foundation\Blender 5.1\blender.exe")
@@ -55,7 +56,7 @@ foreach ($B in $Blenders) {
 
     $env:CODENODES_TOKEN_FILE = Join-Path $prof "config\codenodes_token.json"
     $out = Join-Path $prof "mcp_out"
-    & $Python "$PSScriptRoot\mcp_e2e.py" $out | ForEach-Object { "$ver  $_" }
+    & $Python "$PSScriptRoot\$Client" $out | ForEach-Object { "$ver  $_" }
     New-Item -ItemType File $done | Out-Null
     if (-not $p.WaitForExit(60000)) { $p.Kill() }
     $errs = Get-Content "$log.err" -ErrorAction SilentlyContinue | Select-String 'Traceback'

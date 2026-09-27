@@ -1,0 +1,26 @@
+# This is an Asset Catalog Definition file for Blender.
+#
+# Written by geonodes/build_library.py; edits here are overwritten.
+
+VERSION 1
+
+c0a80130-21dd-56e8-ac6b-a197da71da74:Architecture:Architecture
+93589e22-1b62-50f8-8b89-373c7fec9e76:Architecture/Openings:Architecture-Openings
+6d01f142-85d4-521a-9bde-c790d55c1e2d:Architecture/Paths:Architecture-Paths
+027dec19-3f6d-5dfd-b1c8-0e79dbccefe4:Architecture/Roofs and Stairs:Architecture-Roofs and Stairs
+56db53f7-f785-5f32-8c64-b56822b50c65:Architecture/Services:Architecture-Services
+c3fc1a98-0e15-593a-b8a0-ad81c3ab07c0:Architecture/Structure:Architecture-Structure
+355b5413-8bea-5b31-8a18-8e26b88487b9:Architecture/Walls:Architecture-Walls
+16fb930c-487d-59f2-9450-bb29f370931d:Factory:Factory
+7d2464e6-97dc-522e-a2f4-bda43a32b6c8:Factory/Electrical:Factory-Electrical
+064b14f4-7b17-5b41-88a3-2dd4d2f0d814:Factory/Handling:Factory-Handling
+459c1d37-396d-59ee-9d6e-d07ce6c0dc85:Factory/Machines:Factory-Machines
+31d37210-fd22-5df5-b65e-b62530973292:Factory/Process:Factory-Process
+03d6755d-a8a5-5c63-b664-28a692bb05e9:Factory/Robots:Factory-Robots
+60e73f10-c166-5def-a4d1-5aa002be1bb4:Factory/Safety:Factory-Safety
+5daced22-dbad-59ea-b2aa-62f9c7164532:Factory/Storage:Factory-Storage
+3941054b-d850-5bda-9aab-289da5e1c9d3:Factory/Vehicles:Factory-Vehicles
+718fc84a-f867-550f-be11-620db9fe37e5:Factory/Workstations:Factory-Workstations
+76ceedb0-71ab-59dd-86ad-7a1c8d15595a:Furniture:Furniture
+216eedf4-b094-5ba8-89aa-a15ce0c12511:Furniture/Office:Furniture-Office
+5636a167-6b28-508b-8272-87e472bc1daa:Terrain:Terrain

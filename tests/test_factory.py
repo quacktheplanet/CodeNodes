@@ -315,7 +315,7 @@ def test_edits():
     ra = {sp["name"]: sp["rect"] for sp in p["levels"][0]["spaces"]}
     rb = {sp["name"]: sp["rect"] for sp in new["levels"][0]["spaces"]}
     check(rep["kept_arrangement"] and set(rep["moved"]) >= {a, b}, "a swap exchanges two spaces and keeps the rest")
-    still = [n for n in names if n not in rep["moved"]]
+    still = [n for n in names if n not in rep["moved"] and n not in rep["resized_only"]]
     check(all(ra[n] == rb[n] for n in still), f"{len(still)} other spaces stay exactly where they were")
     new, rep = edits.apply(p, [{"op": "add_space", "space": {"name": "Paint", "area": 150, "type": "production",
                                                               "enclosed": True}},
@@ -323,6 +323,9 @@ def test_edits():
                                {"op": "add_equipment", "item": {"kind": "tank", "count": 2, "in": "Paint"}}])
     check(new["ok"] and rep["added"] == ["Paint"] and any(e["in"] == "Paint" for e in new["spec"]["equipment"]),
           "adding a space with a relation and equipment re-solves around it")
+    check(len(rep["moved"]) <= len(names) // 2,
+          f"most spaces keep their strip and neighbours ({len(rep['moved'])} of {len(names)} moved, "
+          f"{len(rep['resized_only'])} only resized)")
     new, rep = edits.apply(p, [{"op": "remove_space", "space": "Break Room"}])
     check(new["ok"] and rep["removed"] == ["Break Room"], "removing a space")
     new, rep = edits.apply(p, [{"op": "rule", "name": "aisle_forklift", "value": 4.2}])

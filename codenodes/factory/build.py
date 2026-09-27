@@ -430,6 +430,9 @@ def building(p, name):
                 ld = bpy.data.lights.new(f"{name} lamp", 'AREA')
                 ld.size = 1.2 if house else 2.5
                 ld.energy = 120.0 if house else 2200.0
+                # dozens of shadowed area lights overflow EEVEE's shadow pool; the sun
+                # gives the shadows, the grid only lights
+                ld.use_shadow = False
                 lo = bpy.data.objects.new(f"{name} lamp L{lvl['level']} {i}.{j}", ld)
                 lo.location = ((i + 0.5) * W / nx, (j + 0.5) * D / ny, zl)
                 lights.objects.link(lo)
