@@ -1,0 +1,466 @@
+<title>Myriad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* One deliberate look: light on black, whatever the theme. Every colour is set here. */
+:root {
+  --glass: rgba(8, 8, 14, 0.58); --edge: rgba(255, 210, 240, 0.14);
+  --ink: #F2EEF6; --muted: #AFA6BB; --rose: #FF9EC7; --rose-ink: #1E0612;
+  --display: "Cinzel", "Trajan Pro", Georgia, serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: #000; color: var(--ink); font-family: var(--body); overflow: hidden; font-size: 14px; }
+canvas#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+canvas#view.stir { cursor: crosshair; }
+.glass { background: var(--glass); backdrop-filter: blur(14px) saturate(1.2); border: 1px solid var(--edge); border-radius: 12px; }
+#panel { position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: min(300px, calc(100% - 32px));
+  padding: 14px 16px; display: grid; gap: 12px; max-height: calc(100% - 32px); overflow: auto; }
+#panel h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 30px; letter-spacing: 0.14em; line-height: 1; }
+#panel .sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.field { display: grid; gap: 4px; }
+.field .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.field label { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; color: var(--muted); }
+.field output { font-family: var(--mono); font-size: 12px; color: var(--rose); font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--rose); margin: 0; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+button, select { font: inherit; color: var(--ink); }
+.btn { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--edge); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-weight: 500; }
+.btn:hover { background: rgba(255, 255, 255, 0.12); }
+.btn[aria-pressed="true"] { background: var(--rose); color: var(--rose-ink); border-color: transparent; }
+select { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--edge); border-radius: 8px; padding: 5px 8px; }
+select option { background: #141019; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--rose); outline-offset: 2px; }
+#hud { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px; padding: 6px 10px; font-family: var(--mono);
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  #panel { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); left: 10px; width: calc(100% - 20px); max-height: 50%; padding: 12px; gap: 10px; }
+  #panel h1 { font-size: 24px; }
+  #panel .sub { display: none; }
+}
+</style>
+
+<canvas id="view" aria-label="Millions of particles moved by GPU code. Drag to orbit; turn on Stir to push them."></canvas>
+<div id="hud" class="glass" role="status">Starting…</div>
+<section id="panel" class="glass" aria-label="Simulation">
+  <div>
+    <h1>Myriad</h1>
+    <p class="sub">Millions of particles, each moved every frame by code running on the graphics card. Drag to orbit; switch on Stir and drag through them.</p>
+  </div>
+  <div class="field"><div class="row"><label>Motion</label></div>
+    <div class="seg" role="group" aria-label="Motion">
+      <button class="btn" type="button" data-mode="0" aria-pressed="true">Galaxy</button>
+      <button class="btn" type="button" data-mode="1" aria-pressed="false">Flow</button>
+      <button class="btn" type="button" data-mode="2" aria-pressed="false">Attractor</button>
+    </div></div>
+  <div class="field"><div class="row"><label for="count">Particles</label></div>
+    <select id="count"><option value="512">262,144</option><option value="1024" selected>1,048,576</option><option value="2048">4,194,304</option></select></div>
+  <div class="field"><div class="row"><label for="speed">Speed</label><output id="speedOut" for="speed"></output></div>
+    <input type="range" id="speed" min="0" max="3" step="0.01" value="1"></div>
+  <div class="field"><div class="row"><label for="trails">Trails</label><output id="trailsOut" for="trails"></output></div>
+    <input type="range" id="trails" min="0" max="0.97" step="0.01" value="0.6"></div>
+  <div class="field"><div class="row"><label for="glow">Glow</label><output id="glowOut" for="glow"></output></div>
+    <input type="range" id="glow" min="0" max="2" step="0.01" value="0.9"></div>
+  <div class="buttons">
+    <button class="btn" id="stir" type="button" aria-pressed="false">Stir</button>
+    <button class="btn" id="reset" type="button">Start again</button>
+    <button class="btn" id="pause" type="button" aria-pressed="false">Pause</button>
+  </div>
+</section>
+
+<script>
+(function () {
+"use strict";
+const hud = document.getElementById("hud");
+const canvas = document.getElementById("view");
+const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, powerPreference: "high-performance" });
+if (!gl) { hud.textContent = "This needs WebGL 2, which this browser does not offer."; return; }
+if (!gl.getExtension("EXT_color_buffer_float")) { hud.textContent = "This needs floating-point render targets (EXT_color_buffer_float), which this GPU does not offer."; return; }
+gl.getExtension("OES_texture_float_linear");
+
+// ------------------------------------------------------------------ shaders
+const QUAD = `#version 300 es
+in vec2 aPos; out vec2 vUv;
+void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const COMMON = `
+float hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+vec3 hash3(vec2 p) { return vec3(hash(p), hash(p + 17.13), hash(p + 41.71)); }
+vec3 randSphere(vec2 s) { vec3 h = hash3(s); float z = h.x * 2.0 - 1.0, a = h.y * 6.2831853, r = sqrt(1.0 - z * z); return vec3(r * cos(a), r * sin(a), z) * pow(h.z, 0.333); }
+// gradient noise and its curl, for a flow that never piles up
+vec3 hash33(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx) * 2.0 - 1.0; }
+float gnoise(vec3 p) {
+  vec3 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(dot(hash33(i), f), dot(hash33(i + vec3(1, 0, 0)), f - vec3(1, 0, 0)), u.x),
+                 mix(dot(hash33(i + vec3(0, 1, 0)), f - vec3(0, 1, 0)), dot(hash33(i + vec3(1, 1, 0)), f - vec3(1, 1, 0)), u.x), u.y),
+             mix(mix(dot(hash33(i + vec3(0, 0, 1)), f - vec3(0, 0, 1)), dot(hash33(i + vec3(1, 0, 1)), f - vec3(1, 0, 1)), u.x),
+                 mix(dot(hash33(i + vec3(0, 1, 1)), f - vec3(0, 1, 1)), dot(hash33(i + vec3(1, 1, 1)), f - vec3(1, 1, 1)), u.x), u.y), u.z);
+}
+vec3 potential(vec3 p) { return vec3(gnoise(p), gnoise(p + vec3(31.4, 7.1, 11.9)), gnoise(p + vec3(-17.3, 23.9, 5.3))); }
+vec3 curl(vec3 p) {
+  const float e = 0.08;
+  vec3 dx = vec3(e, 0, 0), dy = vec3(0, e, 0), dz = vec3(0, 0, e);
+  vec3 px0 = potential(p - dx), px1 = potential(p + dx), py0 = potential(p - dy), py1 = potential(p + dy), pz0 = potential(p - dz), pz1 = potential(p + dz);
+  return vec3((py1.z - py0.z) - (pz1.y - pz0.y), (pz1.x - pz0.x) - (px1.z - px0.z), (px1.y - px0.y) - (py1.x - py0.x)) / (2.0 * e);
+}
+`;
+
+// seeding: position in xyz, and w holds a per-particle value (radius, life…)
+const INIT = `#version 300 es
+precision highp float;
+in vec2 vUv;
+layout(location = 0) out vec4 oPos; layout(location = 1) out vec4 oVel;
+uniform int uMode; uniform float uSeed;
+${COMMON}
+void main() {
+  vec2 s = gl_FragCoord.xy + uSeed * 131.0;
+  vec3 h = hash3(s);
+  if (uMode == 0) {
+    // orbital elements for a kinematic density wave: an orbit size (a), a starting phase,
+    // a height above the disc, and whether the star belongs to the bulge
+    float bulge = step(hash(s + 9.0), 0.14);
+    float a = bulge > 0.5 ? pow(h.x, 1.6) * 0.45 + 0.02 : -log(1.0 - h.x * 0.99) * 0.6 + 0.05;
+    float z = (hash(s + 3.0) - 0.5) * (bulge > 0.5 ? 0.35 * (1.0 - a) : 0.05 * exp(-a));
+    oPos = vec4(0.0, 0.0, 0.0, a); oVel = vec4(h.y * 6.2831853, z, hash(s + 21.0), bulge);  } else if (uMode == 1) {
+    vec3 d = normalize(randSphere(s) + 1e-4);
+    oPos = vec4(d * (2.0 + h.x * 0.25), h.z * 8.0); oVel = vec4(0.0);
+  } else {
+    oPos = vec4((h - 0.5) * 0.6, hash(s + 2.0) * 20.0); oVel = vec4(0.0);
+  }
+}`;
+
+const STEP = `#version 300 es
+precision highp float;
+in vec2 vUv;
+layout(location = 0) out vec4 oPos; layout(location = 1) out vec4 oVel;
+uniform sampler2D uPos, uVel; uniform int uMode; uniform float uDt, uTime, uSeed, uStir; uniform vec3 uStirAt;
+${COMMON}
+void main() {
+  ivec2 ij = ivec2(gl_FragCoord.xy);
+  vec4 P = texelFetch(uPos, ij, 0), V = texelFetch(uVel, ij, 0);
+  vec3 p = P.xyz, v = V.xyz;
+  float dt = uDt;
+  vec3 push = vec3(0.0);
+  if (uStir != 0.0) { vec3 d = p - uStirAt; float l = length(d); push = d / (l * l * l + 0.08) * uStir * 0.35; }
+  if (uMode == 0) {
+    // Each star goes round an ellipse; each ellipse is turned a little more than the one
+    // inside it. The arms are where the orbits crowd together, so they never wind up.
+    float a = P.w, bulge = V.w;
+    float omega = 0.9 / (a + 0.25);                                     // inner stars go round faster
+    float phase = V.x + omega * uTime;
+    float squash = bulge > 0.5 ? 0.92 : 0.78;                            // how elliptical
+    float turn = a * 2.4 + 0.3;                                          // the twist that makes the spiral
+    vec2 e = vec2(cos(phase) * a, sin(phase) * a * squash);
+    float c = cos(turn), sn = sin(turn);
+    vec3 q = vec3(c * e.x - sn * e.y, sn * e.x + c * e.y, V.y);
+    if (bulge > 0.5) q.z += sin(phase * 1.7 + V.z * 20.0) * 0.08 * (1.0 - a);
+    vec3 np = q * 2.4;
+    oPos = vec4(np, a); oVel = vec4(V.x, V.y, V.z, bulge);  } else if (uMode == 1) {
+    float life = P.w - dt;
+    vec3 flow = curl(p * 0.55 + vec3(0.0, 0.0, uTime * 0.05)) * 0.55 - p * 0.04 * max(length(p) - 2.4, 0.0);
+    v = flow * 1.9 + push * 3.0;                                       // follow the current exactly: crisp filaments
+    p += v * dt;
+    if (life < 0.0 || length(p) > 6.0) { p = randSphere(gl_FragCoord.xy + uTime * 13.7 + uSeed) * 2.2; v = vec3(0.0); life = 4.0 + hash(gl_FragCoord.xy + uTime) * 5.0; }
+    oPos = vec4(p, life); oVel = vec4(v, 0.0);
+  } else {
+    // the Aizawa attractor, integrated in its own units and drawn scaled up
+    float life = P.w - dt;
+    vec3 q = p;
+    const float a = 0.95, b = 0.7, c = 0.6, d = 3.5, e = 0.25, f = 0.1;
+    for (int k = 0; k < 3; k++) {
+      vec3 dq = vec3((q.z - b) * q.x - d * q.y, d * q.x + (q.z - b) * q.y,
+                     c + a * q.z - q.z * q.z * q.z / 3.0 - (q.x * q.x + q.y * q.y) * (1.0 + e * q.z) + f * q.z * q.x * q.x * q.x);
+      q += dq * dt * 0.45;
+    }
+    v = (q - p) / max(dt, 1e-4);
+    p = q + push * dt * 0.2;
+    if (life < 0.0 || length(p) > 4.0) { p = (hash3(gl_FragCoord.xy + uTime * 7.3) - 0.5) * 0.4 + vec3(0.1, 0.0, 0.0); life = 8.0 + hash(gl_FragCoord.xy + uTime) * 20.0; }
+    oPos = vec4(p, life); oVel = vec4(v, 0.0);
+  }
+}`;
+
+// each particle is a point, fetched from the textures by its index
+const DRAW_V = `#version 300 es
+precision highp float;
+uniform sampler2D uPos, uVel; uniform int uSide, uMode; uniform mat4 uViewProj; uniform float uPoint, uGain;
+out vec3 vColor;
+vec3 ramp(float t, vec3 a, vec3 b, vec3 c) { return t < 0.5 ? mix(a, b, t * 2.0) : mix(b, c, t * 2.0 - 1.0); }
+void main() {
+  ivec2 ij = ivec2(gl_VertexID % uSide, gl_VertexID / uSide);
+  vec4 P = texelFetch(uPos, ij, 0), V = texelFetch(uVel, ij, 0);
+  vec3 p = P.xyz; float speed = length(V.xyz);
+  if (uMode == 2) p = vec3(p.x, p.y, p.z - 0.6) * 2.1;                   // the attractor, centred and enlarged
+  gl_Position = uViewProj * vec4(p, 1.0);
+  gl_PointSize = uPoint;
+  vec3 c;
+  if (uMode == 0) {
+    float r = P.w, rnd = V.z;
+    vec3 old = vec3(1.0, 0.78, 0.5), young = vec3(0.55, 0.7, 1.0), rosy = vec3(1.0, 0.55, 0.75);
+    c = V.w > 0.5 ? old * 0.55 : mix(mix(old, young, smoothstep(0.15, 0.9, r)), rosy, step(0.985, rnd) * 0.9);
+    c *= (0.25 + 0.75 * smoothstep(0.0, 0.7, r)) * (0.6 + 0.8 * rnd);   // fewer photons from the crowded middle  } else if (uMode == 1) {
+    c = ramp(clamp(speed * 1.1, 0.0, 1.0), vec3(0.15, 0.25, 0.9), vec3(0.3, 0.95, 0.85), vec3(1.0, 0.95, 0.7));
+    c *= smoothstep(0.0, 1.0, P.w) ;
+  } else {
+    c = ramp(clamp(speed * 0.35, 0.0, 1.0), vec3(0.6, 0.12, 0.45), vec3(1.0, 0.45, 0.25), vec3(1.0, 0.95, 0.8));
+  }
+  vColor = c * uGain;
+}`;
+const DRAW_F = `#version 300 es
+precision highp float;
+in vec3 vColor; out vec4 fragColor;
+void main() { fragColor = vec4(vColor, 1.0); }`;
+
+const FADE = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 fragColor;
+uniform float uKeep;
+void main() { fragColor = vec4(0.0, 0.0, 0.0, uKeep); }`;
+
+// bloom: a chain of half-size images, then added back up
+const DOWN = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 fragColor;
+uniform sampler2D uSrc; uniform vec2 uTexel; uniform float uThreshold;
+void main() {
+  vec3 c = (texture(uSrc, vUv + uTexel * vec2(-1, -1)).rgb + texture(uSrc, vUv + uTexel * vec2(1, -1)).rgb +
+            texture(uSrc, vUv + uTexel * vec2(-1, 1)).rgb + texture(uSrc, vUv + uTexel * vec2(1, 1)).rgb) * 0.25;
+  c = max(c - uThreshold, 0.0);
+  fragColor = vec4(c, 1.0);
+}`;
+const UP = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 fragColor;
+uniform sampler2D uSrc; uniform vec2 uTexel;
+void main() {
+  vec3 c = texture(uSrc, vUv).rgb * 4.0;
+  c += (texture(uSrc, vUv + vec2(uTexel.x, 0)).rgb + texture(uSrc, vUv - vec2(uTexel.x, 0)).rgb + texture(uSrc, vUv + vec2(0, uTexel.y)).rgb + texture(uSrc, vUv - vec2(0, uTexel.y)).rgb) * 2.0;
+  c += texture(uSrc, vUv + uTexel).rgb + texture(uSrc, vUv - uTexel).rgb + texture(uSrc, vUv + vec2(uTexel.x, -uTexel.y)).rgb + texture(uSrc, vUv + vec2(-uTexel.x, uTexel.y)).rgb;
+  fragColor = vec4(c / 16.0, 1.0);
+}`;
+const FINAL = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 fragColor;
+uniform sampler2D uScene, uBloom; uniform float uGlow;
+void main() {
+  vec3 c = texture(uScene, vUv).rgb + texture(uBloom, vUv).rgb * uGlow;
+  c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+  vec2 q = vUv - 0.5;
+  fragColor = vec4(pow(c, vec3(1.0 / 2.2)) * (1.0 - 0.3 * dot(q, q)), 1.0);
+}`;
+
+function compile(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs)); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, "aPos"); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+let P = {};
+try {
+  P = { init: program(QUAD, INIT), step: program(QUAD, STEP), draw: program(DRAW_V, DRAW_F), fade: program(QUAD, FADE),
+        down: program(QUAD, DOWN), up: program(QUAD, UP), final: program(QUAD, FINAL) };
+} catch (err) { hud.textContent = "A shader did not compile: " + String(err.message).split("\n")[0]; console.error(err); return; }
+
+const quadVao = gl.createVertexArray(); gl.bindVertexArray(quadVao);
+const quad = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+const pointVao = gl.createVertexArray();          // points need no attributes: they read the textures by index
+gl.bindVertexArray(null);
+
+function tex(w, h, internal, format, type, filter) {
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function fbo(textures) {
+  const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  textures.forEach((t, i) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t, 0));
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return f;
+}
+function colorTarget(w, h) { const t = tex(w, h, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR); return { t, f: fbo([t]), w, h }; }
+
+// ------------------------------------------------------------------ state
+let side = 1024, state = null, mode = 0, speed = 1, keep = 0.6, glow = 0.9, paused = false, stirring = false, simTime = 0, seed = 1;
+function makeState(n) {
+  const mk = () => { const pos = tex(n, n, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.NEAREST), vel = tex(n, n, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.NEAREST); return { pos, vel, f: fbo([pos, vel]) }; };
+  if (state) [state.a, state.b].forEach((s) => { gl.deleteTexture(s.pos); gl.deleteTexture(s.vel); gl.deleteFramebuffer(s.f); });
+  state = { a: mk(), b: mk() };
+}
+function seedParticles() {
+  gl.bindVertexArray(quadVao);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, state.a.f); gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+  gl.viewport(0, 0, side, side); gl.disable(gl.BLEND);
+  gl.useProgram(P.init.p); gl.uniform1i(P.init.u.uMode, mode); gl.uniform1f(P.init.u.uSeed, seed);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  simTime = 0; clearScene = true;
+  // run the simulation a while before showing it, so each motion opens already in shape
+  // rather than as the ball or cube it was seeded as
+  for (let i = 0; i < [1, 160, 400][mode]; i++) step(1 / 60);
+}
+let scene = null, bloom = [], clearScene = true;
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(canvas.clientWidth * dpr); canvas.height = Math.round(canvas.clientHeight * dpr);
+  scene = colorTarget(canvas.width, canvas.height);
+  bloom = [];
+  let w = canvas.width, h = canvas.height;
+  for (let i = 0; i < 6; i++) { w = Math.max(1, w >> 1); h = Math.max(1, h >> 1); bloom.push(colorTarget(w, h)); }
+  clearScene = true;
+}
+
+// camera
+const cam = { yaw: 0.6, pitch: 0.7, dist: 12.5 };
+function viewProj() {
+  const cp = Math.cos(cam.pitch), eye = [Math.cos(cam.yaw) * cp * cam.dist, Math.sin(cam.yaw) * cp * cam.dist, Math.sin(cam.pitch) * cam.dist];
+  const f = norm(eye.map((v) => -v)), r = norm(cross(f, [0, 0, 1])), u = cross(r, f);
+  const view = [r[0], u[0], -f[0], 0, r[1], u[1], -f[1], 0, r[2], u[2], -f[2], 0,
+    -dot(r, eye), -dot(u, eye), dot(f, eye), 1];
+  const aspect = canvas.width / canvas.height, fov = 45 * Math.PI / 180, n = 0.05, far = 100, t = 1 / Math.tan(fov / 2);
+  const proj = [t / aspect, 0, 0, 0, 0, t, 0, 0, 0, 0, (far + n) / (n - far), -1, 0, 0, 2 * far * n / (n - far), 0];
+  return { m: mul(proj, view), eye, f, r, u, t, aspect };
+}
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const norm = (a) => { const l = Math.hypot(...a) || 1; return a.map((v) => v / l); };
+function mul(a, b) { const o = new Array(16).fill(0); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) for (let k = 0; k < 4; k++) o[j * 4 + i] += a[k * 4 + i] * b[j * 4 + k]; return o; }
+
+// ------------------------------------------------------------------ the frame
+let last = performance.now(), fpsFrames = 0, fpsTime = 0, fps = 0, stirAt = [0, 0, 0], stirPower = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  fpsFrames++; fpsTime += dt; if (fpsTime > 0.5) { fps = fpsFrames / fpsTime; fpsFrames = 0; fpsTime = 0;
+    hud.textContent = `${Math.round(fps)} fps · ${(side * side).toLocaleString()} particles`; }
+
+  gl.disable(gl.BLEND);
+  if (!paused) step(Math.min(dt, 1 / 30) * speed);
+  drawFrame();
+}
+function step(h) {                                 // move every particle: read a, write b, swap
+  {
+    simTime += h;
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(quadVao);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, state.b.f); gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    gl.viewport(0, 0, side, side);
+    gl.useProgram(P.step.p);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, state.a.pos);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, state.a.vel);
+    const u = P.step.u;
+    gl.uniform1i(u.uPos, 0); gl.uniform1i(u.uVel, 1); gl.uniform1i(u.uMode, mode);
+    gl.uniform1f(u.uDt, h); gl.uniform1f(u.uTime, simTime); gl.uniform1f(u.uSeed, seed);
+    gl.uniform1f(u.uStir, stirPower); gl.uniform3fv(u.uStirAt, stirAt);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const t = state.a; state.a = state.b; state.b = t;
+  }
+}
+function drawFrame() {
+  // the scene: fade what was there (the trails), then add every particle's light
+  gl.bindFramebuffer(gl.FRAMEBUFFER, scene.f); gl.viewport(0, 0, scene.w, scene.h);
+  if (clearScene) { gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); clearScene = false; }
+  gl.enable(gl.BLEND);
+  gl.bindVertexArray(quadVao);
+  gl.blendFunc(gl.ZERO, gl.SRC_ALPHA);
+  gl.useProgram(P.fade.p); gl.uniform1f(P.fade.u.uKeep, keep);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.bindVertexArray(pointVao);
+  gl.useProgram(P.draw.p);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, state.a.pos);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, state.a.vel);
+  const vp = viewProj(), du = P.draw.u, n = side * side;
+  gl.uniform1i(du.uPos, 0); gl.uniform1i(du.uVel, 1); gl.uniform1i(du.uSide, side); gl.uniform1i(du.uMode, mode);
+  gl.uniformMatrix4fv(du.uViewProj, false, vp.m);
+  gl.uniform1f(du.uPoint, Math.max(1, (canvas.width / 1400) * 1.4));
+  // the same total light whatever the count, a little less when trails pile it up
+  gl.uniform1f(du.uGain, [0.7, 1.1, 0.45][mode] * (1048576 / n) * 0.03 * (1 - keep * 0.75));
+  gl.drawArrays(gl.POINTS, 0, n);
+  gl.disable(gl.BLEND);
+
+  // bloom down the chain, then back up, adding as it goes
+  gl.bindVertexArray(quadVao);
+  let src = scene;
+  bloom.forEach((b, i) => {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, b.f); gl.viewport(0, 0, b.w, b.h);
+    gl.useProgram(P.down.p); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src.t);
+    gl.uniform1i(P.down.u.uSrc, 0); gl.uniform2f(P.down.u.uTexel, 0.5 / src.w, 0.5 / src.h); gl.uniform1f(P.down.u.uThreshold, i === 0 ? 0.25 : 0.0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3); src = b;
+  });
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+  for (let i = bloom.length - 1; i > 0; i--) {
+    const from = bloom[i], to = bloom[i - 1];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, to.f); gl.viewport(0, 0, to.w, to.h);
+    gl.useProgram(P.up.p); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, from.t);
+    gl.uniform1i(P.up.u.uSrc, 0); gl.uniform2f(P.up.u.uTexel, 1 / from.w, 1 / from.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  gl.disable(gl.BLEND);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(P.final.p);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, scene.t);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, bloom[0].t);
+  gl.uniform1i(P.final.u.uScene, 0); gl.uniform1i(P.final.u.uBloom, 1); gl.uniform1f(P.final.u.uGlow, glow);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  stirPower *= 0.9;
+}
+
+// ------------------------------------------------------------------ controls
+let dragging = null;
+function pointerWorld(e) {                         // the point under the pointer on a plane through the centre
+  const rect = canvas.getBoundingClientRect(), vp = viewProj();
+  const x = ((e.clientX - rect.left) / rect.width) * 2 - 1, y = 1 - ((e.clientY - rect.top) / rect.height) * 2;
+  const dir = norm(vp.f.map((v, i) => v + vp.r[i] * x * vp.aspect / vp.t + vp.u[i] * y / vp.t));
+  const t = -dot(vp.eye, vp.f) / dot(dir, vp.f);
+  return vp.eye.map((v, i) => v + dir[i] * t);
+}
+canvas.addEventListener("pointerdown", (e) => { dragging = { x: e.clientX, y: e.clientY }; if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  if (stirring) {
+    const w = pointerWorld(e);
+    stirAt = mode === 2 ? [w[0] / 2.1, w[1] / 2.1, w[2] / 2.1 + 0.6] : w;
+    stirPower = e.shiftKey ? -1.5 : 1.5;
+  } else {
+    cam.yaw -= (e.clientX - dragging.x) * 0.005;
+    cam.pitch = Math.min(1.5, Math.max(-1.5, cam.pitch + (e.clientY - dragging.y) * 0.005));
+  }
+  dragging = { x: e.clientX, y: e.clientY };
+});
+window.addEventListener("pointerup", () => { dragging = null; });
+canvas.addEventListener("wheel", (e) => { e.preventDefault(); cam.dist = Math.min(40, Math.max(1.5, cam.dist * Math.exp(e.deltaY * 0.001))); }, { passive: false });
+document.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => {
+  mode = +b.dataset.mode;
+  document.querySelectorAll("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  cam.dist = [12.5, 8.5, 9.5][mode]; seedParticles();
+}));
+document.getElementById("count").addEventListener("change", (e) => { side = +e.target.value; makeState(side); seedParticles(); });
+const bind = (id, fmt, set) => { const el = document.getElementById(id), out = document.getElementById(id + "Out"); const up = () => { set(+el.value); out.textContent = fmt(+el.value); }; el.addEventListener("input", up); up(); };
+bind("speed", (v) => v.toFixed(2) + "×", (v) => { speed = v; });
+bind("trails", (v) => Math.round(v * 100) + "%", (v) => { keep = v; });
+bind("glow", (v) => v.toFixed(2), (v) => { glow = v; });
+const stirBtn = document.getElementById("stir");
+stirBtn.addEventListener("click", () => { stirring = !stirring; stirBtn.setAttribute("aria-pressed", String(stirring)); canvas.classList.toggle("stir", stirring); });
+document.getElementById("reset").addEventListener("click", () => { seed = Math.random() * 100; seedParticles(); });
+const pauseBtn = document.getElementById("pause");
+pauseBtn.addEventListener("click", () => { paused = !paused; pauseBtn.setAttribute("aria-pressed", String(paused)); pauseBtn.textContent = paused ? "Play" : "Pause"; });
+
+window.addEventListener("resize", resize);
+resize(); makeState(side); seedParticles();
+requestAnimationFrame(frame);
+window.myriad = { cam, setMode(m) { document.querySelector(`[data-mode="${m}"]`).click(); }, setCount(n) { side = n; makeState(side); seedParticles(); } };
+})();
+</script>
