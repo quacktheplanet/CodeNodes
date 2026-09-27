@@ -1,0 +1,22 @@
+{
+  "about": "A production bakery: mixing (tanks stand in for mixers), ovens (machine boxes), packing and a shop front.",
+  "site": {"size": [30, 20], "clear_height": 5, "column_grid": null},
+  "spaces": [
+    {"name": "Mixing", "area": 120, "type": "production"},
+    {"name": "Baking", "area": 150, "type": "production"},
+    {"name": "Packing", "area": 100, "type": "production"},
+    {"name": "Dispatch", "area": 60, "type": "shipping", "exterior": "east", "docks": 1},
+    {"name": "Shop", "area": 60, "type": "retail", "exterior": "west"},
+    {"name": "Staff", "area": 30, "type": "amenity"}
+  ],
+  "relations": [["Mixing", "Baking", "A"], ["Baking", "Packing", "A"], ["Packing", "Dispatch", "A"],
+                ["Shop", "Packing", "I"], ["Staff", "Mixing", "O"]],
+  "flow": [["Mixing", "Baking", 20], ["Baking", "Packing", 20], ["Packing", "Dispatch", 15]],
+  "equipment": [
+    {"kind": "tank", "count": 3, "in": "Mixing", "arrange": "row", "params": {"radius": 0.7, "height": 1.8}},
+    {"kind": "cnc", "count": 2, "in": "Baking", "arrange": "row", "params": {"width": 3.0, "depth": 2.0, "height": 2.2}},
+    {"kind": "conveyor", "from": "Baking", "to": "Packing"},
+    {"kind": "workbench", "count": 3, "in": "Packing", "arrange": "row"},
+    {"kind": "pallet", "count": 2, "in": "Dispatch", "arrange": "grid"}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "about": "A two-storey house: living spaces downstairs, bedrooms upstairs, a stair between.",
+  "site": {"size": [13, 10], "levels": 2},
+  "spaces": [
+    {"name": "Living", "area": 40, "type": "living", "exterior": "south"},
+    {"name": "Kitchen", "area": 22, "type": "kitchen"},
+    {"name": "Dining", "area": 22, "type": "room"},
+    {"name": "WC", "area": 6, "type": "bath"},
+    {"name": "Bedroom 1", "area": 30, "type": "bedroom", "level": 1},
+    {"name": "Bedroom 2", "area": 22, "type": "bedroom", "level": 1},
+    {"name": "Bedroom 3", "area": 20, "type": "bedroom", "level": 1},
+    {"name": "Bath", "area": 12, "type": "bath", "level": 1}
+  ],
+  "relations": [["Kitchen", "Dining", "A"], ["Dining", "Living", "E"], ["Bedroom 1", "Bath", "E"]],
+  "equipment": []
+}

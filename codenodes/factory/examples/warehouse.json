@@ -1,0 +1,20 @@
+{
+  "about": "A distribution warehouse: most of the floor is pallet racking between receiving and shipping docks.",
+  "site": {"size": [72, 48], "clear_height": 10, "column_grid": [12, 12]},
+  "spaces": [
+    {"name": "Receiving", "area": 480, "type": "dock", "exterior": "south", "docks": 4},
+    {"name": "Racking", "area": 1900, "type": "storage"},
+    {"name": "Shipping", "area": 480, "type": "shipping", "exterior": "north", "docks": 4},
+    {"name": "Office", "area": 120, "type": "office"},
+    {"name": "Charging", "area": 80, "type": "utility"}
+  ],
+  "relations": [["Receiving", "Racking", "A"], ["Racking", "Shipping", "A"], ["Charging", "Racking", "E"]],
+  "flow": [["Receiving", "Racking", 60], ["Racking", "Shipping", 60]],
+  "equipment": [
+    {"kind": "rack", "in": "Racking", "count": "fill", "params": {"levels": 5}},
+    {"kind": "pallet", "count": 8, "in": "Receiving", "arrange": "grid"},
+    {"kind": "pallet", "count": 8, "in": "Shipping", "arrange": "grid"},
+    {"kind": "forklift", "count": 3, "in": "Charging", "arrange": "row"},
+    {"kind": "desk", "count": 4, "in": "Office", "arrange": "grid"}
+  ]
+}

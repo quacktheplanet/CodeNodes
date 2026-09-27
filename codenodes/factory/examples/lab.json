@@ -1,0 +1,20 @@
+{
+  "about": "A robotics lab: a test floor with robot cells, electronics benches, a server room and offices.",
+  "site": {"size": [32, 20], "clear_height": 5, "column_grid": [8, 10]},
+  "spaces": [
+    {"name": "Test Floor", "area": 220, "type": "production"},
+    {"name": "Electronics", "area": 90, "type": "lab"},
+    {"name": "Servers", "area": 30, "type": "utility"},
+    {"name": "Offices", "area": 90, "type": "office"},
+    {"name": "Goods In", "area": 60, "type": "dock", "exterior": "east", "docks": 1}
+  ],
+  "relations": [["Test Floor", "Electronics", "A"], ["Electronics", "Offices", "E"], ["Servers", "Electronics", "I"],
+                ["Goods In", "Test Floor", "E"]],
+  "equipment": [
+    {"kind": "robot_arm", "count": 2, "in": "Test Floor", "fenced": true},
+    {"kind": "amr", "count": 3, "in": "Test Floor", "arrange": "perimeter"},
+    {"kind": "workbench", "count": 4, "in": "Electronics", "arrange": "perimeter"},
+    {"kind": "cabinet", "count": 4, "in": "Servers", "arrange": "row"},
+    {"kind": "desk", "count": 6, "in": "Offices", "arrange": "grid"}
+  ]
+}

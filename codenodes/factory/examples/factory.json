@@ -1,0 +1,33 @@
+{
+  "about": "A 60 x 40 m light-assembly factory: receiving and shipping docks, pallet storage, machining, two robot assembly cells, QA and offices.",
+  "site": {"size": [60, 40], "clear_height": 8, "column_grid": [10, 10]},
+  "spaces": [
+    {"name": "Receiving", "area": 240, "type": "dock", "exterior": "south", "docks": 2},
+    {"name": "Storage", "area": 480, "type": "storage"},
+    {"name": "Machining", "area": 420, "type": "production"},
+    {"name": "Assembly", "area": 420, "type": "production"},
+    {"name": "QA", "area": 110, "type": "qa"},
+    {"name": "Shipping", "area": 220, "type": "shipping", "exterior": "north", "docks": 2},
+    {"name": "Offices", "area": 160, "type": "office"},
+    {"name": "Break Room", "area": 60, "type": "amenity"}
+  ],
+  "relations": [["Receiving", "Storage", "A"], ["Storage", "Machining", "E"], ["Machining", "Assembly", "A"],
+                ["Assembly", "QA", "A"], ["QA", "Shipping", "E"], ["Offices", "QA", "I"],
+                ["Offices", "Machining", "X"], ["Break Room", "Offices", "E"]],
+  "flow": [["Receiving", "Storage", 40], ["Storage", "Machining", 30], ["Machining", "Assembly", 30],
+           ["Assembly", "QA", 25], ["QA", "Shipping", 25]],
+  "equipment": [
+    {"kind": "rack", "in": "Storage", "count": "fill", "aisle": "forklift_two_way", "params": {"levels": 4}},
+    {"kind": "cnc", "count": 4, "in": "Machining", "arrange": "row"},
+    {"kind": "cabinet", "count": 2, "in": "Machining", "arrange": "perimeter"},
+    {"kind": "robot_arm", "count": 2, "in": "Assembly", "fenced": true},
+    {"kind": "conveyor", "from": "Machining", "to": "Assembly"},
+    {"kind": "workbench", "count": 3, "in": "Assembly", "arrange": "row"},
+    {"kind": "workbench", "count": 2, "in": "QA", "arrange": "perimeter"},
+    {"kind": "pallet", "count": 6, "in": "Receiving", "arrange": "grid"},
+    {"kind": "pallet", "count": 6, "in": "Shipping", "arrange": "grid"},
+    {"kind": "forklift", "count": 1, "in": "Receiving"},
+    {"kind": "amr", "count": 2, "in": "Assembly", "arrange": "perimeter"},
+    {"kind": "desk", "count": 8, "in": "Offices", "arrange": "grid"}
+  ]
+}

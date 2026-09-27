@@ -1,0 +1,21 @@
+{
+  "about": "A small job shop: a row of CNC machines, a fabrication area with benches, a tool crib and an office.",
+  "site": {"size": [36, 24], "clear_height": 6, "column_grid": [12, 12]},
+  "spaces": [
+    {"name": "Machining", "area": 360, "type": "production"},
+    {"name": "Fabrication", "area": 180, "type": "production"},
+    {"name": "Materials", "area": 120, "type": "dock", "exterior": "west", "docks": 1},
+    {"name": "Tool Crib", "area": 40, "type": "utility"},
+    {"name": "Office", "area": 60, "type": "office"}
+  ],
+  "relations": [["Materials", "Machining", "A"], ["Machining", "Fabrication", "E"], ["Tool Crib", "Machining", "A"],
+                ["Office", "Machining", "O"]],
+  "flow": [["Materials", "Machining", 20], ["Machining", "Fabrication", 10]],
+  "equipment": [
+    {"kind": "cnc", "count": 5, "in": "Machining", "arrange": "row"},
+    {"kind": "workbench", "count": 4, "in": "Fabrication", "arrange": "row"},
+    {"kind": "cabinet", "count": 2, "in": "Tool Crib", "arrange": "perimeter"},
+    {"kind": "pallet", "count": 4, "in": "Materials", "arrange": "grid"},
+    {"kind": "desk", "count": 3, "in": "Office", "arrange": "grid"}
+  ]
+}
