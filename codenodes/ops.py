@@ -154,8 +154,8 @@ class CODENODES_OT_rebuild(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class CODENODES_OT_bake(bpy.types.Operator):
-    bl_idname = "codenodes.bake"
+class CODENODES_OT_make_plain(bpy.types.Operator):
+    bl_idname = "codenodes.make_plain"
     bl_label = "Make Plain Mesh"
     bl_description = "Keep the current mesh and stop driving it from code (the code text stays)"
     bl_options = {'REGISTER', 'UNDO'}
@@ -200,7 +200,7 @@ def show_text(context, text, op=None):
 
 
 classes = (CODENODES_OT_add, CODENODES_OT_add_shape, CODENODES_OT_add_particles,
-           CODENODES_OT_profile_to_curve, CODENODES_OT_rebuild, CODENODES_OT_bake,
+           CODENODES_OT_profile_to_curve, CODENODES_OT_rebuild, CODENODES_OT_make_plain,
            CODENODES_OT_edit_code)
 
 

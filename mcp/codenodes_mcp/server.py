@@ -11,15 +11,18 @@ import base64
 
 from .connection import BlenderNotRunning, Connection
 
-try:
-    from mcp.server.fastmcp import FastMCP, Image
-except ImportError as exc:  # pragma: no cover - depends on the environment
-    raise SystemExit(
-        "The MCP SDK is missing. Install it with:  pip install \"mcp[cli]\"\n"
-        "or run this server with:  uvx --from <path to CodeNodes/mcp> codenodes-mcp"
-    ) from exc
+try:  # MCP SDK 2.x renamed FastMCP to MCPServer
+    from mcp.server.mcpserver import Image, MCPServer
+except ImportError:
+    try:  # 1.x
+        from mcp.server.fastmcp import FastMCP as MCPServer, Image
+    except ImportError as exc:  # pragma: no cover - depends on the environment
+        raise SystemExit(
+            "The MCP SDK is missing. Install it with:  pip install \"mcp[cli]\"\n"
+            "or run this server with:  uvx --from <path to CodeNodes/mcp> codenodes-mcp"
+        ) from exc
 
-mcp = FastMCP("CodeNodes")
+mcp = MCPServer("CodeNodes")
 _link = Connection()
 
 
@@ -44,7 +47,8 @@ def guide(kind: str = "") -> dict:
 def make(kind: str, code: str, name: str = "", options: dict | None = None) -> dict:
     """Build or update something in Blender from GPU code.
 
-    kind is "mesh" (a surface from `float sdf(vec3 p)`), "particles" (a solver with
+    kind is "mesh" (a surface from `float sdf(vec3 p)`), "shape" (a constructed model in
+    the shape language: profiles revolved, extruded, swept), "particles" (a solver with
     `spawn` and `update`) or "volume" (smoke from `float density(vec3 p)`).
     options passes extras such as resolution, count, bounds_min/bounds_max, params.
 

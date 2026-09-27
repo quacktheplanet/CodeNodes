@@ -67,7 +67,7 @@ class CODENODES_PT_main(bpy.types.Panel):
                 box.label(text=line, icon='ERROR' if not line.startswith(" ") else 'BLANK1')
         elif s.stats:
             layout.label(text=s.stats)
-        layout.operator("codenodes.bake", icon='MESH_DATA')
+        layout.operator("codenodes.make_plain", icon='MESH_DATA')
 
 
 classes = (CODENODES_PT_main,)

@@ -365,9 +365,47 @@ def viewport(path=None):
     if area is None:
         return {"ok": False, "error": "no 3D viewport is open (is Blender running with a window?)"}
     out = _out_path(path, "viewport")
-    with bpy.context.temp_override(window=window, area=area):
-        bpy.ops.screen.screenshot_area(filepath=out)
-    return {"ok": True, "path": out, "exists": os.path.exists(out)}
+    try:
+        _draw_viewport(area, out)
+        how = "drawn"
+    except Exception:
+        # A plain screenshot catches anything on top (the splash, a menu), so it is the fallback.
+        with bpy.context.temp_override(window=window, area=area):
+            bpy.ops.screen.screenshot_area(filepath=out)
+        how = "screenshot"
+    return {"ok": True, "path": out, "exists": os.path.exists(out), "how": how}
+
+
+def _draw_viewport(area, out, max_side=1600):
+    """Draw the 3D view offscreen, as it is shaded, from its own camera — unaffected by
+    popups, other windows, or Blender being minimised."""
+    import gpu
+    import numpy as np
+    space = area.spaces.active
+    region = next(r for r in area.regions if r.type == 'WINDOW')
+    scale = min(1.0, max_side / max(region.width, region.height))
+    w, h = max(1, int(region.width * scale)), max(1, int(region.height * scale))
+    rv3d = space.region_3d
+    offscreen = gpu.types.GPUOffScreen(w, h)
+    try:
+        ctx = bpy.context
+        offscreen.draw_view3d(ctx.scene, ctx.view_layer, space, region, rv3d.view_matrix,
+                              rv3d.window_matrix, do_color_management=True)
+        with offscreen.bind():
+            buf = gpu.state.active_framebuffer_get().read_color(0, 0, w, h, 4, 0, 'UBYTE')
+        buf.dimensions = w * h * 4
+        pixels = np.asarray(buf, dtype=np.float32) / 255.0
+    finally:
+        offscreen.free()
+    pixels[3::4] = 1.0
+    image = bpy.data.images.new("codenodes viewport", w, h, alpha=False)
+    try:
+        image.pixels.foreach_set(pixels)
+        image.filepath_raw = out
+        image.file_format = 'PNG'
+        image.save()
+    finally:
+        bpy.data.images.remove(image)
 
 
 # ---- Geometry Nodes ---------------------------------------------------------------------

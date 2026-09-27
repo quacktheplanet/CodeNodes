@@ -9,3 +9,7 @@ type = "add-on"
 tags = ["Mesh", "Modeling", "Development"]
 blender_version_min = "5.0.0"
 license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+network = "Local server an assistant connects to (127.0.0.1 only)"
+files = "Writes bake caches, renders and web pages"

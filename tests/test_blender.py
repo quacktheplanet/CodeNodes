@@ -169,6 +169,14 @@ def after_live_edit(text, started):
     if r.max() < 1.35 and time.perf_counter() - started < 5:
         return False                       # not rebuilt yet; poll again
     check(1.38 < r.max() < 1.45, f"editing the code text rebuilds live (outer radius {r.max():.3f})")
+
+    # --- Make Plain Mesh (it once shared an id with Bake to Disk and was shadowed) ----------
+    bpy.context.view_layer.objects.active = obj
+    check(bpy.ops.codenodes.make_plain() == {'FINISHED'} and not obj.codenodes.enabled
+          and len(obj.data.vertices) > 0, "Make Plain Mesh keeps the mesh and stops the code driving it")
+    codenodes.unregister()
+    codenodes.register()
+    check(hasattr(bpy.ops.codenodes, "make_plain"), "the add-on unregisters and registers again cleanly")
     return True
 
 

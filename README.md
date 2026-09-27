@@ -85,18 +85,55 @@ void spawn(inout Particle p) {
   p.life = 4.0 + rand1(p.seed * 3.3) * 3.0;      // then it respawns
 }
 void update(inout Particle p, float dt) {
-  p.velocity = curl(p.position) * speed;          // your own field
+  p.velocity = vec3(-p.position.y, p.position.x, 0.2) * speed;  // your own field: a swirl
   p.position += p.velocity * dt;
 }
 ```
 
 `Particle` carries `position`, `velocity`, `age`, `life` and a per-particle `seed`. The points come
 out as a real point cloud with `velocity`, `speed`, `age` and `life` attributes, so Geometry Nodes
-can instance anything onto them and Cycles uses `velocity` for motion blur. Shade with **`speed`**,
+can instance anything onto them and Cycles uses `velocity` for motion blur. (The Add › Code
+Particles template shows a curl-noise field written the same way.) Shade with **`speed`**,
 not `velocity`: Blender reserves that name for motion blur and a shader cannot read it back.
 Add › Mesh › **Code Particles**, or `api.code_to_particles(source, name="Swirl", count=20000)`.
 
 300,000 particles simulate in about 12 ms per frame on an RTX A4500.
+
+## Install it in your Blender
+
+Tested exactly this way in throwaway profiles on Blender 5.0.1 and 5.1.2 (`tests/install_check.ps1`).
+
+1. **Build the extension zip** (from this folder; `dist/` is not in git, so build a fresh one):
+
+   ```
+   blender --command extension build --source-dir codenodes --output-dir dist
+   ```
+
+   That writes `dist/codenodes-0.1.0.zip`.
+2. **Install it.** Edit › Preferences › Get Extensions › the ⌄ menu at the top right ›
+   **Install from Disk…** › pick the zip. It is enabled straight away.
+3. **Start the assistant link.** 3D Viewport › Sidebar (N) › **CodeNodes** › **Assistant** ›
+   **Start**. Blender writes a token to its config folder; nothing is reachable from the network.
+4. **Install the MCP server once**, in its own Python (3.10 or newer; MCP SDK 1.x and 2.x both
+   work):
+
+   ```
+   python -m venv %USERPROFILE%\codenodes-mcp
+   %USERPROFILE%\codenodes-mcp\Scripts\pip install -e path/to/CodeNodes\mcp
+   ```
+5. **Tell Claude Code about it:**
+
+   ```
+   claude mcp add codenodes -- %USERPROFILE%\codenodes-mcp\Scripts\codenodes-mcp.exe
+   ```
+
+   (With `uv` installed, `claude mcp add codenodes -- uvx --from path/to/CodeNodes/mcp codenodes-mcp`
+   works too.)
+6. **Try it:** ask Claude to "use CodeNodes to make a wall with two doorways along an L-shaped
+   curve, then render it". It should build it, render it and describe what it sees.
+
+The server only runs while Blender is open and you have pressed Start. To update CodeNodes later,
+build a new zip and install it over the old one.
 
 ## Use it
 
@@ -277,12 +314,14 @@ blender --factory-startup --python tests/test_bake.py          # baking, and pla
 blender -b --factory-startup --python tests/test_farm.py       # the bake renders with no GPU and no add-on (10)
 blender --factory-startup --python tests/test_volume.py        # density code -> OpenVDB -> Volume object (16)
 blender --factory-startup --python tests/test_particles.py     # GPU particle solver, incl. baking (22)
-blender --factory-startup --python tests/test_agent.py         # the assistant-facing surface (30)
+blender --factory-startup --python tests/test_agent.py         # the assistant-facing surface (31)
 blender --factory-startup --python tests/test_shape_blender.py # shapes as Blender objects (36)
 blender --factory-startup --python tests/test_server.py        # a real socket client against Blender (26)
 blender -b --factory-startup --python tests/test_gn.py         # Geometry Nodes as data, both ways (60)
 blender -b --factory-startup --python tests/test_gn_library.py # every capability; editing real trees (43)
 blender -b --factory-startup --python tests/test_web.py        # a scene as a web page with sliders (12)
+powershell -File tests/install_check.ps1 -Python <venv python> -Work <scratch folder>
+    # the zip installed as a user installs it, then the whole loop through the real MCP process (27 per version)
 ```
 
 Run `test_bake.py` before `test_farm.py`: the first saves the .blend the second opens.

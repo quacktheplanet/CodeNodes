@@ -32,7 +32,8 @@ assistant ⇄ MCP (stdio) ⇄ codenodes-mcp ⇄ localhost socket ⇄ CodeNodes a
    }
    ```
 
-   Without `uv`: `pip install -e path/to/CodeNodes/mcp` then run `codenodes-mcp`.
+   Without `uv`: `pip install -e path/to/CodeNodes/mcp` into a venv, then run `codenodes-mcp`
+   (see the main README's install steps). MCP SDK 1.x and 2.x both work.
 
 The server process finds the token by itself from Blender's config folder. Override with
 `CODENODES_TOKEN`, `CODENODES_TOKEN_FILE` or `CODENODES_PORT` if needed.
@@ -42,11 +43,15 @@ The server process finds the token by itself from Blender's config folder. Overr
 | tool | what it does |
 |---|---|
 | `guide` | how to write each kind of code, the GLSL helpers, a template for each |
-| `make` | build a `mesh`, `particles` or `volume` from code |
+| `make` | build a `mesh`, `shape`, `particles` or `volume` from code |
 | `set_params`, `get_code`, `scene` | adjust sliders, read back the code, see what exists |
 | `look_at`, `light`, `set_frame` | aim the camera, light the scene, move the timeline |
 | `render`, `viewport` | **a picture back**, so the assistant can judge its own work |
 | `bake` | write the animation to disk so it renders anywhere |
+| `material`, `collect`, `curve` | materials by name, collections, curves to build along |
+| `nodes_help`, `nodes_library`, `nodes_use`, `nodes_set_inputs` | ready-made Geometry Nodes capabilities |
+| `nodes_find`, `nodes_describe`, `nodes_list`, `nodes_read`, `nodes_write`, `nodes_apply`, `nodes_edit`, `nodes_explain`, `nodes_check` | read, build, edit and explain any node tree |
+| `web_page` | the scene as an interactive web page with sliders |
 | `remove`, `status` | delete an object; check the link |
 
 ## What it cannot do
