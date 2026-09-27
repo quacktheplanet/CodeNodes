@@ -110,7 +110,12 @@ def run():
     check(bpy.context.scene.render.engine != 'CYCLES' or True, "render restored the scene's settings")
 
     shot = agent.viewport(path=os.path.join(WORK, "view.png"))
-    check(shot["ok"] and shot["exists"], f"viewport screenshot works ({shot.get('error')})")
+    check(shot["ok"] and shot["exists"] and shot.get("how") == "drawn",
+          f"viewport is drawn offscreen, so nothing on top can cover it ({shot.get('how')}, {shot.get('error')})")
+    view = bpy.data.images.load(shot["path"])
+    px = np.array(view.pixels[:]).reshape(-1, 4)[:, :3]
+    bpy.data.images.remove(view)
+    check(px.std() > 0.02, f"the viewport picture has content (spread {px.std():.3f})")
 
     # --- frames and baking ----------------------------------------------------------------
     check(agent.frame(7)["frame"] == 7, "frame() moves the timeline")
