@@ -157,7 +157,7 @@ class SpaceSolver:
     def __init__(self, fr, rules, columns, notes):
         self.fr, self.rules, self.notes = fr, rules, notes
         enclosed = fr.sp["enclosed"]
-        self.margin = 0.15 if enclosed else 0.4
+        self.margin = 0.25 if enclosed else 0.4          # clear of the walls, which stand on the edges
         self.front = 0.3                         # paint line gap to the aisle
         self.bounds = [self.margin, self.front, fr.A - self.margin, fr.B - self.margin]
         self.clear_bounds = [0.0, 0.0, fr.A, fr.B]

@@ -575,6 +575,55 @@ def nodes_apply(object_name, group):
     return {"ok": True, "object": obj.name, "group": tree.name, "modifier": mod.name}
 
 
+# ---- buildings: spec -> plan -> building -> equipment -> verify (factory/) ---------------------
+
+def plan_site(spec=None, name="Factory", seed=1, example=None):
+    """Plan a building from a spec: site size, spaces with areas and types, closeness
+    ratings (A E I O U X), material flow, equipment and rules. Returns the plan as a text
+    grid, every space's rectangle, measured problems and a picture. `example` starts from
+    one of the example specs (see `assets`); keys in `spec` then replace the example's."""
+    from .factory import tools
+    return tools.plan_site(spec, name, seed, example)
+
+
+def edit_plan(name, ops, seed=None):
+    """Change a planned building: swap / move / resize / add_space / remove_space /
+    relation / flow / rule / site / add_equipment / remove_equipment / set_equipment /
+    resolve. Only swaps and moves keep the arrangement exactly; other edits re-solve
+    starting from it, so untouched spaces tend to stay."""
+    from .factory import tools
+    return tools.edit_plan(name, ops, seed)
+
+
+def build_plan(name):
+    """Build a planned building in Blender: slabs, painted zones, walls with the plan's
+    doors, docks and windows cut in, roof, stairs, columns, lights."""
+    from .factory import tools
+    return tools.build_plan(name)
+
+
+def place_equipment(name, items=None, seed=None, repair=True):
+    """Lay out the plan's equipment (plus `items`, added to the spec) and build it:
+    conveyors, fenced robot cells, rack rows with forklift aisles, machines in rows."""
+    from .factory import tools
+    return tools.place_equipment(name, items, seed, repair)
+
+
+def verify(name, renders=True, repair=True, views=("plan", "iso", "walk")):
+    """Check a building by measurement: areas, outside walls, collisions, aisles, service
+    clearance, the walk to an exit, robot reach, floating parts, mesh intersections and
+    that every opening is really cut. Repairs the layout when it can; renders set views."""
+    from .factory import tools
+    return tools.verify(name, renders, repair, tuple(views))
+
+
+def assets(kind=None):
+    """The parametric generators (equipment and building parts) with their sliders,
+    clearances and joints, the space types, the rules, and example specs to start from."""
+    from .factory import tools
+    return tools.assets(kind)
+
+
 def nodes_library():
     """The ready-made capabilities: what each does, and its inputs with their ranges."""
     from .gn import library

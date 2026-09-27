@@ -83,6 +83,23 @@ def test_generators():
         m, info = eq.build(k)
         check(len(m.faces) > 0 and closed(m) and info["bottom"] >= -0.02,
               f"{k}: closed parts, stands on the floor ({info['footprint'][0]:.2f} x {info['footprint'][1]:.2f} m)")
+    # nothing floats: every part rests on the floor or on another part, at every slider's ends
+    floating = []
+    for k, g in sorted(eq.GENERATORS.items()):
+        if k == "light_fixture":           # hangs from the roof
+            continue
+        trials = [{}] + [{n: sp[end]} for n, sp in g.params.spec.items() for end in ("min", "max")
+                         if sp[end] is not None]
+        for vals in trials:
+            parts = kit.floating(eq.build(k, vals)[0])
+            if parts:
+                floating.append(f"{k} {vals}: {parts[0][1]} at z {parts[0][2][0][2]:.3f}")
+    check(not floating, f"no generator has floating parts at any slider's ends ({floating[:3]})")
+    poses = [{"j1": j1, "j2": j2, "j3": j3, "j4": j4, "j5": j5, "j6": j6}
+             for j1 in (-120, 0, 90) for j2 in (-60, 0, 45) for j3 in (-60, 20, 120)
+             for j4 in (0, 90) for j5 in (-90, 0, 70) for j6 in (0, 45)]
+    loose = [ps for ps in poses if kit.floating(eq.build("robot_arm", ps)[0])]
+    check(not loose, f"the robot arm holds together in all {len(poses)} test poses ({loose[:2]})")
     m, info = eq.build("conveyor", {"length": 6.0})
     check(abs(info["footprint"][0] - 6.0) < 0.01 and abs(info["height"] - 0.87) < 0.01,
           "a 6 m conveyor measures 6 m long, rollers at 0.85 m")

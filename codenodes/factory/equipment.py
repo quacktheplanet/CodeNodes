@@ -119,7 +119,7 @@ def conveyor(p):
     return Group([
         Box((p.length, 0.05, 0.14), at=(0, rail_y, p.height - 0.05), mat="steel"),
         Box((p.length, 0.05, 0.14), at=(0, -rail_y, p.height - 0.05), mat="steel"),
-        Array(Cyl(0.03, p.width, rot=(90, 0, 0), mat="steel", segments=10),
+        Array(Cyl(0.03, p.width + 0.03, rot=(90, 0, 0), mat="steel", segments=10),
               count=floor(p.length / p.pitch), step=(p.pitch, 0, 0),
               at=(-p.length / 2 + p.pitch / 2, 0, p.height - 0.03)),
         Array(Group([Box((0.05, 0.05, leg_h), at=(0, rail_y, 0), mat="dark_steel"),
@@ -153,8 +153,9 @@ def rack(p):
                    Box((length, 0.05, 0.12), at=(0, p.depth / 2 - 0.04, 0), mat="rack_orange")])
     # two pallets per bay on the floor and on every beam level but the top one; `loaded` 0
     # takes them all away
-    load = Group([Box((1.0, 1.0, 0.14), at=(0, 0, 0.07), mat="pallet_wood"),
-                  Box((0.95, 0.95, 0.9), at=(0, 0, 0.14 + 0.45), mat="cardboard")])
+    # pallets span the rack's depth and overhang the beams a little, as they are loaded
+    load = Group([Box((1.0, p.depth + 0.1, 0.14), at=(0, 0, 0.07), mat="pallet_wood"),
+                  Box((0.95, p.depth, 0.9), at=(0, 0, 0.14 + 0.45), mat="cardboard")])
     per_bay = Array(Group([load], at=(-p.bay_width / 4, 0, 0)), count=2, step=(p.bay_width / 2, 0, 0))
     first_bay = -length / 2 + p.bay_width / 2
     return Group([
@@ -176,17 +177,21 @@ P_PALLET = Params(width=(1.2, 0.6, 2.0), depth=(1.0, 0.6, 2.0),
            clearance=lambda v: {"front": 0.3, "back": 0.1, "sides": 0.1})
 def pallet(p):
     nx, ny = floor(p.width / p.box), floor(p.depth / p.box)
-    carton = Box((p.box - 0.02, p.box - 0.02, p.box - 0.02), mat="cardboard")
+    carton = Box((p.box - 0.02, p.box - 0.02, p.box), mat="cardboard")
+    # a block pallet: bottom deck, 3 x 3 blocks, three stringers along X on the blocks, and
+    # top boards across them
     return Group([
-        Array(Box((p.width, 0.1, 0.022), mat="pallet_wood"), count=5,
-              step=(0, (p.depth - 0.1) / 4, 0), at=(0, -p.depth / 2 + 0.05, 0.133)),
+        Box((p.width, p.depth, 0.022), at=(0, 0, 0.011), mat="pallet_wood"),
         Array(Array(Box((0.1, 0.1, 0.1), mat="pallet_wood"), count=3,
                     step=((p.width - 0.1) / 2, 0, 0)), count=3, step=(0, (p.depth - 0.1) / 2, 0),
-              at=(-p.width / 2 + 0.05, -p.depth / 2 + 0.05, 0.061)),
-        Array(Box((p.width, p.depth, 0.022), mat="pallet_wood"), count=1, step=(0, 0, 0), at=(0, 0, 0.011)),
+              at=(-p.width / 2 + 0.05, -p.depth / 2 + 0.05, 0.072)),
+        Array(Box((p.width, 0.1, 0.022), mat="pallet_wood"), count=3,
+              step=(0, (p.depth - 0.1) / 2, 0), at=(0, -p.depth / 2 + 0.05, 0.133)),
+        Array(Box((0.1, p.depth, 0.022), mat="pallet_wood"), count=5,
+              step=((p.width - 0.1) / 4, 0, 0), at=(-p.width / 2 + 0.05, 0, 0.155)),
         Array(Array(Array(carton, count=nx, step=(p.box, 0, 0)), count=ny, step=(0, p.box, 0)),
               count=p.layers, step=(0, 0, p.box),
-              at=(-(nx - 1) * p.box / 2, -(ny - 1) * p.box / 2, 0.144 + p.box / 2)),
+              at=(-(nx - 1) * p.box / 2, -(ny - 1) * p.box / 2, 0.166 + p.box / 2)),
     ])
 
 
@@ -200,19 +205,20 @@ P_FORKLIFT = Params(length=(2.4, 1.6, 4.0, "body, without the forks"),
 def forklift(p):
     wheel = Cyl(0.3, 0.2, rot=(90, 0, 0), mat="rubber", segments=18)
     x_front = p.length / 2 - 0.35
+    lift = kit.minimum(p.lift, p.mast - 0.6)      # the carriage never leaves the mast
     return Group([
         Box((p.length - 0.3, p.width - 0.2, 0.7), at=(-0.15, 0, 0.55), mat="safety_yellow"),
         Box((0.5, p.width - 0.1, 0.8), at=(-p.length / 2 + 0.25, 0, 0.8), mat="dark_steel"),
-        Box((0.45, 0.5, 0.1), at=(-0.25, 0, 1.05), mat="black"),
-        Box((0.08, 0.5, 0.55), at=(-0.5, 0, 1.3), mat="black"),
+        Box((0.45, 0.5, 0.1), at=(-0.25, 0, 0.95), mat="black"),
+        Box((0.08, 0.5, 0.55), at=(-0.5, 0, 1.2), mat="black"),
         Array(Array(Box((0.06, 0.06, 1.3), mat="dark_steel"), count=2, step=(0, p.width - 0.3, 0)),
               count=2, step=(1.05, 0, 0), at=(-0.75, -(p.width - 0.3) / 2, 1.55)),
         Box((1.2, p.width - 0.2, 0.05), at=(-0.2, 0, 2.2), mat="dark_steel"),
         Array(Box((0.1, 0.1, p.mast), mat="dark_steel"), count=2, step=(0, 0.7, 0),
               at=(p.length / 2 - 0.1, -0.35, p.mast / 2)),
         Array(Box((1.1, 0.12, 0.05), mat="steel"), count=2, step=(0, 0.5, 0),
-              at=(p.length / 2 + 0.5, -0.25, 0.05 + p.lift)),
-        Box((0.06, 0.9, 0.5), at=(p.length / 2 - 0.02, 0, 0.3 + p.lift), mat="steel"),
+              at=(p.length / 2 + 0.5, -0.25, 0.05 + lift)),
+        Box((0.06, 0.9, 0.5), at=(p.length / 2 - 0.02, 0, 0.3 + lift), mat="steel"),
         Array(Array(wheel, count=2, step=(0, p.width - 0.2, 0)), count=2, step=(x_front + p.length / 2 - 0.45, 0, 0),
               at=(-p.length / 2 + 0.45, -(p.width - 0.2) / 2, 0.3)),
     ])
@@ -269,8 +275,8 @@ def arm_reach(v):
            joints=ARM_JOINTS, info=lambda v: {"reach": arm_reach(v)})
 def robot_arm(p):
     flange = Group([Cyl(0.05, 0.06, rot=(0, 90, 0), at=(0.03, 0, 0), mat="dark_steel"),
-                    Box((0.06, 0.02, 0.1), at=(0.1, 0.035, 0), mat="steel"),
-                    Box((0.06, 0.02, 0.1), at=(0.1, -0.035, 0), mat="steel")],
+                    Box((0.06, 0.02, 0.1), at=(0.09, 0.035, 0), mat="steel"),
+                    Box((0.06, 0.02, 0.1), at=(0.09, -0.035, 0), mat="steel")],
                    at=(0.12, 0, 0), rot=(p.j6, 0, 0))
     hand = Group([Cyl(0.07, 0.16, rot=(90, 0, 0), mat="robot_orange"),
                   Box((0.14, 0.1, 0.1), at=(0.07, 0, 0), mat="robot_orange"), flange],
@@ -304,7 +310,7 @@ def cnc(p):
         Box((p.width * 0.5, 0.04, p.height * 0.45), at=(-p.width * 0.1, -p.depth / 2 + 0.33, p.height * 0.55), mat="glass"),
         Box((p.width + 0.02, 0.2, p.height * 0.12), at=(0, 0.175 - (p.depth - 0.35) / 2 + 0.0, p.height * 0.12 / 2),
             mat="machine_blue"),
-        Box((0.45, 0.15, 0.6), at=(p.width / 2 - 0.3, -p.depth / 2 + 0.26, p.height * 0.58), mat="dark_steel"),
+        Box((0.45, 0.15, 0.6), at=(p.width / 2 - 0.3, -p.depth / 2 + 0.275, p.height * 0.58), mat="dark_steel"),
         Box((0.8, 0.35, 0.9), at=(p.width / 2 - 0.5, p.depth / 2 - 0.175, 0.45), mat="machine_blue"),
         Cyl(0.03, 0.4, at=(p.width / 2 - 0.15, p.depth / 2 - 0.5, p.height + 0.2), mat="dark_steel", segments=8),
         Cyl(0.05, 0.08, at=(p.width / 2 - 0.15, p.depth / 2 - 0.5, p.height + 0.44), mat="green", segments=12),
@@ -410,10 +416,10 @@ P_DESK = Params(width=(1.6, 0.8, 2.4), depth=(0.8, 0.5, 1.2), chair=(1, 0, 1))
            clearance=lambda v: {"front": 1.0, "back": 0.1, "sides": 0.1})
 def desk(p):
     chair = Group([Box((0.5, 0.5, 0.08), at=(0, 0, 0.47), mat="fabric"),
-                   Box((0.5, 0.06, 0.55), at=(0, -0.25, 0.8), mat="fabric"),
-                   Cyl(0.03, 0.4, at=(0, 0, 0.22), mat="dark_steel", segments=8),
-                   Box((0.55, 0.06, 0.03), at=(0, 0, 0.03), mat="dark_steel"),
-                   Box((0.06, 0.55, 0.03), at=(0, 0, 0.03), mat="dark_steel")],
+                   Box((0.5, 0.06, 0.55), at=(0, -0.25, 0.78), mat="fabric"),
+                   Cyl(0.03, 0.43, at=(0, 0, 0.245), mat="dark_steel", segments=8),
+                   Box((0.55, 0.06, 0.03), at=(0, 0, 0.015), mat="dark_steel"),
+                   Box((0.06, 0.55, 0.03), at=(0, 0, 0.015), mat="dark_steel")],
                   at=(0, -p.depth / 2 - 0.45, 0))
     return Group([
         Box((p.width, p.depth, 0.03), at=(0, 0, 0.735), mat="white"),
@@ -458,7 +464,7 @@ def dock_door(p):
               at=(0, 0.02, p.height - 0.125 - (slats - 1) * 0.25)),
         Box((p.width - 0.2, 2.0, 0.04), at=(0, -1.15, 0.02), mat="dark_steel"),
         Array(Box((0.25, 0.12, 0.45), mat="rubber"), count=2, step=(p.width - 0.2, 0, 0),
-              at=(-p.width / 2 + 0.1, 0.25, 0.5)),
+              at=(-p.width / 2 + 0.1, 0.18, 0.5)),
     ])
 
 

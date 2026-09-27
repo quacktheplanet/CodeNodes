@@ -194,12 +194,14 @@ def _apply(m, t, p):
 class Mesh:
     def __init__(self):
         self.verts, self.faces, self.mats = [], [], []
+        self.parts = []             # (first vertex, vertex count, material) per primitive
 
     def add(self, verts, faces, mat):
         base = len(self.verts)
         self.verts.extend(verts)
         self.faces.extend(tuple(i + base for i in f) for f in faces)
         self.mats.extend([mat or "default"] * len(faces))
+        self.parts.append((base, len(verts), mat or "default"))
 
     def bounds(self):
         if not self.verts:
@@ -213,6 +215,27 @@ class Mesh:
             if m not in seen:
                 seen.append(m)
         return seen
+
+
+def floating(m, floor=0.0, tol=0.005):
+    """Parts that neither rest on the floor nor touch (box against box, within tol) a part
+    that does, directly or through others. Returns [(part index, material, (min, max))]."""
+    boxes = []
+    for base, n, mat in m.parts:
+        xs, ys, zs = zip(*m.verts[base:base + n]) if n else ((0,), (0,), (0,))
+        boxes.append(((min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs)), mat))
+    held = [lo[2] <= floor + tol for lo, hi, _ in boxes]
+    todo = [i for i, h in enumerate(held) if h]
+    while todo:
+        i = todo.pop()
+        lo_i, hi_i, _ = boxes[i]
+        for j, (lo, hi, _) in enumerate(boxes):
+            if held[j]:
+                continue
+            if all(lo[k] <= hi_i[k] + tol and lo_i[k] <= hi[k] + tol for k in range(3)):
+                held[j] = True
+                todo.append(j)
+    return [(i, boxes[i][2], (boxes[i][0], boxes[i][1])) for i, h in enumerate(held) if not h]
 
 
 def _box(sx, sy, sz):
@@ -334,6 +357,8 @@ class _Emitter:
         elif isinstance(part, Array):
             child = self.emit(part.part)
             count = self.num(floor(part.count) if isinstance(part.count, E) else math.floor(part.count))
+            if isinstance(count, float):
+                count = int(max(0, count))
             line = g.node("GeometryNodeMeshLine", {"Count": count, "Start Location": (0.0, 0.0, 0.0),
                                                    "Offset": self.vec(part.step)},
                           mode="OFFSET")["Mesh"]
@@ -346,10 +371,16 @@ class _Emitter:
                                        {"Vertices": part.segments, "Radius": self.num(part.radius),
                                         "Depth": self.num(part.depth)}, fill_type="NGON")["Mesh"], part)
         elif isinstance(part, Cone):
-            geo = self.material(g.node("GeometryNodeMeshCone",
-                                       {"Vertices": part.segments, "Radius Bottom": self.num(part.radius1),
-                                        "Radius Top": self.num(part.radius2), "Depth": self.num(part.depth)},
-                                       fill_type="NGON")["Mesh"], part)
+            cone = g.node("GeometryNodeMeshCone",
+                          {"Vertices": part.segments, "Radius Bottom": self.num(part.radius1),
+                           "Radius Top": self.num(part.radius2), "Depth": self.num(part.depth)},
+                          fill_type="NGON")["Mesh"]
+            # the Cone node stands on its base; kit parts are centred like the Cylinder node
+            half = self.num(part.depth * -0.5 if isinstance(part.depth, E) else -0.5 * part.depth)
+            cone = g.node("GeometryNodeTransform", {"Geometry": cone,
+                                                    "Translation": self.vec((0.0, 0.0, half))
+                                                    if isinstance(half, float) else g.xyz(0.0, 0.0, half)})["Geometry"]
+            geo = self.material(cone, part)
         else:
             raise TypeError(f"not a part: {part!r}")
         return self.place(geo, part)

@@ -745,6 +745,12 @@ def wall_network():
                     "how many on each wall (each spline), spaced evenly along it")
     door_w = g.input("Doorway Width", "float", 1.4, 0.05, 100.0, subtype="DISTANCE")
     door_h = g.input("Doorway Height", "float", 2.3, 0.05, 200.0, subtype="DISTANCE")
+    g.panel("Openings")
+    openings_obj = g.input("Openings", "object",
+                           about="a points object: every point cuts an opening where it stands, "
+                                 "its bottom at the point, sized by the point's 'size' attribute "
+                                 "(width, unused, height) and turned by its 'angle' (radians) — "
+                                 "how a floor plan puts its doors, docks and windows exactly")
     g.panel(None)
 
     solid, path, base = _walls(g, curve, thick, height, footing, ground_obj)
@@ -787,7 +793,19 @@ def wall_network():
     cutters = _cutters(g, placed, oriented["Facing"],
                        g.xyz(door_w, g.math("MULTIPLY", thick, 4.0), g.math("MULTIPLY", door_h, 2.0)),
                        0.0)
-    g.output("Geometry", "geometry", _material(g, _flat_shaded(g, _cut(g, solid, cutters)), wall_mat))
+    # openings from a points object: a unit box standing on each point, scaled and turned
+    spots_in = g.node("GeometryNodeObjectInfo", {"Object": openings_obj},
+                      transform_space="RELATIVE")["Geometry"]
+    size = g.separate(g.node("GeometryNodeInputNamedAttribute", {"Name": "size"},
+                             data_type="FLOAT_VECTOR")["Attribute"])
+    angle = g.node("GeometryNodeInputNamedAttribute", {"Name": "angle"}, data_type="FLOAT")["Attribute"]
+    unit = _lift(g, g.node("GeometryNodeMeshCube", {"Size": (1.0, 1.0, 1.0)})["Mesh"], 0.5)
+    boxes = g.node("GeometryNodeInstanceOnPoints",
+                   {"Points": spots_in, "Instance": unit, "Rotation": g.xyz(0, 0, angle),
+                    "Scale": g.xyz(size["X"], g.math("MULTIPLY", thick, 4.0), size["Z"])})["Instances"]
+    planned = g.node("GeometryNodeRealizeInstances", {"Geometry": boxes})["Geometry"]
+    g.output("Geometry", "geometry", _material(g, _flat_shaded(g, _cut(g, solid, g.join(cutters, planned))),
+                                               wall_mat))
     return g
 
 

@@ -208,6 +208,105 @@ def bake_to_nodes(name: str) -> dict:
     return _call("bake_to_nodes", name=name)
 
 
+def _with_images(result, paths):
+    """A tool's answer as text, followed by its pictures as real images."""
+    import json
+    content = [json.dumps(result, indent=1, default=str)]
+    for path in paths:
+        got = _call("read_image", path=path)
+        if got.get("ok"):
+            content.append(Image(data=base64.b64decode(got["image_base64"]), format="png"))
+    return content
+
+
+@mcp.tool()
+def plan_site(spec: dict | None = None, name: str = "Factory", example: str = "", seed: int = 1):
+    """Plan a building (a factory floor, a warehouse, a lab, a house) from a spec, before
+    anything is built. Returns every space's rectangle, the aisles, a text grid view, the
+    measured problems and a picture of the plan.
+
+    spec: {"site": {"size": [60, 40], "levels": 1, "clear_height": 8, "column_grid": [10, 10]},
+           "spaces": [{"name": "Receiving", "area": 240, "type": "dock", "exterior": "south",
+                       "docks": 2}, ...],
+           "relations": [["Receiving", "Storage", "A"], ...],   # closeness A E I O U X
+           "flow": [["Receiving", "Storage", 40], ...],
+           "equipment": [{"kind": "cnc", "count": 4, "in": "Machining", "arrange": "row"}, ...],
+           "rules": {"aisle_forklift": 3.6}}
+    Space types: production storage dock shipping qa office amenity utility lab retail living
+    kitchen bedroom bath room. example="factory" (or machine_shop, warehouse, bakery, lab,
+    house) starts from an example; top-level keys given in spec replace the example's.
+    Then: build_plan, place_equipment, verify. Change it with edit_plan.
+    """
+    args = {"name": name, "seed": seed}
+    if spec:
+        args["spec"] = spec
+    if example:
+        args["example"] = example
+    result = _call("plan_site", **args)
+    return _with_images(result, result.get("images", [])[:1]) if result.get("ok") else result
+
+
+@mcp.tool()
+def edit_plan(name: str, ops: list):
+    """Change a planned building, then re-solve locally. ops, in order:
+    {"op": "swap", "a": "QA", "b": "Offices"}; {"op": "move", "space": "QA", "strip": 2, "index": 0};
+    {"op": "resize", "space": "Storage", "area": 600};
+    {"op": "add_space", "space": {"name": "Paint", "area": 150, "type": "production"}};
+    {"op": "remove_space", "space": "Break Room"};
+    {"op": "relation", "a": "Paint", "b": "Assembly", "rating": "I"};
+    {"op": "flow", "a": "Assembly", "b": "Paint", "amount": 10};
+    {"op": "rule", "name": "aisle_forklift", "value": 4.0}; {"op": "site", "size": [70, 40]};
+    {"op": "add_equipment", "item": {...}}; {"op": "remove_equipment", "kind": "amr", "in": "Assembly"};
+    {"op": "set_equipment", "kind": "cnc", "in": "Machining", "changes": {"count": 6}}; {"op": "resolve"}.
+    Rebuild afterwards with build_plan / place_equipment."""
+    result = _call("edit_plan", name=name, ops=ops)
+    return _with_images(result, result.get("images", [])[:1]) if result.get("ok") else result
+
+
+@mcp.tool()
+def build_plan(name: str) -> dict:
+    """Build a planned building in Blender from the Geometry Nodes library: floor slabs with
+    painted zones and aisle lines, the shell and interior walls with every door, dock and
+    window cut where the plan put it, a roof, stairs, columns, lights. Editable afterwards:
+    the walls are wall_network modifiers, the roof a roof modifier."""
+    return _call("build_plan", name=name)
+
+
+@mcp.tool()
+def place_equipment(name: str, items: list | None = None, repair: bool = True):
+    """Lay out and build the plan's equipment: conveyors (overhead across aisles), fenced
+    robot cells, pallet-rack rows with forklift aisles, machines and benches in rows, desks
+    in grids. `items` adds more, like {"kind": "tank", "count": 2, "in": "Mixing"}.
+    Returns what went where, what did not fit and a picture of the layout."""
+    args = {"name": name, "repair": repair}
+    if items:
+        args["items"] = items
+    result = _call("place_equipment", **args)
+    return _with_images(result, [result["image"]] if result.get("image") else []) if result.get("ok") else result
+
+
+@mcp.tool()
+def verify(name: str, renders: bool = True, repair: bool = True):
+    """Check a building by measurement: areas, outside walls, docks, collisions, aisles and
+    their clear width, service clearance, the walk from anywhere to an exit, robot reach and
+    fences, floating parts, meshes that intersect, and rays through every opening. Repairs
+    the layout where it can (and rolls back a repair that makes things worse). Returns the
+    violations, the numbers, and renders: a plan from above, a cut-away, a walk down the aisle."""
+    result = _call("verify", name=name, renders=renders, repair=repair)
+    paths = list((result.get("images") or {}).values())
+    return _with_images(result, paths) if result.get("ok") else result
+
+
+@mcp.tool()
+def assets(kind: str = "") -> dict:
+    """What a building can be made of: the parametric generators (conveyor, rack, pallet,
+    forklift, amr, robot_arm, cnc, workbench, tank, cabinet, fence, desk, column, dock_door,
+    door, window) with their sliders, clearances and joints; the space types and rules;
+    example specs. assets("rack") for one generator, assets("example:warehouse") for a
+    whole spec to start from."""
+    return _call("assets", **({"kind": kind} if kind else {}))
+
+
 @mcp.tool()
 def remove(name: str, delete_cache: bool = False) -> dict:
     """Delete an object that was made here."""
