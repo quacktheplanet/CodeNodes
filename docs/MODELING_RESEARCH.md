@@ -1,6 +1,6 @@
 # Modeling research, 2026-09-27
 
-**The goal (the user):** an all-round modeling plugin where the Opus 5.5 agent gets a command like
+**The goal:** an all-round modeling system where an AI agent gets a command like
 *"make me a floor plan for a factory floor, given some specs"* and actually builds it: the plan,
 the building, the rooms, the equipment and robots inside. The house builder is one part of that
 system, not a separate toy. Pieces that can ship on their own go in a Geometry Nodes project
@@ -216,7 +216,7 @@ warnings with the rule's name.*
 | Infinigen / Infinigen Indoors / Infinigen-Sim | BSD-3 (some CC0 snippets, marked) | read and adapt solver, constraint DSL, joint node groups, simulator export |
 | Phobos | BSD-3 | URDF/SDF export reference or optional dependency |
 | Poly Haven, Blender Studio assets | CC0 | textures, kit parts |
-| Buildify, Building Tools | GPL | ideas only unless CodeNodes stays GPL (manifest says GPL-3.0-or-later today) |
+| Buildify, Building Tools | GPL | ideas only unless CodeNodes is GPL (its licence is still to be decided) |
 | Houdini Labs, CityEngine | proprietary | concepts only |
 | Research papers | — | methods; no code copied unless its repo licence allows |
 
@@ -364,7 +364,7 @@ where the agent gets good; 7 is packaging; 8 is the showcase.
   learned-plan route (HomeWorld / Graph2Plan data) later; start with factories and simple houses.
 - **Licence**: GPL vs BSD decides whether Buildify/Building Tools code can be reused.
 - **Scope of "robots"**: static posed models first, animated second, simulation export (URDF)
-  third — confirm with the user which matters for his uses (Unreal game, showcases, sim).
+  third — which matters first depends on the use (games, showcases, simulation).
 - **Verification thresholds**: code numbers vary by jurisdiction; present them as editable
   defaults with sources, never as compliance.
 

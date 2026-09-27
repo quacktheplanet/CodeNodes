@@ -9,7 +9,7 @@ assistant ⇄ MCP (stdio) ⇄ codenodes-mcp ⇄ localhost socket ⇄ CodeNodes a
 
 ## Setting it up
 
-1. **Install the add-on** in Blender (`dist/codenodes-0.1.0.zip`, via Edit › Preferences › Get
+1. **Install the add-on** in Blender (the extension zip, via Edit › Preferences › Get
    Extensions › Install from Disk).
 2. **Start the server**: View3D › Sidebar (N) › **CodeNodes** › **Assistant** › **Start**. It listens
    on `127.0.0.1:9877` and writes a token next to Blender's config as `codenodes_token.json`.
@@ -81,6 +81,6 @@ independent implementation of that idea.)
 ## Tests
 
 ```bash
-python tests/test_rpc.py                                      # the protocol alone (29 checks)
-blender --factory-startup --python tests/test_server.py       # a real client against Blender (25)
+python tests/test_rpc.py                                      # the protocol alone (31 checks)
+blender --factory-startup --python tests/test_server.py       # a real client against Blender (26)
 ```

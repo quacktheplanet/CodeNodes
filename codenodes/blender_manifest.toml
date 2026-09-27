@@ -8,6 +8,7 @@ maintainer = "Lucas DeMeritt"
 type = "add-on"
 tags = ["Mesh", "Modeling", "Development"]
 blender_version_min = "5.0.0"
+# Placeholder: the licence is still to be decided. Blender requires this field.
 license = ["SPDX:GPL-3.0-or-later"]
 
 [permissions]

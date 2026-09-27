@@ -6,7 +6,8 @@ Last updated 2026-09-27. Anything marked **checked** was run on this machine in 
 ## Where the work is (2026-09-27)
 
 `main` has everything up to the four graphics showcases. Newer work sits on branches, each
-tested on both Blender versions and waiting for the user to try and merge:
+tested on both Blender versions and waiting to be tried and merged. `release-prep` combines
+all of them for a first public release:
 
 | branch | what it adds |
 |---|---|
@@ -17,7 +18,7 @@ tested on both Blender versions and waiting for the user to try and merge:
 | `roadmap-refresh` | this file |
 | `all-changes` | all of the above merged, for trying in one go |
 | `modeling-research` | `docs/MODELING_RESEARCH.md`: how others do language-to-buildings, and the plan |
-| `factory-builder` | **the plan built (phases 0–7)**: spec → floor plan → building → equipment → verify, six MCP tools, the `geonodes/` library (on top of `modeling-research`, so it includes `all-changes`) |
+| `factory-builder` | **experimental — the plan built (phases 0–7)**: spec → floor plan → building → equipment → verify, six MCP tools, the `geonodes/` library (on top of `modeling-research`, so it includes `all-changes`) |
 
 They were cut from `main` separately, so README.md and the MCP tool list will need a small hand
 merge where two branches both added lines.
@@ -150,7 +151,7 @@ drive real solvers and CAD, not stand in for them.
    with disputed defaults ([#232](https://github.com/ahujasid/blender-mcp/issues/232)); and CVEs
    including arbitrary code execution (CVE-2026-10688, closed "not planned"). No socket auth.
 
-   *Why not Blender's Lab MCP yet:* official and GPL-3.0-or-later like us, but experimental, and its
+   *Why not Blender's Lab MCP yet:* official and GPL-3.0-or-later, but experimental, and its
    premise is arbitrary `exec` behind a self-described "weak sandbox".
 
    *What to copy from Lab MCP (its architecture is good):*
@@ -208,8 +209,8 @@ drive real solvers and CAD, not stand in for them.
 
 **P2.5 — the Geometry Nodes agent** (started 2026-09-26; see `docs/RESEARCH.md`)
 
-The goal in the user's words: *"talk to Claude and have it build me a geometry node setup,
-understand it entirely, and edit it on the fly."*
+The goal: *talk to an assistant and have it build a Geometry Nodes setup, understand it
+entirely, and edit it on the fly.*
 
 - ~~**Catalog**~~ **done.** `codenodes/gn/catalog.py` reads every node type out of Blender itself
   (320 here: 245 geometry, 49 function, 26 shader), with each socket's type, **whether it takes a
@@ -269,11 +270,11 @@ understand it entirely, and edit it on the fly."*
   Fill Curve fills all splines as one shape unless each gets its own Group ID; merging points
   averages their rotations, so two opposite facings become none.
 
-**P2.6 — headless Blender to the web** (the user's idea, 2026-09-26)
+**P2.6 — headless Blender to the web** (2026-09-26)
 
 Run Blender with no window, build the geometry, and publish it as an interactive page — three.js,
-with sliders for the parameters. His **webblend** repo is the start of this (a scene → HTML/CSS
-exporter, currently a skeleton).
+with sliders for the parameters. A separate scene → HTML/CSS exporter (WebBlend, not yet
+public) is heading the same way.
 
 Worth noting how close it already is: a shape description and a node tree are both **plain data
 with declared parameters**, so the page can expose exactly those as sliders. Two honest routes:
@@ -289,8 +290,8 @@ with declared parameters**, so the page can expose exactly those as sliders. Two
   values, sun and camera carried over, errors shown on the page. Runs headless.
   `tests/test_web.py`; pages checked in headless Edge, including moving sliders.
 
-  The first published version used ES modules and an import map and did not work on the
-  artifact host, though it worked in a local browser; the cause was not pinned down (an import
+  The first published version used ES modules and an import map and did not work on one
+  hosted-page sandbox, though it worked in a local browser; the cause was not pinned down (an import
   map after a host module script was ruled out). Not yet: procedural material variation is lost
   (flat colours on the web); no Draco compression (the sandbox blocks fetching the decoder, so
   it would need inlining); a wall that follows the ground carries many points, so variants are
@@ -301,10 +302,9 @@ with declared parameters**, so the page can expose exactly those as sliders. Two
   `agent.web_shape` writes a ~60 KB page that rebuilds as sliders move (5-10 ms for the lamp),
   checked in headless Edge. Shapes whose parts cut others still need Blender. The port found a
   bug in the Python: a path's `line … steps N` could never work.
-- **webblend** can take the exporter as its core.
+- WebBlend can take the exporter as its core.
 
-**P2.7 — graphics showcases** (the user, 2026-09-26: "put all of those on a list and knock them
-out one by one")
+**P2.7 — graphics showcases** (2026-09-26)
 
 Rampart showed what a mesh editor with good lighting looks like; these push further, each a
 separate page. **All four built the same day** (`web/aerie.html`, `tellus.html`, `myriad.html`,
@@ -320,12 +320,12 @@ open in shape.
    straight into a Code Mesh.
 2. **Procedural planet** — atmospheric scattering, oceans, clouds, terrain; orbit to surface.
 3. **Million-particle GPU simulation** — galaxy, fluid or murmuration; bloom and trails.
-4. **Cinematic raster flythrough** — triangles pushed hard; the bridge to the game and to
+4. **Cinematic raster flythrough** — triangles pushed hard; the bridge to
    Solid Suzanne.
 
-**P2.8 — buildings from a spec: the factory builder** (the user, 2026-09-27: "make me a floor plan
-for a factory floor, given some specs, and actually go to work creating the building, the room,
-the robots inside it"; branch `factory-builder`, plan in `docs/MODELING_RESEARCH.md`)
+**P2.8 — buildings from a spec: the factory builder** (experimental; branch `factory-builder`,
+plan in `docs/MODELING_RESEARCH.md`). The aim: *"make me a floor plan for a factory floor, given
+some specs"* becomes the building, the rooms and the equipment inside, checked.
 
 ![the example factory](factory_demo.jpg)
 
@@ -388,12 +388,12 @@ edges (dual contouring), and use fewer faces where the surface is flat.
 ## Decisions waiting
 
 - ~~**MCP server**~~ decided and built: our own, with a fixed tool table and no exec (see P1.4).
-- ~~**Where the house builder lives**~~ decided (the user, 2026-09-27): part of the all-round modeling
+- ~~**Where the house builder lives**~~ decided (2026-09-27): part of the all-round modeling
   system, inside CodeNodes (`codenodes/factory/`), with the standalone pieces shipped as node-group
   assets in `geonodes/`. Built on branch `factory-builder` (P2.8).
 - **Robots first as what?** Static posed models are built; the joints are recorded. Animated
-  (showcases, the Unreal game) or simulation export (URDF/MJCF) next: the user to choose.
-- **License**: the manifest says GPL-3.0-or-later (placeholder). Infinigen is BSD-3 and Poly Haven
+  (showcases, games) or simulation export (URDF/MJCF) next: not decided yet.
+- **Licence**: to be decided; the manifest's GPL-3.0-or-later is a placeholder. Infinigen is BSD-3 and Poly Haven
   assets are CC0, so both fit.
 - ~~**Merging `node-editor` and `bake` into `main`.**~~ Done. Still waiting: the five branches in
   "Where the work is" at the top.

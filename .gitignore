@@ -1,6 +1,21 @@
+# Python
 __pycache__/
 *.pyc
+*.egg-info/
+.venv/
+venv/
+
+# Blender backups and build output
 *.blend1
+*.blend2
 dist/
+
+# Example output (the scripts write next to themselves by default)
 examples/*.png
+examples/*.jpg
 examples/*.blend
+examples/*.html
+examples/out/
+
+# Node (for tests/web_shape_check.mjs)
+node_modules/

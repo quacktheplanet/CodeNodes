@@ -67,8 +67,8 @@ def main():
     check(d.overflowed and list(d.messages()) == [], "an oversized message is dropped, not buffered")
 
     # --- dispatch ---------------------------------------------------------------------
-    r = rpc.handle({"id": 7, "tool": "greet", "args": {"name": "the user"}}, DISPATCH)
-    check(r["ok"] and r["id"] == 7 and r["result"]["hello"] == "the user", f"a tool runs and the id comes back ({r})")
+    r = rpc.handle({"id": 7, "tool": "greet", "args": {"name": "Ada"}}, DISPATCH)
+    check(r["ok"] and r["id"] == 7 and r["result"]["hello"] == "Ada", f"a tool runs and the id comes back ({r})")
     r = rpc.handle({"tool": "greet", "args": {}}, DISPATCH)
     check(not r["ok"] and "missing" in r["error"].lower() or "required" in r["error"].lower(),
           f"a missing argument is explained ({r['error']})")

@@ -1,8 +1,8 @@
 # Research notes, 2026-09-26
 
 Background reading for the bigger idea: **a Geometry Nodes agent** that can build anything with
-nodes, standing on a growing library of capabilities — and where CodeNodes, solidsuzanne and the
-other repos fit around it.
+nodes, standing on a growing library of capabilities — and where CodeNodes, Solid Suzanne and
+earlier prototypes fit around it.
 
 Anything marked **checked here** was run on this machine. The rest is research, with sources.
 
@@ -111,7 +111,7 @@ a Python add-on's output, which doesn't exist until you run it.
 
 (One correction: "Physical Starlight and Atmosphere" is a sky shader, not a GN tool.)
 
-### Spline and shape driven environments — the thing you described
+### Spline and shape driven environments
 
 The pattern is real and partly solved:
 
@@ -122,7 +122,7 @@ The pattern is real and partly solved:
   Curve Tangent.
 - **A bridge generator** ([80.lv](https://80.lv)) uses Raycast and Geometry Proximity to tell a gap
   from solid ground and split the path into ramp and span automatically. That is genuine
-  connection-resolution, and it is the technique your "bridges appear where needed" idea needs.
+  connection-resolution, and it is the technique "bridges appear where needed" needs.
 - Blender core is adding a low-level **Bridge Curves** node (PR #114014).
 
 ### Where it stops
@@ -165,24 +165,24 @@ Blender has **no built-in text or JSON form of a node tree**. What exists:
 
 ---
 
-## 3. The four repos
+## 3. Earlier prototypes this builds on
 
 | repo | what it really is | verdict |
 |---|---|---|
 | **solidsuzanne** | A working C++/Vulkan Nanite-lite: mesh → `.vgeo` via meshoptimizer, headless Vulkan renderer with frustum-cull and HZB compute shaders, pybind11 module, and a Blender `RenderEngine` that pipes pixels back as a texture. One commit, mid-flight. Tests cover the C++ conversion, not the renderer. | Read for the pybind11 + pixel-readback trick. It exists because "Blender's Vulkan wasn't stable until 5.0" — **that reason may have expired**, so decide what it's for before touching it |
-| **webblend** | A day-one skeleton: mostly markdown spec, a props module, a DOM/CSS exporter, validators. No tests. | Leave alone |
-| **hoverrace-prockit** | **Finished, with real CI.** A `GraphBuilder` class wraps node-tree authoring; four modules each build one capability (track spline, canyon, infra scatter, vehicle proxy); parameters are typed GN sockets, enums via Menu Switch. CI pip-installs `bpy` and runs a smoke test, a geometric validator and golden-file regression on every push. The `.blend` is a **build artifact** | **Build on it.** This is the capability library, already |
-| **sacred-geometry-engine** | A three-tier compiler: DSL → symbol graph → a typed `EvalGraph` DAG with socket types → CSE/DCE → a `gn_backend` emitter registry of ~35 ops keyed by dotted names, each calling real `nodes.new()`. 45 tests, bpy-free via mocking | **Build on it.** This is the answer to "how does an agent emit nodes" |
+| **a scene → web page exporter** | A day-one skeleton: mostly markdown spec, a props module, a DOM/CSS exporter, validators. No tests. | Leave alone |
+| **a procedural racetrack kit** | **Finished, with real CI.** A `GraphBuilder` class wraps node-tree authoring; four modules each build one capability (track spline, canyon, infra scatter, vehicle proxy); parameters are typed GN sockets, enums via Menu Switch. CI pip-installs `bpy` and runs a smoke test, a geometric validator and golden-file regression on every push. The `.blend` is a **build artifact** | **Build on it.** This is the capability library, already |
+| **a DSL → Geometry Nodes compiler** (now [Expression Nodes](https://github.com/quacktheplanet/expression-nodes)) | A three-tier compiler: DSL → symbol graph → a typed `EvalGraph` DAG with socket types → CSE/DCE → a `gn_backend` emitter registry of ~35 ops keyed by dotted names, each calling real `nodes.new()`. 45 tests, bpy-free via mocking | **Build on it.** This is the answer to "how does an agent emit nodes" |
 
 ---
 
 ## 4. Where this leaves the Geometry Nodes agent
 
-### You already own both halves
+### Both halves already exist
 
-- **hoverrace-prockit** shows what one capability looks like: a Python function that builds a
+- **The racetrack kit** shows what one capability looks like: a Python function that builds a
   parameterised node group, with a smoke test, a validator and a golden file.
-- **sacred-geometry-engine** shows how intent becomes nodes: an IR, then a registry of emitters.
+- **The DSL compiler** shows how intent becomes nodes: an IR, then a registry of emitters.
 
 What is missing between them is small: a **manifest** so an agent can discover what capabilities
 exist and what each one promises, and a **loop** to check the result — which CodeNodes already has
@@ -191,7 +191,7 @@ in `agent.py` and the MCP server (build → render → look → fix).
 ### One disagreement with the research, worth recording
 
 The survey recommends `.blend` node groups as the source of truth, with a text export as an audit
-trail. **Your own repo demonstrates the better answer.** hoverrace-prockit keeps *Python* as the
+trail. **The racetrack kit demonstrates the better answer.** It keeps *Python* as the
 source and treats the `.blend` as a build artifact — which is diffable, reviewable, testable in CI,
 and dodges the unsolved `.blend` diffing problem entirely. Keep that.
 
@@ -200,7 +200,7 @@ and dodges the unsolved `.blend` diffing problem entirely. Keep that.
 1. **A manifest generator.** Walk a node group's `interface.items_tree` and emit JSON: what it
    makes, its inputs with types, units, ranges and descriptions, its outputs, and tags for what it
    composes with. Generated, never hand-written. Cheap, testable headlessly, and immediately useful.
-2. **`gnkit`** — hoverrace-prockit's `GraphBuilder` and CI pattern pulled out as the shared way to
+2. **`gnkit`** — the racetrack kit's `GraphBuilder` and CI pattern pulled out as the shared way to
    write a capability: one function, typed sockets, a mandatory `seed`, a smoke test and a golden
    file.
 3. **Agent tools**: list capabilities, place one, set its sockets, connect two, render, critique.

@@ -9,11 +9,12 @@ param(
     [Parameter(Mandatory = $true)][string]$Python,
     [Parameter(Mandatory = $true)][string]$Work,
     [string]$Client = "mcp_e2e.py",
-    [string[]]$Blenders = @(
-        "C:/Users/you\blender-versions\blender-5.0.1-windows-x64\blender.exe",
-        "C:\Program Files\Blender Foundation\Blender 5.1\blender.exe")
+    # Every Blender to test, comma-separated; the last one builds the zip.
+    [string[]]$Blenders = @("blender")
 )
 $ErrorActionPreference = "Stop"
+# powershell -File passes "a,b" as one string, so split it here.
+$Blenders = @($Blenders | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Repo = Split-Path -Parent $PSScriptRoot
 New-Item -ItemType Directory -Force $Work | Out-Null
 $dist = Join-Path $Work "dist"
