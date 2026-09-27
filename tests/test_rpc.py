@@ -5,6 +5,7 @@
 import base64
 import importlib.util
 import os
+import re
 import sys
 import tempfile
 
@@ -126,6 +127,22 @@ def main():
     check(got["ok"] and base64.b64decode(got["image_base64"])[:4] == b"\x89PNG", "an image comes back as base64")
     check(not rpc.read_image(os.path.join(tmp, "nope.png"))["ok"], "a missing image is explained")
     check(not rpc.read_image(png, max_bytes=10)["ok"], "an oversized image is refused")
+
+    # the MCP process itself: every tool it declares is one the add-on answers, and the files
+    # at least parse (a broken edit there once went unnoticed, since nothing here runs it)
+    import ast
+    mcp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mcp", "codenodes_mcp")
+    tree = ast.parse(open(os.path.join(mcp_dir, "server.py"), encoding="utf-8").read())
+    tools = [f.name for f in tree.body if isinstance(f, ast.FunctionDef)
+             and any(getattr(d, "func", None) is not None and getattr(d.func, "attr", "") == "tool"
+                     for d in f.decorator_list)]
+    called = {n.args[0].value for n in ast.walk(tree) if isinstance(n, ast.Call)
+              and getattr(n.func, "id", "") == "_call" and n.args and isinstance(n.args[0], ast.Constant)}
+    server_src = open(os.path.join(os.path.dirname(mcp_dir), "..", "codenodes", "server.py"), encoding="utf-8").read()
+    answered = set(re.findall(r'"(\w+)"', server_src.split("def dispatch_table")[1].split("return table")[0]))
+    check(len(tools) >= 20 and "remove" in tools, f"the MCP server parses and declares {len(tools)} tools")
+    check(called <= answered | {"read_image", "status"},
+          f"every call it makes is one the add-on answers (missing: {sorted(called - answered - {'read_image', 'status'}) or 'none'})")
 
     print(f"\nAll {_checks} checks passed.")
 

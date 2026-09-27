@@ -208,7 +208,8 @@ def bake_to_nodes(name: str) -> dict:
     return _call("bake_to_nodes", name=name)
 
 
-name: str, delete_cache: bool = False) -> dict:
+@mcp.tool()
+def remove(name: str, delete_cache: bool = False) -> dict:
     """Delete an object that was made here."""
     return _call("remove", name=name, delete_cache=delete_cache)
 
