@@ -252,6 +252,20 @@ with declared parameters**, so the page can expose exactly those as sliders. Two
   shape re-evaluates in the browser at any slider value, not only baked ones.
 - **webblend** can take the exporter as its core.
 
+**P2.7 — graphics showcases** (the user, 2026-09-26: "put all of those on a list and knock them
+out one by one")
+
+Rampart showed what a mesh editor with good lighting looks like; these push further, each a
+separate page:
+1. **Raymarched SDF world** — a citadel on a sea-stack above clouds, traced per pixel: no polygon
+   budget, soft shadows, AO, volumetric clouds, reflective ocean. The castle is live GLSL in the
+   same helper vocabulary as CodeNodes (Z up, `sdBox`, `smin`, `// @param`), so it copies
+   straight into a Code Mesh.
+2. **Procedural planet** — atmospheric scattering, oceans, clouds, terrain; orbit to surface.
+3. **Million-particle GPU simulation** — galaxy, fluid or murmuration; bloom and trails.
+4. **Cinematic raster flythrough** — triangles pushed hard; the bridge to the game and to
+   Solid Suzanne.
+
 **P3 — bigger simulations**
 11. **Field output** (vector grids that GN simulations and hair can sample).
 12. **GPU smoke solver** (advect, pressure solve, project; sources, forces and SDF obstacles as nodes).

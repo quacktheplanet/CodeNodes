@@ -1,0 +1,690 @@
+<title>Aerie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* One deliberate look: the scene is the subject, so the controls are smoked glass over it
+   in either theme. Every colour is set here explicitly. */
+:root {
+  --glass: rgba(14, 16, 22, 0.62); --glass-strong: rgba(12, 14, 19, 0.9); --edge: rgba(255, 240, 220, 0.14);
+  --ink: #F3EEE6; --muted: #B7AFA3; --gold: #E9B872; --gold-ink: #1B1409; --error: #FF9A8A;
+  --display: "Cinzel", "Trajan Pro", Georgia, serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: #07090d; color: var(--ink); font-family: var(--body); overflow: hidden; font-size: 14px; }
+canvas#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+canvas#view:active { cursor: grabbing; }
+.glass { background: var(--glass); backdrop-filter: blur(14px) saturate(1.2); border: 1px solid var(--edge); border-radius: 12px; }
+#panel { position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: min(300px, calc(100% - 32px));
+  padding: 14px 16px; display: grid; gap: 12px; max-height: calc(100% - 32px); overflow: auto; }
+#panel h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 30px; letter-spacing: 0.12em; line-height: 1; }
+#panel .sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.field { display: grid; gap: 4px; }
+.field .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.field label { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; color: var(--muted); }
+.field output { font-family: var(--mono); font-size: 12px; color: var(--gold); font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--gold); margin: 0; }
+.buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+button, select { font: inherit; color: var(--ink); }
+.btn { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--edge); border-radius: 8px; padding: 6px 11px; cursor: pointer; font-weight: 500; }
+.btn:hover { background: rgba(255, 255, 255, 0.12); }
+.btn[aria-pressed="true"], .btn.primary { background: var(--gold); color: var(--gold-ink); border-color: transparent; }
+select { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--edge); border-radius: 8px; padding: 5px 8px; }
+select option { background: #151821; }
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#params { display: grid; gap: 10px; border-top: 1px solid var(--edge); padding-top: 10px; }
+#params:empty { display: none; }
+#hud { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px; padding: 6px 10px; font-family: var(--mono);
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#code { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  width: min(520px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--glass-strong); }
+#code h2 { margin: 0; font-family: var(--display); font-size: 18px; letter-spacing: 0.08em; }
+#code p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+#code code { font-family: var(--mono); color: var(--gold); font-size: 12px; }
+#source { flex: 1; min-height: 200px; resize: none; width: 100%; box-sizing: border-box; background: rgba(0, 0, 0, 0.35); color: #EDE6DA;
+  border: 1px solid var(--edge); border-radius: 8px; padding: 10px; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; tab-size: 2; white-space: pre; }
+#codeMsg { font-family: var(--mono); font-size: 12px; min-height: 1.5em; white-space: pre-wrap; }
+#codeMsg.bad { color: var(--error); }
+@media (max-width: 640px) {
+  #panel { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); left: 10px; width: calc(100% - 20px); max-height: 48%; padding: 12px; gap: 10px; }
+  #panel h1 { font-size: 24px; }
+  #panel .sub { display: none; }
+  #code { left: 10px; right: 10px; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) { #tour { display: none; } }
+</style>
+
+<canvas id="view" aria-label="A raymarched citadel on a sea stack above the clouds. Drag to orbit, scroll to zoom."></canvas>
+<div id="hud" class="glass" role="status">Starting…</div>
+<section id="panel" class="glass" aria-label="Scene">
+  <div>
+    <h1>Aerie</h1>
+    <p class="sub">A citadel above the clouds, drawn with no triangles: every pixel traces into shapes defined by code. Drag to orbit, scroll to zoom; stand still and it sharpens.</p>
+  </div>
+  <div class="field"><div class="row"><label for="time">Time of day</label><output id="timeOut" for="time"></output></div>
+    <input type="range" id="time" min="4.5" max="23.5" step="0.05" value="18.8"></div>
+  <div class="field"><div class="row"><label for="clouds">Cloud cover</label><output id="cloudsOut" for="clouds"></output></div>
+    <input type="range" id="clouds" min="0" max="1" step="0.01" value="0.55"></div>
+  <div class="field"><div class="row"><label for="quality">Quality</label></div>
+    <select id="quality"><option value="fast">Fast</option><option value="balanced" selected>Balanced</option><option value="best">Best</option></select></div>
+  <div class="buttons">
+    <button class="btn" id="tour" type="button" aria-pressed="false">Tour</button>
+    <button class="btn" id="edit" type="button" aria-pressed="false">Edit the shape code</button>
+  </div>
+  <div id="params" aria-label="Shape sliders"></div>
+</section>
+<section id="code" class="glass" hidden aria-label="Shape code">
+  <h2>Shape code</h2>
+  <p>The castle is <code>citadel(p)</code>, its roofs <code>roofs(p)</code>: distances in metres, Z up, the middle of the plateau at the origin — the same conventions and helpers (<code>sdBox</code>, <code>sdCylinder</code>, <code>smin</code>…) as CodeNodes in Blender. A line <code>// @param name default min max</code> becomes a slider. Ctrl+Enter runs it.</p>
+  <textarea id="source" spellcheck="false" aria-label="GLSL source"></textarea>
+  <div id="codeMsg" role="status"></div>
+  <div class="buttons">
+    <button class="btn primary" id="run" type="button">Run</button>
+    <button class="btn" id="copyBlender" type="button">Copy for Blender</button>
+    <button class="btn" id="resetCode" type="button">Back to the original</button>
+    <button class="btn" id="closeCode" type="button">Close</button>
+  </div>
+</section>
+
+<script>
+(function () {
+"use strict";
+const hud = document.getElementById("hud");
+const canvas = document.getElementById("view");
+const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, preserveDrawingBuffer: false, powerPreference: "high-performance" });
+if (!gl) { hud.textContent = "This needs WebGL 2, which this browser does not offer."; return; }
+const floatTargets = !!gl.getExtension("EXT_color_buffer_float");
+gl.getExtension("OES_texture_float_linear");
+
+// ------------------------------------------------------------------ the shape code
+const DEFAULT_CODE = `// A citadel on the rock. Metres, Z up, (0,0,0) is the middle of the plateau.
+// @param towers 6 3 12
+// @param radius 10 6 12.5
+// @param wallHeight 4.5 2 9
+// @param keepHeight 14 6 26
+
+float citadel(vec3 p) {
+  // the curtain wall: a ring, battlements all the way round
+  float ring = abs(length(p.xy) - radius) - 0.7;
+  float wall = max(ring, max(-p.z - 1.0, p.z - wallHeight));
+  vec3 m = aroundZ(p, floor(towers) * 7.0);
+  wall = min(wall, sdBox(m - vec3(radius, 0.0, wallHeight + 0.45), vec3(0.7, 0.42, 0.45)));
+
+  // a gate facing south: an arched opening through the wall
+  float gate = min(sdBox(p - vec3(0.0, -radius, 1.0), vec3(1.4, 2.0, 2.0)),
+                   sdCylinder(rotateX(p - vec3(0.0, -radius, 3.0), 1.5708), 1.4, 2.0));
+  wall = max(wall, -gate);
+
+  // round towers standing on the ring, with arrow slits
+  vec3 t = aroundZ(p, floor(towers));
+  float towerH = wallHeight + 3.5;
+  float tower = sdCylinder(t - vec3(radius, 0.0, towerH * 0.5), 2.0, towerH * 0.5 + 0.5);
+  vec3 s = aroundZ(t - vec3(radius, 0.0, 0.0), 4.0);
+  tower = max(tower, -sdBox(s - vec3(2.0, 0.0, towerH * 0.62), vec3(0.5, 0.11, 0.6)));
+
+  // the keep, with an arcade round its foot and windows higher up
+  float keep = sdRoundBox(p - vec3(0.0, 0.0, keepHeight * 0.5), vec3(3.6, 3.6, keepHeight * 0.5), 0.25);
+  vec3 k = aroundZ(p, 4.0);
+  float arcade = min(sdBox(k - vec3(3.6, 0.0, 1.1), vec3(0.8, 1.05, 1.1)),
+                     sdCylinder(rotateY(k - vec3(3.6, 0.0, 2.2), 1.5708), 1.05, 0.8));
+  float windows = sdBox(k - vec3(3.6, 0.0, keepHeight * 0.72), vec3(0.8, 0.35, 0.9));
+  keep = max(keep, -min(arcade, windows));
+
+  return min(min(wall, tower), keep);
+}
+
+float roofs(vec3 p) {
+  vec3 t = aroundZ(p, floor(towers));
+  float towerH = wallHeight + 3.5;
+  float caps = sdCone(t - vec3(radius, 0.0, towerH + 2.4), 2.4, 2.55, 0.05);
+  float spire = sdCone(p - vec3(0.0, 0.0, keepHeight + 3.4), 3.4, 4.0, 0.08);
+  return min(caps, spire);
+}
+`;
+
+// helpers CodeNodes already has in Blender, under the same names
+const CODENODES_PRELUDE = `
+float sdSphere(vec3 p, float r) { return length(p) - r; }
+float sdBox(vec3 p, vec3 b) { vec3 q = abs(p) - b; return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0); }
+float sdRoundBox(vec3 p, vec3 b, float r) { return sdBox(p, b - r) - r; }
+float sdTorus(vec3 p, float R, float r) { vec2 q = vec2(length(p.xy) - R, p.z); return length(q) - r; }
+float sdCapsule(vec3 p, vec3 a, vec3 b, float r) { vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) - r; }
+float sdCylinder(vec3 p, float r, float h) { vec2 d = abs(vec2(length(p.xy), p.z)) - vec2(r, h); return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)); }
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float smax(float a, float b, float k) { return -smin(-a, -b, k); }
+vec3 rotateZ(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x - s * p.y, s * p.x + c * p.y, p.z); }
+vec3 rotateX(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(p.x, c * p.y - s * p.z, s * p.y + c * p.z); }
+vec3 rotateY(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z); }
+float cnHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise3(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(cnHash(i), cnHash(i + vec3(1, 0, 0)), f.x), mix(cnHash(i + vec3(0, 1, 0)), cnHash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(cnHash(i + vec3(0, 0, 1)), cnHash(i + vec3(1, 0, 1)), f.x), mix(cnHash(i + vec3(0, 1, 1)), cnHash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+float fbm3(vec3 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise3(p); p = p * 2.03 + 11.7; a *= 0.5; } return v; }
+`;
+// two more this page adds; "Copy for Blender" brings them along
+const EXTRA_HELPERS = `
+// repeat space n times around the Z axis
+vec3 aroundZ(vec3 p, float n) { float s = 6.2831853 / n; float a = atan(p.y, p.x); a = mod(a + s * 0.5, s) - s * 0.5; float r = length(p.xy); return vec3(r * cos(a), r * sin(a), p.z); }
+// a cone along Z, centred: from z = -h (radius r1) to z = +h (radius r2)
+float sdCone(vec3 p, float h, float r1, float r2) {
+  vec2 q = vec2(length(p.xy), p.z), k1 = vec2(r2, h), k2 = vec2(r2 - r1, 2.0 * h);
+  vec2 ca = vec2(q.x - min(q.x, (q.y < 0.0) ? r1 : r2), abs(q.y) - h);
+  vec2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0, 1.0);
+  float s = (cb.x < 0.0 && ca.y < 0.0) ? -1.0 : 1.0;
+  return s * sqrt(min(dot(ca, ca), dot(cb, cb)));
+}
+`;
+
+// ------------------------------------------------------------------ the renderer
+const VERT = `#version 300 es
+in vec2 aPos; out vec2 vUv;
+void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+function sceneShader(user, params) {
+  const uniforms = params.map((p) => `uniform float ${p.name};`).join("\n");
+  const roofs = /float\s+roofs\s*\(/.test(user) ? "" : "float roofs(vec3 p) { return 1e9; }\n";
+  const head = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 fragColor;
+uniform vec2 uRes, uJitter; uniform vec3 uCamPos, uCamFwd, uCamRight, uCamUp, uSun, uLightCol; uniform float uFov, uTime, uClouds, uDay;
+uniform int uSteps, uCloudSteps;
+${CODENODES_PRELUDE}${EXTRA_HELPERS}
+${uniforms}
+${roofs}`;
+  const lines = head.split("\n").length;
+  return { src: head + "\n" + user + "\n" + SCENE_BODY, offset: lines };
+}
+
+const SCENE_BODY = `
+// ---------------------------------------------------------------------------------- the world
+const float PLATEAU = 40.0;
+float rockNoise(vec3 p) { return noise3(p) * 0.55 + noise3(p * 2.1 + 3.1) * 0.28 + noise3(p * 4.3 + 7.7) * 0.17; }
+
+float spire(vec3 p, vec2 at, float height, float base, float top) {
+  vec3 q = p - vec3(at, 0.0);
+  float k = clamp(q.z / height, 0.0, 1.0);
+  float r = mix(base, top, pow(k, 0.7));
+  float d = length(q.xy) - r;
+  return smax(d, q.z - height, 2.5);
+}
+float rock(vec3 p) {
+  float d = spire(p, vec2(0.0), PLATEAU, 26.0, 15.0);
+  d = min(d, spire(p, vec2(-58.0, 34.0), 26.0, 13.0, 4.0));
+  d = min(d, spire(p, vec2(46.0, 70.0), 34.0, 15.0, 5.0));
+  d = min(d, spire(p, vec2(84.0, -26.0), 17.0, 11.0, 3.5));
+  d = min(d, spire(p, vec2(-30.0, -82.0), 21.0, 12.0, 4.0));
+  d = max(d, -p.z - 6.0);
+  if (d < 6.0) {
+    d += (rockNoise(p * vec3(0.09, 0.09, 0.05)) - 0.5) * 7.0;                                      // big masses
+    d += (noise3(p * 0.7) - 0.5) * 0.9;                                                            // blocks
+    d += (abs(noise3(vec3(p.xy * 0.35, p.z * 2.2)) - 0.5) - 0.25) * 0.6;                           // ledges and strata
+    if (d < 1.5) d += (noise3(p * 2.6) - 0.5) * 0.22;                                              // grain, close up only
+  }
+  return d * 0.62;
+}
+// 0 rock, 1 stone, 2 roof
+float map(vec3 p, out int mat) {
+  float d = rock(p); mat = 0;
+  vec3 c = p - vec3(0.0, 0.0, PLATEAU);
+  float bound = sdCylinder(c - vec3(0.0, 0.0, 16.0), 16.0, 20.0);
+  if (bound < 1.5) {
+    float s = citadel(c); if (s < d) { d = s; mat = 1; }
+    float r = roofs(c); if (r < d) { d = r; mat = 2; }
+  } else if (bound < d) {
+    d = bound;
+  }
+  return d;
+}
+float mapD(vec3 p) { int m; return map(p, m); }
+vec3 normalAt(vec3 p, float t) {
+  float e = max(0.002, 0.0008 * t);
+  vec2 k = vec2(1.0, -1.0);
+  return normalize(k.xyy * mapD(p + k.xyy * e) + k.yyx * mapD(p + k.yyx * e) + k.yxy * mapD(p + k.yxy * e) + k.xxx * mapD(p + k.xxx * e));
+}
+float softShadow(vec3 ro, vec3 rd, float k) {
+  float res = 1.0, t = 0.06;
+  for (int i = 0; i < 64; i++) {
+    float h = mapD(ro + rd * t);
+    res = min(res, k * h / t);
+    t += clamp(h, 0.08, 3.0);
+    if (res < 0.003 || t > 140.0) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+float ambientOcclusion(vec3 p, vec3 n) {
+  float o = 0.0, w = 1.0;
+  for (int i = 1; i <= 5; i++) { float h = 0.12 * float(i) * float(i); o += (h - mapD(p + n * h)) * w; w *= 0.6; }
+  return clamp(1.0 - 0.55 * o, 0.0, 1.0);
+}
+
+// ---------------------------------------------------------------------------------- sky and air
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+vec3 sky(vec3 rd) {
+  float e = uSun.z;
+  // (a gradient that starts just below the horizon: pow(h, <1) is infinitely steep at 0
+  // and drew a hard line where the sky met the haze)
+  float h = clamp((rd.z + 0.04) / 1.04, 0.0, 1.0);
+  vec3 zenith = mix(vec3(0.004, 0.006, 0.018), vec3(0.09, 0.22, 0.55), smoothstep(-0.12, 0.25, e));
+  vec3 dusk = vec3(1.0, 0.42, 0.16), noon = vec3(0.5, 0.68, 0.9);
+  vec3 horizon = mix(vec3(0.012, 0.016, 0.035), mix(dusk, noon, smoothstep(0.02, 0.45, e)), smoothstep(-0.16, 0.06, e));
+  vec3 col = mix(horizon, zenith, pow(h, 0.6));
+  float sd = max(dot(rd, uSun), 0.0);
+  float up = smoothstep(-0.05, 0.05, e);
+  col += uLightCol * up * (pow(sd, 1400.0) * 60.0 + pow(sd, 90.0) * 0.9 + pow(sd, 6.0) * 0.25 * (1.0 - h));
+  col = mix(col, horizon * 0.6, smoothstep(0.0, -0.3, rd.z));
+  float night = 1.0 - smoothstep(-0.14, 0.0, e);
+  if (night > 0.0 && rd.z > 0.06) {
+    vec2 g = rd.xy / (rd.z + 0.35) * 220.0;
+    vec2 cell = floor(g), f = fract(g) - 0.5;
+    float star = step(0.993, hash2(cell)) * smoothstep(0.08, 0.0, length(f));
+    col += vec3(0.9, 0.95, 1.0) * star * night * 1.6;
+  }
+  return col;
+}
+vec3 air(vec3 col, vec3 rd, float t) {
+  float fog = 1.0 - exp(-t * 0.0009);
+  float sd = max(dot(rd, uSun), 0.0);
+  // the haze is the sky at the horizon itself, so the far sea melts into it with no seam
+  vec3 haze = sky(normalize(vec3(rd.xy, 0.0))) + uLightCol * pow(sd, 8.0) * 0.4 * smoothstep(-0.05, 0.05, uSun.z);
+  return mix(col, haze, fog);
+}
+
+// ---------------------------------------------------------------------------------- surfaces
+vec3 stoneColour(vec3 p, vec3 n) {
+  // courses of blocks, projected from whichever side the surface faces most (a plain
+  // "along the wall" coordinate is constant round a curved wall and gives stripes)
+  vec2 uv = abs(n.z) > 0.7 ? p.xy : vec2(abs(n.x) > abs(n.y) ? p.y : p.x, p.z);
+  vec2 b = uv / vec2(0.9, 0.42);
+  b.x += step(1.0, mod(floor(b.y), 2.0)) * 0.5;
+  vec2 f = fract(b);
+  float mortar = smoothstep(0.0, 0.05, f.x) * smoothstep(0.0, 0.05, 1.0 - f.x) * smoothstep(0.0, 0.08, f.y) * smoothstep(0.0, 0.08, 1.0 - f.y);
+  float block = cnHash(vec3(floor(b), 3.0));
+  vec3 c = mix(vec3(0.40, 0.35, 0.28), vec3(0.56, 0.50, 0.41), block) * (0.85 + 0.15 * noise3(p * 3.0));
+  return c * mix(0.5, 1.0, mortar);
+}
+vec3 surface(vec3 p, vec3 n, int mat) {
+  if (mat == 1) return stoneColour(p - vec3(0.0, 0.0, PLATEAU), n);
+  if (mat == 2) { float row = smoothstep(0.35, 0.5, abs(fract(p.z * 3.0) - 0.5)); return vec3(0.33, 0.12, 0.08) * (0.8 + 0.2 * row); }
+  vec3 rockC = mix(vec3(0.24, 0.21, 0.18), vec3(0.42, 0.37, 0.31), rockNoise(p * 0.35));
+  rockC *= 0.8 + 0.2 * smoothstep(0.3, 0.7, noise3(vec3(p.xy * 0.05, p.z * 1.4)));        // strata
+  float grass = smoothstep(0.72, 0.9, n.z) * smoothstep(PLATEAU - 16.0, PLATEAU - 4.0, p.z + (noise3(p * 0.3) - 0.5) * 8.0);
+  grass = max(grass, smoothstep(0.8, 0.95, n.z) * smoothstep(3.0, 9.0, p.z) * 0.8);
+  return mix(rockC, vec3(0.16, 0.22, 0.09) * (0.8 + 0.4 * noise3(p * 2.0)), grass);
+}
+vec3 light(vec3 p, vec3 n, vec3 rd, vec3 alb, float t, int mat) {
+  float dif = max(dot(n, uSun), 0.0);
+  float sh = dif > 0.0 ? softShadow(p + n * 0.05, uSun, 10.0) : 0.0;
+  float ao = ambientOcclusion(p, n);
+  vec3 skyTop = sky(vec3(0.0, 0.0, 1.0)), skyH = sky(normalize(vec3(-uSun.xy, 0.15)));
+  vec3 amb = mix(skyH, skyTop, n.z * 0.5 + 0.5) * 0.9;
+  float bounce = clamp(-n.z * 0.5 + 0.5, 0.0, 1.0) * 0.12;
+  vec3 h = normalize(uSun - rd);
+  float spec = pow(max(dot(n, h), 0.0), mat == 2 ? 24.0 : 12.0) * (mat == 0 ? 0.05 : 0.12) * sh;
+  vec3 col = alb * (uLightCol * dif * sh * 3.4 + amb * ao * ao * 0.32 + vec3(0.25, 0.3, 0.35) * bounce * ao * uDay) + uLightCol * spec;
+  return col;
+}
+
+// ---------------------------------------------------------------------------------- clouds
+float cloudDensity(vec3 p) {
+  if (p.z < 12.0 || p.z > 30.0) return 0.0;
+  float profile = smoothstep(12.0, 16.0, p.z) * smoothstep(30.0, 22.0, p.z);
+  vec3 q = p * 0.018 + vec3(uTime * 0.004, uTime * 0.002, 0.0);
+  float n = noise3(q) * 0.6 + noise3(q * 2.3 + 5.0) * 0.28 + noise3(q * 5.1 + 9.0) * 0.12;
+  return clamp((n - (1.0 - uClouds * 0.8) + 0.12) * 3.0, 0.0, 1.0) * profile;
+}
+vec4 clouds(vec3 ro, vec3 rd, float tMax) {
+  if (uClouds < 0.01 || abs(rd.z) < 1e-4) return vec4(0.0, 0.0, 0.0, 1.0);
+  float t0 = (12.0 - ro.z) / rd.z, t1 = (30.0 - ro.z) / rd.z;
+  if (t0 > t1) { float s = t0; t0 = t1; t1 = s; }
+  t0 = max(t0, 0.0); t1 = min(t1, min(tMax, 900.0));
+  if (t1 <= t0) return vec4(0.0, 0.0, 0.0, 1.0);
+  float stepLen = (t1 - t0) / float(uCloudSteps);
+  float t = t0 + stepLen * hash2(gl_FragCoord.xy + uJitter * 97.0);
+  vec3 acc = vec3(0.0); float trans = 1.0;
+  vec3 skyTop = sky(vec3(0.0, 0.0, 1.0));
+  for (int i = 0; i < 96; i++) {
+    if (i >= uCloudSteps || trans < 0.02) break;
+    vec3 p = ro + rd * t;
+    float d = cloudDensity(p);
+    if (d > 0.005) {
+      float toSun = cloudDensity(p + uSun * 3.0) + cloudDensity(p + uSun * 8.0) * 0.6;
+      float lit = exp(-toSun * 2.4) * smoothstep(-0.08, 0.05, uSun.z);
+      float powder = 1.0 - exp(-d * 4.0);
+      vec3 c = uLightCol * lit * powder * 2.4 + skyTop * (0.2 + 0.3 * (p.z - 12.0) / 18.0);
+      float a = 1.0 - exp(-d * stepLen * 0.35);
+      acc += trans * a * c; trans *= 1.0 - a;
+    }
+    t += stepLen;
+  }
+  return vec4(acc, trans);
+}
+
+// ---------------------------------------------------------------------------------- the ocean
+float waves(vec2 p) {
+  float h = 0.0, a = 0.35; vec2 d = vec2(1.0, 0.3);
+  for (int i = 0; i < 5; i++) {
+    h += a * sin(dot(p, d) * (0.18 * pow(1.9, float(i))) + uTime * (0.6 + 0.35 * float(i)));
+    d = vec2(d.x * 0.8 - d.y * 0.6, d.x * 0.6 + d.y * 0.8); a *= 0.55;
+  }
+  return h;
+}
+vec3 oceanNormal(vec2 p, float t) {
+  float e = 0.05 + t * 0.002;
+  return normalize(vec3(-(waves(p + vec2(e, 0.0)) - waves(p - vec2(e, 0.0))) / (2.0 * e),
+                        -(waves(p + vec2(0.0, e)) - waves(p - vec2(0.0, e))) / (2.0 * e), 1.0) + vec3(0.0, 0.0, t * 0.004));
+}
+
+// ---------------------------------------------------------------------------------- tracing
+float trace(vec3 ro, vec3 rd, float tMax, int steps, out int mat) {
+  float t = 0.1; mat = -1;
+  for (int i = 0; i < 400; i++) {
+    if (i >= steps) break;
+    vec3 p = ro + rd * t;
+    int m; float d = map(p, m);
+    if (d < 0.0015 * t) { mat = m; return t; }
+    t += d;
+    if (t > tMax) break;
+  }
+  return -1.0;
+}
+vec3 shadeHit(vec3 ro, vec3 rd, float t, int mat) {
+  vec3 p = ro + rd * t, n = normalAt(p, t);
+  return air(light(p, n, rd, surface(p, n, mat), t, mat), rd, t);
+}
+
+void main() {
+  vec2 frag = gl_FragCoord.xy + uJitter;
+  vec2 uv = (frag - 0.5 * uRes) / uRes.y;
+  float f = 1.0 / tan(radians(uFov) * 0.5);
+  vec3 rd = normalize(uCamFwd * f + uCamRight * uv.x + uCamUp * uv.y);
+  vec3 ro = uCamPos;
+
+  float tSea = rd.z < 0.0 ? -ro.z / rd.z : 1e9;
+  int mat; float t = trace(ro, rd, min(tSea, 1200.0), uSteps, mat);
+  vec3 col; float depth;
+  if (t > 0.0) { col = shadeHit(ro, rd, t, mat); depth = t; }
+  else if (tSea < 1e8) {
+    vec3 p = ro + rd * tSea;
+    vec3 n = oceanNormal(p.xy, tSea);
+    vec3 rr = reflect(rd, n); rr.z = abs(rr.z);
+    float fres = 0.02 + 0.98 * pow(1.0 - max(dot(-rd, n), 0.0), 5.0);
+    int rm; float rt = trace(p + n * 0.1, rr, 400.0, uSteps / 2, rm);
+    vec3 refl = rt > 0.0 ? shadeHit(p, rr, rt, rm) : sky(rr);
+    vec3 deep = vec3(0.004, 0.02, 0.035) + vec3(0.01, 0.05, 0.06) * uDay;
+    float foam = smoothstep(4.0, 0.0, rock(vec3(p.xy, 0.5))) * (0.5 + 0.5 * noise3(vec3(p.xy * 0.8, uTime * 0.5)));
+    col = mix(deep, refl, fres) + uLightCol * pow(max(dot(rr, uSun), 0.0), 400.0) * 3.0 * smoothstep(-0.02, 0.05, uSun.z);
+    col = mix(col, vec3(0.8, 0.85, 0.9) * (uLightCol * max(uSun.z, 0.0) + sky(vec3(0, 0, 1))), foam * 0.7);
+    col = air(col, rd, tSea); depth = tSea;
+  } else { col = sky(rd); depth = 1e9; }
+
+  vec4 cl = clouds(ro, rd, depth);
+  col = col * cl.a + cl.rgb;
+
+  // film response: ACES, then sRGB, with a light vignette
+  col *= 0.9;
+  col = clamp((col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14), 0.0, 1.0);
+  col = pow(col, vec3(1.0 / 2.2));
+  vec2 q = vUv - 0.5;
+  col *= 1.0 - 0.35 * dot(q, q) * 1.6;
+  fragColor = vec4(col, 1.0);
+}
+`;
+
+const SHOW = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 fragColor;
+uniform sampler2D uImage; uniform float uScale;
+void main() { fragColor = vec4(texture(uImage, vUv).rgb * uScale, 1.0); }`;
+
+function compile(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { const log = gl.getShaderInfoLog(s); gl.deleteShader(s); throw new Error(log); }
+  return s;
+}
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs)); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, "aPos"); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+const show = program(VERT, SHOW);
+
+// ------------------------------------------------------------------ render targets
+function target(w, h, float) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, float ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA, float ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { tex, fb, w, h };
+}
+let low = null, accum = null;
+
+// ------------------------------------------------------------------ state
+const QUALITY = {
+  fast: { min: 0.3, max: 0.6, steps: 140, cloud: 28, idleSamples: 8 },
+  balanced: { min: 0.4, max: 0.85, steps: 200, cloud: 44, idleSamples: 24 },
+  best: { min: 0.55, max: 1.0, steps: 300, cloud: 72, idleSamples: 64 },
+};
+let quality = QUALITY.balanced, scale = 0.6, frameMs = 16;
+const cam = { yaw: -1.75, pitch: 0.11, dist: 170, target: [0, 0, 40] };
+let scene = null, params = [], values = {}, dirty = true, lastMove = performance.now(), samples = 0, touring = false;
+let hour = 18.8, cover = 0.55, clock0 = performance.now();
+
+function parseParams(src) {
+  const out = [];
+  src.split("\n").forEach((line) => {
+    const m = line.match(/^\s*\/\/\s*@param\s+([A-Za-z_]\w*)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)/);
+    if (m) out.push({ name: m[1], def: +m[2], min: +m[3], max: +m[4] });
+  });
+  return out;
+}
+function build(src) {
+  const ps = parseParams(src);
+  const { src: fs, offset } = sceneShader(src, ps);
+  try {
+    const prog = program(VERT, fs);
+    if (scene) gl.deleteProgram(scene.p);
+    scene = prog; params = ps;
+    ps.forEach((p) => { if (!(p.name in values)) values[p.name] = p.def; values[p.name] = Math.min(p.max, Math.max(p.min, values[p.name])); });
+    drawParams(); dirty = true;
+    return { ok: true };
+  } catch (err) {
+    // map the driver's line numbers back onto the lines of the shape code
+    const msg = String(err.message).split("\n").filter(Boolean).slice(0, 6).map((l) => {
+      const m = l.match(/ERROR:\s*\d+:(\d+):\s*(.*)/);
+      if (!m) return l;
+      const line = +m[1] - offset;
+      return line >= 1 && line <= src.split("\n").length ? `line ${line}: ${m[2]}` : m[2];
+    }).join("\n");
+    return { ok: false, error: msg };
+  }
+}
+
+// ------------------------------------------------------------------ sun and time
+function sunFor(h) {
+  const day = (h - 6) / 13;
+  const elev = day >= 0 && day <= 1 ? Math.sin(day * Math.PI) * 52 : -6 - 18 * Math.min(1, (day < 0 ? -day : day - 1) * 4);
+  const az = (h - 12.5) / 12 * Math.PI * 0.95 + 0.6;
+  const e = elev * Math.PI / 180;
+  return [Math.cos(e) * Math.sin(az), Math.cos(e) * Math.cos(az), Math.sin(e)];
+}
+function lightFor(sun) {
+  if (sun[2] > -0.02) {
+    // warm and low near the horizon, white and strong once it is well up
+    const k = Math.min(1, Math.max(0, sun[2] / 0.5));
+    const c = [1.0, 0.42 + 0.48 * k, 0.16 + 0.62 * k];
+    const i = Math.min(1, Math.max(0.12, sun[2] * 6 + 0.15));
+    return { dir: sun, col: c.map((v) => v * i * 1.35), day: Math.min(1, Math.max(0, sun[2] * 4 + 0.3)) };
+  }
+  const moon = [-0.35, 0.45, 0.82]; const l = Math.hypot(...moon);
+  return { dir: moon.map((v) => v / l), col: [0.12, 0.15, 0.24], day: 0.05, night: true };
+}
+
+// ------------------------------------------------------------------ drawing
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(canvas.clientWidth * dpr); canvas.height = Math.round(canvas.clientHeight * dpr);
+  accum = floatTargets ? target(canvas.width, canvas.height, true) : null;
+  low = null; dirty = true;
+}
+function camera() {
+  const cp = Math.cos(cam.pitch);
+  const fwd = [-Math.cos(cam.yaw) * cp, -Math.sin(cam.yaw) * cp, -Math.sin(cam.pitch)];
+  const pos = [cam.target[0] - fwd[0] * cam.dist, cam.target[1] - fwd[1] * cam.dist, Math.max(1.5, cam.target[2] - fwd[2] * cam.dist)];
+  const right = norm(cross(fwd, [0, 0, 1])), up = cross(right, fwd);
+  return { pos, fwd, right, up };
+}
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a) => { const l = Math.hypot(...a) || 1; return a.map((v) => v / l); };
+
+function renderScene(fb, w, h, jitter, steps, cloudSteps) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, w, h);
+  gl.useProgram(scene.p);
+  const u = scene.u, c = camera(), L = lightFor(sunFor(hour));
+  gl.uniform2f(u.uRes, w, h); gl.uniform2f(u.uJitter, jitter[0], jitter[1]);
+  gl.uniform3fv(u.uCamPos, c.pos); gl.uniform3fv(u.uCamFwd, c.fwd); gl.uniform3fv(u.uCamRight, c.right); gl.uniform3fv(u.uCamUp, c.up);
+  gl.uniform3fv(u.uSun, L.dir); gl.uniform3fv(u.uLightCol, L.col);
+  gl.uniform1f(u.uFov, 42); gl.uniform1f(u.uTime, (performance.now() - clock0) / 1000); gl.uniform1f(u.uClouds, cover); gl.uniform1f(u.uDay, L.day);
+  gl.uniform1i(u.uSteps, steps); gl.uniform1i(u.uCloudSteps, cloudSteps);
+  params.forEach((p) => { if (u[p.name]) gl.uniform1f(u[p.name], values[p.name]); });
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+function present(tex, mul) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(show.p); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(show.u.uImage, 0); gl.uniform1f(show.u.uScale, mul);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+// Moving: render small and scale up, adjusting the size to hold the frame rate. Still:
+// add full-resolution samples with sub-pixel offsets and show their average.
+let last = performance.now(), fpsFrames = 0, fpsTime = 0, fps = 0;
+const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = now - last; last = now;
+  fpsFrames++; fpsTime += dt; if (fpsTime > 500) { fps = fpsFrames * 1000 / fpsTime; fpsFrames = 0; fpsTime = 0; }
+  if (!scene) return;
+  if (touring) { cam.yaw += dt * 0.00008; dirty = true; }
+  const moving = dirty || touring || now - lastMove < 220;
+  if (moving) {
+    if (dirty) { dirty = false; }
+    frameMs = frameMs * 0.85 + dt * 0.15;
+    if (frameMs > 26) scale = Math.max(quality.min, scale * 0.94); else if (frameMs < 18) scale = Math.min(quality.max, scale * 1.03);
+    const w = Math.max(64, Math.round(canvas.width * scale)), h = Math.max(36, Math.round(canvas.height * scale));
+    if (!low || low.w !== w || low.h !== h) low = target(w, h, false);
+    renderScene(low.fb, w, h, [0, 0], Math.round(quality.steps * 0.7), Math.round(quality.cloud * 0.6));
+    present(low.tex, 1);
+    samples = 0;
+    hud.textContent = `${Math.round(fps)} fps · ${Math.round(scale * 100)}% resolution`;
+    return;
+  }
+  if (!accum) {                                   // no float targets: one sharp frame, then rest
+    if (samples === 0) { low = target(canvas.width, canvas.height, false); renderScene(low.fb, canvas.width, canvas.height, [0, 0], quality.steps, quality.cloud); samples = 1; }
+    present(low.tex, 1); hud.textContent = "Full resolution"; return;
+  }
+  if (samples >= quality.idleSamples) { present(accum.tex, 1 / samples); return; }
+  if (samples === 0) { gl.bindFramebuffer(gl.FRAMEBUFFER, accum.fb); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+  renderScene(accum.fb, canvas.width, canvas.height, [halton(samples + 1, 2) - 0.5, halton(samples + 1, 3) - 0.5], quality.steps, quality.cloud);
+  gl.disable(gl.BLEND);
+  samples++;
+  present(accum.tex, 1 / samples);
+  hud.textContent = `Refining · ${samples} of ${quality.idleSamples} samples`;
+}
+
+// ------------------------------------------------------------------ controls
+function moved() { lastMove = performance.now(); dirty = true; }
+let dragging = null;
+canvas.addEventListener("pointerdown", (e) => { dragging = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  cam.yaw -= (e.clientX - dragging.x) * 0.005;
+  cam.pitch = Math.min(1.3, Math.max(-0.05, cam.pitch + (e.clientY - dragging.y) * 0.004));
+  dragging = { x: e.clientX, y: e.clientY }; moved();
+});
+window.addEventListener("pointerup", () => { dragging = null; });
+canvas.addEventListener("wheel", (e) => { e.preventDefault(); cam.dist = Math.min(420, Math.max(18, cam.dist * Math.exp(e.deltaY * 0.001))); moved(); }, { passive: false });
+
+const timeIn = document.getElementById("time"), timeOut = document.getElementById("timeOut");
+const cloudsIn = document.getElementById("clouds"), cloudsOut = document.getElementById("cloudsOut");
+function showTime() { timeOut.textContent = String(Math.floor(hour)).padStart(2, "0") + ":" + String(Math.floor((hour % 1) * 60)).padStart(2, "0"); }
+timeIn.addEventListener("input", () => { hour = +timeIn.value; showTime(); moved(); });
+cloudsIn.addEventListener("input", () => { cover = +cloudsIn.value; cloudsOut.textContent = Math.round(cover * 100) + "%"; moved(); });
+document.getElementById("quality").addEventListener("change", (e) => { quality = QUALITY[e.target.value]; scale = (quality.min + quality.max) / 2; moved(); });
+const tourBtn = document.getElementById("tour");
+tourBtn.addEventListener("click", () => { touring = !touring; tourBtn.setAttribute("aria-pressed", String(touring)); moved(); });
+
+// sliders from the code's @param lines
+const paramsEl = document.getElementById("params");
+function drawParams() {
+  paramsEl.replaceChildren();
+  params.forEach((p) => {
+    const id = "param-" + p.name;
+    const wrap = document.createElement("div"); wrap.className = "field";
+    wrap.innerHTML = `<div class="row"><label for="${id}"></label><output for="${id}"></output></div><input type="range" id="${id}">`;
+    wrap.querySelector("label").textContent = p.name.replace(/([A-Z])/g, " $1");
+    const input = wrap.querySelector("input"), out = wrap.querySelector("output");
+    const step = (p.max - p.min) / 200;
+    Object.assign(input, { min: p.min, max: p.max, step: step, value: values[p.name] });
+    const fmt = () => { out.textContent = (+values[p.name]).toFixed(Math.abs(p.max - p.min) > 20 ? 0 : 1); };
+    input.addEventListener("input", () => { values[p.name] = +input.value; fmt(); moved(); });
+    fmt(); paramsEl.append(wrap);
+  });
+}
+
+// the code editor
+const codePanel = document.getElementById("code"), source = document.getElementById("source"), codeMsg = document.getElementById("codeMsg");
+const editBtn = document.getElementById("edit");
+let savedCode = DEFAULT_CODE;
+try { savedCode = localStorage.getItem("aerie-code") || DEFAULT_CODE; } catch (e) {}
+source.value = savedCode;
+function setEditor(open) { codePanel.hidden = !open; editBtn.setAttribute("aria-pressed", String(open)); if (open) source.focus(); }
+editBtn.addEventListener("click", () => setEditor(codePanel.hidden));
+document.getElementById("closeCode").addEventListener("click", () => setEditor(false));
+function run() {
+  const r = build(source.value);
+  codeMsg.className = r.ok ? "" : "bad";
+  codeMsg.textContent = r.ok ? `Built. ${params.length} slider${params.length === 1 ? "" : "s"} from @param lines.` : r.error;
+  if (r.ok) { try { localStorage.setItem("aerie-code", source.value); } catch (e) {} }
+}
+document.getElementById("run").addEventListener("click", run);
+source.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); run(); }
+  if (e.key === "Tab") { e.preventDefault(); const s = source.selectionStart; source.setRangeText("  ", s, source.selectionEnd, "end"); }
+});
+document.getElementById("resetCode").addEventListener("click", () => { source.value = DEFAULT_CODE; values = {}; run(); });
+document.getElementById("copyBlender").addEventListener("click", () => {
+  // CodeNodes already defines the prelude helpers; bring the two extra ones and join the parts
+  const hasRoofs = /float\s+roofs\s*\(/.test(source.value);
+  const text = `// From Aerie. Paste into a CodeNodes Code Mesh (Add > Mesh > Code Mesh) or pass to agent.make("mesh", ...).\n` +
+    `// Set the bounds to about -16..16 in X and Y and -1..34 in Z.\n` + EXTRA_HELPERS + "\n" + source.value +
+    `\nfloat sdf(vec3 p) {\n  return ${hasRoofs ? "min(citadel(p), roofs(p))" : "citadel(p)"};\n}\n`;
+  navigator.clipboard.writeText(text).then(() => { codeMsg.className = ""; codeMsg.textContent = "Copied: ready for a Code Mesh in Blender."; },
+    () => { source.select(); codeMsg.className = "bad"; codeMsg.textContent = "This page may not use the clipboard here; the code is selected, so press Ctrl+C."; });
+});
+
+// ------------------------------------------------------------------ go
+window.addEventListener("resize", resize);
+resize(); showTime(); cloudsOut.textContent = Math.round(cover * 100) + "%";
+const first = build(savedCode);
+if (!first.ok) { codeMsg.className = "bad"; codeMsg.textContent = first.error; build(DEFAULT_CODE); setEditor(true); }
+requestAnimationFrame(frame);
+window.aerie = { cam, set(h, c) { if (h !== undefined) { hour = h; timeIn.value = h; showTime(); } if (c !== undefined) { cover = c; cloudsIn.value = c; } moved(); },
+  quality(q) { quality = QUALITY[q]; document.getElementById("quality").value = q; moved(); }, build, state: () => ({ samples, scale, fps }) };
+})();
+</script>
