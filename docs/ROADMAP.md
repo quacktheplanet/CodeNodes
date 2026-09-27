@@ -338,6 +338,9 @@ edges (dual contouring), and use fewer faces where the surface is flat.
 - ~~**MCP server**~~ decided and built: our own, with a fixed tool table and no exec (see P1.4).
 - **Where the house builder lives**: its own add-on using CodeNodes, or inside CodeNodes. Today
   the pieces (`rooms`, `roof`, `stairs`, `wall_network`) are capabilities inside CodeNodes.
+  the user (2026-09-27): it is part of an all-round modeling system (spec → floor plan → building →
+  rooms → equipment and robots), and standalone pieces go in a Geometry Nodes project folder.
+  Research and a phased plan: `docs/MODELING_RESEARCH.md`.
 - **License**: the manifest says GPL-3.0-or-later (placeholder). Infinigen is BSD-3 and Poly Haven
   assets are CC0, so both fit.
 - ~~**Merging `node-editor` and `bake` into `main`.**~~ Done. Still waiting: the five branches in
