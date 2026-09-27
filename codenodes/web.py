@@ -532,3 +532,252 @@ main().catch((e) => { status.textContent = "Could not load the scene: " + e.mess
 })();
 </script>
 """
+
+
+# ---- live shape pages ----------------------------------------------------------------------
+# A shape description is our own small language, so the browser can build it itself: the
+# page carries the text and a JavaScript copy of the builder (shapes/shapes.js, checked
+# against the Python by tests/test_shape_js.py) and rebuilds the mesh as a slider moves,
+# at any value rather than a few baked ones.
+
+def shape_page(path, source, title="Shape", subtitle="", colors=None, color=(0.72, 0.7, 0.66),
+               roughness=0.45, metalness=0.0, values=None):
+    """Write a page that rebuilds a shape in the browser as its sliders move.
+
+    values: slider values to start from (what was tuned in Blender), by name.
+    colors: {part name: [r, g, b]} (linear, 0-1); other parts get `color`. Parts that
+    cut another part (subtract, intersect) need Blender's boolean solver, so a shape
+    with them is refused; bevels are left off and the page says so.
+    """
+    from . import shapes as shape_lang
+    if not str(path).lower().endswith(".html"):
+        raise WebError("the page has to be written to a .html file")
+    try:
+        shape = shape_lang.parse(source)
+        parts = shape.build_parts()
+    except shape_lang.ExprError as exc:
+        raise WebError(f"the shape does not build: {exc}") from None
+    cutting = [p.name for p in parts if p.mode != "add"]
+    if cutting:
+        raise WebError("a live page cannot cut one part with another yet (" + ", ".join(
+            f"'{n}'" for n in cutting) + "); bake it with web_page instead")
+    notes = []
+    if any(p.bevel for p in parts) or shape.finish_options().get("bevel"):
+        notes.append("Bevels are left off here; Blender adds them.")
+    data = {"title": title, "subtitle": subtitle, "source": source,
+            "params": [{"name": n, "default": min(max(float((values or {}).get(n, d)), lo), hi),
+                        "min": lo, "max": hi} for n, d, lo, hi in shape.params],
+            "color": [float(c) for c in color],
+            "colors": {k: [float(c) for c in v] for k, v in (colors or {}).items()},
+            "roughness": float(roughness), "metalness": float(metalness), "notes": notes}
+    with open(os.path.join(os.path.dirname(__file__), "shapes", "shapes.js"), encoding="utf-8") as fh:
+        engine = fh.read()
+    payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
+    html = (SHAPE_TEMPLATE.replace("__STYLE__", _STYLE).replace("__TITLE__", _escape(title))
+            .replace("__ENGINE__", engine.replace("</", "<\\/")).replace("__DATA__", payload))
+    target = os.path.abspath(path)
+    if not os.path.isdir(os.path.dirname(target)):
+        raise WebError(f"the folder {os.path.dirname(target)} does not exist")
+    partial = target + ".part"
+    with open(partial, "w", encoding="utf-8") as f:
+        f.write(html)
+    os.replace(partial, target)
+    solid = shape.build()
+    return {"ok": True, "path": target, "bytes": len(html), "sliders": [p[0] for p in shape.params],
+            "faces": len(solid.faces) + len(solid.tris), "notes": notes}
+
+
+_STYLE = TEMPLATE[TEMPLATE.index("<style>"):TEMPLATE.index("</style>") + len("</style>")]
+
+SHAPE_TEMPLATE = r"""<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+__STYLE__
+<style>
+details.src summary { cursor: pointer; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+details.src pre { margin: 8px 0 0; max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 11.5px; line-height: 1.45; background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.notes { font-size: 13px; color: var(--muted); }
+.notes:empty { display: none; }
+</style>
+<div id="stage"></div>
+<section class="panel" aria-label="Shape controls">
+  <div>
+    <h1 id="title"></h1>
+    <p class="sub" id="subtitle"></p>
+  </div>
+  <div class="controls" id="controls"></div>
+  <div class="notes" id="notes"></div>
+  <details class="src"><summary>The whole model</summary><pre id="source"></pre></details>
+  <div class="foot"><span>Built live in your browser · drag to orbit</span><button type="button" id="reset">Reset</button></div>
+</section>
+<div id="status" role="status">Loading…</div>
+<script type="application/json" id="shape-data">__DATA__</script>
+<script>
+window.addEventListener("error", function (e) { var s = document.getElementById("status"); if (s) { s.hidden = false; s.textContent = "Error: " + (e.message || e); } });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+__ENGINE__
+</script>
+<script>
+(function () {
+const status = document.getElementById("status");
+if (!window.THREE || !THREE.OrbitControls) { status.textContent = "Could not load three.js from cdn.jsdelivr.net."; return; }
+const data = JSON.parse(document.getElementById("shape-data").textContent);
+document.getElementById("title").textContent = data.title;
+document.getElementById("subtitle").textContent = data.subtitle || "";
+document.getElementById("source").textContent = data.source.trim();
+document.getElementById("notes").textContent = data.notes.join(" ");
+const shape = CodeShapes.parse(data.source);
+
+const stage = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.physicallyCorrectLights = true;
+stage.appendChild(renderer.domElement);
+const theme = document.documentElement.dataset.theme;
+const dark = theme === "dark" || (theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(dark ? 0x121815 : 0xe9ede7);
+const camera = new THREE.PerspectiveCamera(35, 1, 0.001, 1000);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x3a3228, 1.4));
+const sun = new THREE.DirectionalLight(0xfff4e6, 3.2);
+sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0002; sun.shadow.normalBias = 0.02;
+scene.add(sun, sun.target);
+const fill = new THREE.DirectionalLight(0xcfe0ff, 0.8);
+scene.add(fill);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: dark ? 0.45 : 0.22 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+scene.add(ground);
+const holder = new THREE.Group();
+scene.add(holder);
+const lin = (c) => new THREE.Color(c[0], c[1], c[2]);
+const materials = {};
+function material(name) {
+  if (!materials[name]) materials[name] = new THREE.MeshStandardMaterial({
+    color: lin(data.colors[name] || data.color), roughness: data.roughness, metalness: data.metalness, side: THREE.DoubleSide });
+  return materials[name];
+}
+
+// Z up to Y up, and normals that stay smooth across curves but break at real corners
+const CREASE = Math.cos(25 * Math.PI / 180);
+function geometry(solid) {
+  const v = solid.verts, polys = solid.polygons(), nv = v.length / 3;
+  const P = (i) => [v[3 * i], v[3 * i + 2], -v[3 * i + 1]];
+  const fn = polys.map((f) => {
+    let x = 0, y = 0, z = 0;
+    for (let k = 0; k < f.length; k++) {
+      const a = P(f[k]), b = P(f[(k + 1) % f.length]);
+      x += (a[1] - b[1]) * (a[2] + b[2]); y += (a[2] - b[2]) * (a[0] + b[0]); z += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    const len = Math.hypot(x, y, z) || 1;
+    return [x / len, y / len, z / len, len];
+  });
+  const around = Array.from({ length: nv }, () => []);
+  polys.forEach((f, p) => f.forEach((i) => around[i].push(p)));
+  const pos = [], nor = [];
+  polys.forEach((f, p) => {
+    const corner = f.map((i) => {
+      let x = 0, y = 0, z = 0;
+      for (const q of around[i]) {
+        const a = fn[p], b = fn[q];
+        if (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] >= CREASE) { x += b[0] * b[3]; y += b[1] * b[3]; z += b[2] * b[3]; }
+      }
+      const len = Math.hypot(x, y, z) || 1;
+      return [x / len, y / len, z / len];
+    });
+    for (let k = 1; k < f.length - 1; k++) for (const c of [0, k, k + 1]) {
+      const q = P(f[c]);
+      pos.push(q[0], q[1], q[2]); nor.push(corner[c][0], corner[c][1], corner[c][2]);
+    }
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  return g;
+}
+
+const values = {};
+data.params.forEach((p) => { values[p.name] = p.default; });
+let framed = false, pending = false, homeView = null;
+function home(centre, radius) {
+  if (centre) homeView = { target: centre.clone(), pos: centre.clone().add(new THREE.Vector3(radius * 1.9, radius * 1.1, radius * 2.3)) };
+  if (!homeView) return;
+  camera.position.copy(homeView.pos); controls.target.copy(homeView.target); controls.update();
+}
+function build() {
+  pending = false;
+  const t0 = performance.now();
+  let parts;
+  try { parts = shape.buildParts(values); }
+  catch (e) { status.hidden = false; status.textContent = e.message; window.shapeStats = { error: e.message }; return; }
+  holder.children.forEach((m) => m.geometry.dispose());
+  holder.clear();
+  let faces = 0;
+  for (const part of parts) {
+    const mesh = new THREE.Mesh(geometry(part.solid), material(part.name));
+    mesh.castShadow = true; mesh.receiveShadow = true; mesh.name = part.name;
+    holder.add(mesh);
+    faces += part.solid.quads.length / 4 + part.solid.tris.length / 3;
+  }
+  const box = new THREE.Box3().setFromObject(holder);
+  if (!box.isEmpty()) {
+    const size = box.getSize(new THREE.Vector3()), centre = box.getCenter(new THREE.Vector3()), radius = size.length() / 2 || 1;
+    ground.position.set(centre.x, box.min.y, centre.z); ground.scale.setScalar(radius * 12);
+    sun.position.set(centre.x + radius * 2, centre.y + radius * 3.5, centre.z + radius * 1.6); sun.target.position.copy(centre);
+    fill.position.set(centre.x - radius * 3, centre.y + radius, centre.z - radius * 2);
+    const cam = sun.shadow.camera; cam.left = cam.bottom = -radius * 2; cam.right = cam.top = radius * 2;
+    cam.near = radius * 0.1; cam.far = radius * 10; cam.updateProjectionMatrix();
+    if (!framed) { home(centre, radius); framed = true; }
+  }
+  const ms = performance.now() - t0;
+  window.shapeStats = { faces, ms, parts: parts.length, size: box.isEmpty() ? null : box.getSize(new THREE.Vector3()).toArray() };
+  status.hidden = false;
+  status.textContent = faces.toLocaleString() + " faces · built in " + ms.toFixed(1) + " ms";
+}
+const request = () => { if (!pending) { pending = true; requestAnimationFrame(build); } };
+
+const controlsEl = document.getElementById("controls");
+const nice = (x) => { const e = Math.pow(10, Math.floor(Math.log10(x))); return [1, 2, 5, 10].map((m) => m * e).find((s) => s >= x); };
+const inputs = [];
+data.params.forEach((p, i) => {
+  const whole = [p.default, p.min, p.max].every(Number.isInteger) && p.max - p.min >= 2;
+  const step = whole ? 1 : nice((p.max - p.min) / 400 || 0.001);
+  const digits = whole ? 0 : Math.max(0, -Math.floor(Math.log10(step)));
+  const id = "param-" + i, wrap = document.createElement("div");
+  wrap.className = "ctl";
+  wrap.innerHTML = '<div class="row"><label for="' + id + '"></label><output for="' + id + '"></output></div>' +
+    '<input type="range" id="' + id + '" min="' + p.min + '" max="' + p.max + '" step="' + step + '" value="' + p.default + '">' +
+    '<div class="ticks"><span></span><span></span></div>';
+  wrap.querySelector("label").textContent = p.name.replace(/_/g, " ");
+  const out = wrap.querySelector("output"), input = wrap.querySelector("input"), ticks = wrap.querySelectorAll(".ticks span");
+  ticks[0].textContent = (+p.min).toFixed(digits); ticks[1].textContent = (+p.max).toFixed(digits);
+  const show = () => { out.textContent = (+values[p.name]).toFixed(digits); };
+  input.addEventListener("input", () => { values[p.name] = Number(input.value); show(); request(); });
+  show();
+  inputs.push([input, p, show]);
+  controlsEl.appendChild(wrap);
+});
+document.getElementById("reset").addEventListener("click", () => {
+  inputs.forEach(([input, p, show]) => { input.value = p.default; values[p.name] = p.default; show(); });
+  build(); home();
+});
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+resize();
+build();
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+})();
+</script>
+"""

@@ -358,6 +358,20 @@ revolve segments 32
         check(raises(lambda s=source: language.parse(s).build_parts(), wanted),
               f"{wanted!r} is reported")
 
+    # a path's straight run takes `steps` (it once read "0.3 steps 4" as one expression)
+    divided = language.parse("""
+part rod
+  profile
+    move 0.01, 0
+    line 0, 0.01
+    line -0.01, 0
+    close
+  path
+    move 0, 0, 0
+    line 0, 0, 0.3 steps 4
+  sweep""").build()
+    check(len(divided.verts) == 5 * 3 + 2, f"a path's line can be divided with steps ({len(divided.verts)} verts)")
+
 
 def main():
     test_expressions()

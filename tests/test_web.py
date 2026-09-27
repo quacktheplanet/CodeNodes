@@ -91,6 +91,38 @@ def main():
     bad = agent.web_page(out.replace(".html", ".exe"))
     check(not bad["ok"], "and only .html files are written")
 
+    # --- a Code Shape as a live page: built in the browser, nothing baked -------------------
+    from codenodes.shapes import TEMPLATE, parse
+    made = agent.make("shape", TEMPLATE, name="Lamp")
+    agent.set_params("Lamp", height=0.5)
+    folder = os.environ.get("CODENODES_SHAPE_PAGE_DIR") or tempfile.mkdtemp()
+    page = os.path.join(folder, "lamp.html")
+    got = agent.web_shape(page, object="Lamp", colors={"shade": [0.9, 0.55, 0.2]})
+    text = open(page, encoding="utf-8").read() if os.path.exists(page) else ""
+    found = re.search(r'id="shape-data">(.*?)</script>', text, re.S)
+    data = json.loads(found.group(1).replace("<\\/", "</")) if found else {}
+    heights = [p for p in data.get("params", []) if p["name"] == "height"]
+    check(made["ok"] and got["ok"] and "CodeShapes" in text and len(data.get("params", [])) == 4,
+          f"a shape becomes a live page with its four sliders and the builder inside ({got.get('bytes')} bytes)")
+    check(bool(heights) and abs(heights[0]["default"] - 0.5) < 1e-6,
+          "the page starts from the value tuned in Blender")
+    # what the browser should build: the Python kernel at a few slider values, in Y-up
+    expect = []
+    for values in ({"height": 0.5}, {"height": 0.75, "shade_r": 0.3}, {"height": 0.2, "stem_r": 0.03}):
+        solid = parse(TEMPLATE).build(values)
+        size = solid.verts.max(axis=0) - solid.verts.min(axis=0)
+        expect.append({"values": values, "faces": len(solid.faces) + len(solid.tris),
+                       "size": [float(size[0]), float(size[2]), float(size[1])]})
+    with open(os.path.join(folder, "lamp_expected.json"), "w", encoding="utf-8") as fh:
+        json.dump(expect, fh)
+    cut = agent.web_shape(os.path.join(folder, "cut.html"), source=(
+        "part block\n  profile\n    move 0, 0\n    line 1, 0\n    line 1, 1\n    line 0, 1\n    close\n"
+        "  extrude 1\npart hole subtract\n  profile\n    move 0, 0\n    line 0.2, 0\n    line 0, 0.2\n"
+        "    close\n  extrude 1\n"))
+    check(not cut["ok"] and "'hole'" in cut["error"], "a shape that cuts is refused, with the reason")
+    check(not agent.web_shape(page, object="Nope")["ok"], "and so is something that is not a shape")
+    print(f"SHAPE PAGE {page}")
+
     print(("\nFAIL" if _failed else f"\nALL {_checks} CHECKS PASSED"), flush=True)
 
 

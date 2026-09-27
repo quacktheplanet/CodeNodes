@@ -67,7 +67,7 @@ def dispatch_table():
               "nodes_help", "nodes_find", "nodes_describe", "nodes_list", "nodes_read",
               "nodes_write", "nodes_apply", "nodes_check", "nodes_explain", "nodes_edit",
               "nodes_library", "nodes_use", "nodes_set_inputs", "curve", "material",
-              "collect", "web_page")}
+              "collect", "web_page", "web_shape")}
     table["read_image"] = rpc.read_image
     table["status"] = status
     return table

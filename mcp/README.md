@@ -52,6 +52,7 @@ The server process finds the token by itself from Blender's config folder. Overr
 | `nodes_help`, `nodes_library`, `nodes_use`, `nodes_set_inputs` | ready-made Geometry Nodes capabilities |
 | `nodes_find`, `nodes_describe`, `nodes_list`, `nodes_read`, `nodes_write`, `nodes_apply`, `nodes_edit`, `nodes_explain`, `nodes_check` | read, build, edit and explain any node tree |
 | `web_page` | the scene as an interactive web page with sliders |
+| `web_shape` | a Code Shape as a page that rebuilds it live in the browser, at any slider value |
 | `remove`, `status` | delete an object; check the link |
 
 ## What it cannot do

@@ -309,10 +309,13 @@ def _bevel_options(positional, named, scope, line_no):
             "angle": number(named.get("angle", 30.0), scope, "angle")}
 
 
+PATH_KEYWORDS = dict(KEYWORDS, line=("steps",))     # a path's straight run can be divided
+
+
 def _build_path(ops, scope):
     path = solids.Path()
     for word, rest, line_no in ops:
-        positional, named = split_args(rest, KEYWORDS.get(word, ()))
+        positional, named = split_args(rest, PATH_KEYWORDS.get(word, ()))
         try:
             if word in ("move", "line"):
                 if len(positional) != 3:

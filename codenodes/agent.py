@@ -747,6 +747,35 @@ def web_page(path, sliders=None, objects=None, static=None, overrides=None, titl
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
+def web_shape(path, object=None, source=None, title=None, subtitle="", colors=None,
+              color=None, roughness=0.45, metalness=0.0):
+    """A page that rebuilds a Code Shape in the browser at any slider value — no baking.
+
+    Give the shape object (its code and the slider values tuned on it), or the source.
+    colors: {part name: [r, g, b]}. Parts that cut other parts are refused (they need
+    Blender); use web_page for those.
+    """
+    from . import web
+    values = None
+    if object:
+        obj = bpy.data.objects.get(object)
+        if obj is None or obj.codenodes.text is None or obj.codenodes.kind != 'SHAPE':
+            return {"ok": False, "error": f"'{object}' is not a Code Shape object"}
+        source = obj.codenodes.text.as_string()
+        values = {p.name: p.value for p in obj.codenodes.params}
+        title = title or object
+    if not source:
+        return {"ok": False, "error": "give a shape object or its source"}
+    kwargs = {"title": title or "Shape", "subtitle": subtitle, "colors": colors, "values": values,
+              "roughness": roughness, "metalness": metalness}
+    if color is not None:
+        kwargs["color"] = color
+    try:
+        return web.shape_page(bpy.path.abspath(path), source, **kwargs)
+    except web.WebError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def measure(obj):
     """What an object's modifiers actually produce: mesh, curves, points and instances,
     and the size of all of it together. Instances count — to_mesh() would miss them."""
