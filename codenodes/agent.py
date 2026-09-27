@@ -415,9 +415,11 @@ def _draw_viewport(area, out, max_side=1600):
 NODES_GUIDE = """\
 Working with Geometry Nodes here:
 
-1. Look before you build. nodes_library() lists ready-made, tested capabilities (walls
-   along a curve, scatter, bridges over gaps…); nodes_use builds one. Prefer composing
-   those over writing everything from scratch.
+1. Look before you build. nodes_library() lists ready-made, tested capabilities (terrain
+   with river/road carving, scatter, walls and wall networks, rooms from a floor plan,
+   roofs, stairs, bridges over gaps, water…); nodes_use builds one. Prefer composing those over
+   writing everything from scratch. A floor plan or wall network is one curve object with
+   several splines: curve(name, splines=[[...], [...]]).
 2. nodes_find("words") finds node types; nodes_describe(type) gives exact socket names,
    which take a field ("field": true), and what each dropdown accepts. Never guess a
    socket name.
@@ -615,7 +617,8 @@ def nodes_use(capability, object=None, values=None, name=None, refresh=False):
     """Build a ready-made capability and put it on an object, with its inputs set by name.
 
     With no object, a new empty one is made for it. Curve-following capabilities (wall,
-    path_bridge, along_curve) belong on a curve object — make one with `curve`. The
+    wall_network, rooms, stairs, water, path_bridge, along_curve) belong on a curve object
+    — make one with `curve` (several splines for wall_network and rooms). The
     capability's group is shared: if it exists it is reused as it is (keeping any edits);
     refresh=True rebuilds it from the library.
     """
@@ -672,16 +675,26 @@ def nodes_set_inputs(object, values, modifier=None):
     return {"ok": True, "object": obj.name, "modifier": mods[0].name, "made": measure(obj)}
 
 
-def curve(name, points, cyclic=False, smooth=True):
+def curve(name, points=None, cyclic=False, smooth=True, splines=None):
     """Make or reshape a curve object through the given points — a path, the line of a
-    wall, a river. smooth=True makes an auto-handled Bezier, False a straight polyline."""
+    wall, a river. smooth=True makes an auto-handled Bezier, False a straight polyline.
+
+    splines=[[points], [points], ...] makes several in one object instead: a network of
+    walls (wall_network) or a floor plan of room outlines (rooms, with cyclic=True).
+    """
+    if splines is None:
+        if points is None:
+            return {"ok": False, "error": "give points, or splines (a list of point lists)"}
+        splines = [points]
+    parsed = []
     try:
-        pts = [tuple(float(c) for c in list(p)[:3]) + (0.0,) * (3 - len(list(p)[:3]))
-               for p in points]
+        for pts in splines:
+            parsed.append([tuple(float(c) for c in list(p)[:3]) + (0.0,) * (3 - len(list(p)[:3]))
+                           for p in pts])
     except Exception:
         return {"ok": False, "error": "points should be a list of [x, y] or [x, y, z]"}
-    if len(pts) < 2:
-        return {"ok": False, "error": "a curve needs at least two points"}
+    if not parsed or any(len(pts) < 2 for pts in parsed):
+        return {"ok": False, "error": "each curve needs at least two points"}
     obj = bpy.data.objects.get(name)
     if obj is not None and obj.type != 'CURVE':
         return {"ok": False, "error": f"'{name}' exists and is not a curve"}
@@ -692,22 +705,27 @@ def curve(name, points, cyclic=False, smooth=True):
     data = obj.data
     data.dimensions = '3D'
     data.splines.clear()
-    if smooth:
-        spline = data.splines.new('BEZIER')
-        spline.bezier_points.add(len(pts) - 1)
-        for bp, p in zip(spline.bezier_points, pts):
-            bp.co = p
-            bp.handle_left_type = bp.handle_right_type = 'AUTO'
-    else:
-        spline = data.splines.new('POLY')
-        spline.points.add(len(pts) - 1)
-        for sp, p in zip(spline.points, pts):
-            sp.co = (*p, 1.0)
-    spline.use_cyclic_u = bool(cyclic)
-    length = sum(((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
-                 for a, b in zip(pts, pts[1:] + (pts[:1] if cyclic else [])))
-    return {"ok": True, "object": obj.name, "points": len(pts), "cyclic": bool(cyclic),
-            "length": round(length, 3)}
+    length = 0.0
+    for pts in parsed:
+        if smooth:
+            spline = data.splines.new('BEZIER')
+            spline.bezier_points.add(len(pts) - 1)
+            for bp, p in zip(spline.bezier_points, pts):
+                bp.co = p
+                bp.handle_left_type = bp.handle_right_type = 'AUTO'
+        else:
+            spline = data.splines.new('POLY')
+            spline.points.add(len(pts) - 1)
+            for sp, p in zip(spline.points, pts):
+                sp.co = (*p, 1.0)
+        spline.use_cyclic_u = bool(cyclic)
+        length += sum(((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
+                      for a, b in zip(pts, pts[1:] + (pts[:1] if cyclic else [])))
+    result = {"ok": True, "object": obj.name, "points": sum(len(p) for p in parsed),
+              "cyclic": bool(cyclic), "length": round(length, 3)}
+    if len(parsed) > 1:
+        result["splines"] = len(parsed)
+    return result
 
 
 def web_page(path, sliders=None, objects=None, static=None, overrides=None, title="Level",
