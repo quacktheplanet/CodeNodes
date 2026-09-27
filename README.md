@@ -18,6 +18,59 @@ and smoke from a density function. All three come from the snippets below.*
 >
 > **Licence: to be decided.** Until a licence file is added, please ask before reusing the code.
 
+## Your first five minutes
+
+After installing (see [Install](#install)), everything CodeNodes adds lives in four places:
+
+| Where | What you'll find |
+|---|---|
+| **Geometry Nodes editor › Add (Shift A) › CodeNodes** | Code nodes that sit in your Geometry Nodes tree like any other node: Code Mesh (SDF), Code Shape and Code Particles, each with a few starting templates. |
+| **Geometry Nodes editor › Sidebar (N) › CodeNodes** | For the selected code node: **Edit Code**, Replace with Template, Live / Animate, Rebuild and **Make Native**. |
+| **3D Viewport › Add › Mesh** | The same three as standalone objects: **Code Mesh**, **Code Shape**, **Code Particles**. |
+| **3D Viewport › Sidebar (N) › CodeNodes** | Settings and sliders for the selected code object, **Edit Code**, and **New Node Graph** / **Open Node Graph** for the separate CodeNodes node editor. |
+
+**The quickest way in, inside Geometry Nodes:**
+
+1. Select a mesh, open the **Geometry Nodes** workspace and press **New** (or skip this: adding a code
+   node to an empty editor sets one up for you).
+2. **Add › CodeNodes › Code Mesh (SDF) › Donut.** A node called *Code · Donut* appears with a Geometry
+   output and one input per slider in its code (`major`, `minor`, plus `Resolution`).
+3. Wire its Geometry into anything: Transform, Join Geometry, Set Material, Instance on Points… It
+   behaves like any other geometry.
+4. Change `major` on the node: the donut rebuilds. Press **Edit Code** in the sidebar (N › CodeNodes)
+   and change the code: it rebuilds as you type, and new `// @param` lines appear as new inputs.
+
+![Code nodes wired into a Geometry Nodes tree, with the CodeNodes sidebar](docs/gn_integration.png)
+
+*A Code Mesh, a Code Shape and Code Particles in a normal Geometry Nodes tree. The sidebar edits
+the selected one.*
+
+**What each kind of code makes:**
+
+- **Code Mesh (SDF):** you write `float sdf(vec3 p)`, the distance from `p` to the surface (negative
+  inside). The GPU samples it and makes a watertight mesh. Good for soft, organic or mathematical
+  forms. Templates: Donut, Rounded Box, Gyroid Ball, Blob.
+- **Code Shape:** a short description of profiles that get revolved, extruded or swept. The mesh is
+  constructed, not sampled, so edges are exact and the quads are clean. Good for lamps, bottles,
+  furniture. Templates: Desk Lamp, Vase.
+- **Code Particles:** `spawn()` and `update()` functions that move points on the GPU as the timeline
+  plays. Templates: Swirl, Fountain.
+
+**How a code node works under the hood.** Blender doesn't let add-ons define new nodes inside
+Geometry Nodes, so a code node is an ordinary **Group node**. Inside it, an Object Info node reads a
+hidden object in the *CodeNodes Sources* collection, which CodeNodes rebuilds whenever the code or an
+input changes. Each node you add (or duplicate with Shift D) gets its own code. Values that come in
+through a link are followed back to a Value or Integer node, a reroute, or the modifier's own input;
+values computed by other nodes can't be read, so the number typed on the socket is used instead.
+Renders read the stored result and never run GPU code. **Make Native** replaces a Code Mesh node with
+real Geometry Nodes that do the same maths (needs the ExpressNode add-on), so the file no longer
+needs CodeNodes at all.
+
+**The separate CodeNodes node editor** (Sidebar › **New Node Graph**, or switch any Node Editor's
+type to *CodeNodes*) is for combining several pieces of code into one GPU program: code nodes,
+Combine (union, subtract, blend), Transform and Offset, feeding a Mesh Output that builds an object.
+The starter graph makes a small Saturn.
+
 ## What's in it
 
 | Feature | What it does | Status |
@@ -26,6 +79,7 @@ and smoke from a density function. All three come from the snippets below.*
 | **Code → Shape** | a small shape language → exact, constructed meshes with sharp edges and real UVs | works |
 | **Code → Volume** | GLSL density → OpenVDB volume that renders natively | works (script/API only, no panel yet) |
 | **Code → Particles** | your own GPU particle solver → a point cloud with velocity, age and life | works |
+| **Code nodes in Geometry Nodes** | Add › CodeNodes in the Geometry Nodes editor: code as a node, its sliders as inputs, rebuilt live | works |
 | **Node editor** | code nodes with typed sockets that compile into one GPU program | works |
 | **Bake to Disk** | animations written to files that play back with stock nodes; renders with no GPU and no add-on | works |
 | **Bake to Nodes** | the GLSL itself becomes a Geometry Nodes network | experimental (needs the ExpressNode add-on, not public yet) |
@@ -54,7 +108,7 @@ and smoke from a density function. All three come from the snippets below.*
    blender --command extension build --source-dir codenodes --output-dir dist
    ```
 
-   That writes `dist/codenodes-0.1.0.zip` (Blender needs the `dist` folder to exist first).
+   That writes `dist/codenodes-0.1.1.zip` (Blender needs the `dist` folder to exist first).
 2. **Install it.** Edit › Preferences › Get Extensions › the ⌄ menu at the top right ›
    **Install from Disk…** › pick the zip. It's enabled straight away.
 3. **Optional: connect an assistant.**

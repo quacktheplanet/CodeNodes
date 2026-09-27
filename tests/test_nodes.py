@@ -63,12 +63,12 @@ def run_checks(state):
     err = nodes.build_output(tree, out)
     check(not err and out.target is not None and len(out.target.data.polygons) > 1000,
           f"starter graph builds a mesh ({out.stats})")
-    blob = tree.nodes["Blob"]
-    check([s.name for s in blob.inputs] == ["radius", "wobble"], "@param lines became input sockets")
+    blob = tree.nodes["Planet"]
+    check([s.name for s in blob.inputs] == ["radius", "bands"], "@param lines became input sockets")
     obj = out.target
 
     # --- socket values and code edits ------------------------------------------------
-    blob.inputs["wobble"].default_value = 0.0
+    blob.inputs["bands"].default_value = 0.0
     blob.inputs["radius"].default_value = 1.6
     nodes.build_output(tree, out)
     ext_big = np.ptp(verts(obj), axis=0)
@@ -78,7 +78,7 @@ def run_checks(state):
     check(ext_big[2] > ext_small[2] + 0.5, f"a socket value changes the mesh (height {ext_big[2]:.2f} -> {ext_small[2]:.2f})")
     blob.text.from_string(blob.text.as_string().replace("float sdf", "// @param stretch 1.0 0.5 2.0\nfloat sdf"))
     nodes.build_output(tree, out)
-    check([s.name for s in blob.inputs] == ["radius", "wobble", "stretch"] and
+    check([s.name for s in blob.inputs] == ["radius", "bands", "stretch"] and
           abs(blob.inputs["radius"].default_value - 0.9) < 1e-6,
           "editing the code adds a socket and keeps the other values")
 
@@ -87,7 +87,7 @@ def run_checks(state):
     good = blob.text.as_string()
     blob.text.from_string(good.replace("sdSphere(p, radius)", "sdSphere(p, radis)"))
     err = nodes.build_output(tree, out)
-    check("node 'Blob'" in err and "radis" in err, f"a compile error names the node: {err.splitlines()[0]!r}")
+    check("node 'Planet'" in err and "radis" in err, f"a compile error names the node: {err.splitlines()[0]!r}")
     check("radis" in blob.error and blob.error.startswith("line "), f"the node itself shows the error ({blob.error!r})")
     check(len(obj.data.polygons) == faces, "the mesh is untouched by the failed build")
     blob.text.from_string(good)
@@ -202,7 +202,7 @@ def run_checks(state):
     check(cache.is_baked(pobj), "a particle graph bakes from its output node")
 
     # --- animation -------------------------------------------------------------------
-    blob.inputs["wobble"].default_value = 0.25
+    blob.inputs["bands"].default_value = 0.04
     out.animate = True
     scene = bpy.context.scene
     scene.frame_set(1)
@@ -213,7 +213,7 @@ def run_checks(state):
     out.animate = False
 
     # --- live: changing a socket rebuilds on its own -------------------------------------
-    blob.inputs["wobble"].default_value = 0.0
+    blob.inputs["bands"].default_value = 0.0
     blob.inputs["radius"].default_value = 1.4
     state["live_from"] = np.ptp(verts(obj), axis=0)[2]
     state["t"] = time.perf_counter()

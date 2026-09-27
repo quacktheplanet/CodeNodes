@@ -679,10 +679,8 @@ def request(tree):
 
 
 def _rendering():
-    try:
-        return bpy.app.is_job_running('RENDER')
-    except Exception:
-        return False
+    from . import live
+    return live._rendering()
 
 
 def _poll_text():
@@ -768,21 +766,34 @@ float sdf(vec3 p) {
 """
 
 
-def new_demo_graph(name="CodeNodes Graph"):
-    """A small starting graph: two code nodes, a smooth union, a transform, a mesh output."""
+def new_demo_graph(name="CodeNodes Graph (Saturn)"):
+    """A small starting graph that looks like something: a planet and a tilted ring,
+    joined by a Combine node and meshed by a Mesh Output."""
     tree = bpy.data.node_groups.new(name, TREE)
     tree.use_fake_user = True
-    t1 = bpy.data.texts.new("Blob.sdf")
-    t1.from_string("// @param radius 0.9 0.1 2.0\n// @param wobble 0.06 0.0 0.3\nfloat sdf(vec3 p) {\n"
-                   "  return sdSphere(p, radius) + wobble * sin(6.0 * p.x + uTime) * sin(6.0 * p.y) * sin(6.0 * p.z);\n}\n")
+    t1 = bpy.data.texts.new("Planet.sdf")
+    t1.from_string("// The planet: a sphere with faint bands that drift over time (uTime).\n"
+                   "// @param radius 0.9 0.1 2.0\n"
+                   "// @param bands 0.012 0.0 0.05\n"
+                   "float sdf(vec3 p) {\n"
+                   "  return sdSphere(p, radius) + bands * sin(p.z * 18.0 + uTime * 3.0);\n"
+                   "}\n")
     t2 = bpy.data.texts.new("Ring.sdf")
-    t2.from_string("// @param major 1.2 0.2 3.0\n// @param minor 0.22 0.02 1.0\nfloat sdf(vec3 p) {\n"
-                   "  return sdTorus(p, major, minor);\n}\n")
-    blob = tree.nodes.new("CN_NodeCode"); blob.name = blob.label = "Blob"; blob.location = (-520, 160); blob.text = t1
+    t2.from_string("// The ring: a flat band around the planet.\n"
+                   "// @param major 1.55 0.2 3.0\n"
+                   "// @param width 0.35 0.02 1.0\n"
+                   "// @param thickness 0.03 0.005 0.2\n"
+                   "float sdf(vec3 p) {\n"
+                   "  vec2 q = vec2(length(p.xy) - major, p.z);\n"
+                   "  return sdBox(vec3(q, 0.0), vec3(width, thickness, 1.0));\n"
+                   "}\n")
+    blob = tree.nodes.new("CN_NodeCode"); blob.name = blob.label = "Planet"; blob.location = (-520, 160); blob.text = t1
     ring = tree.nodes.new("CN_NodeCode"); ring.name = ring.label = "Ring"; ring.location = (-520, -140); ring.text = t2
     tilt = tree.nodes.new("CN_NodeTransform"); tilt.location = (-260, -140)
-    tilt.inputs["Rotation"].default_value = (0.5, 0.0, 0.0)
+    tilt.inputs["Rotation"].default_value = (0.45, 0.0, 0.0)
     comb = tree.nodes.new("CN_NodeCombine"); comb.location = (-20, 60)
+    if hasattr(comb, "operation"):
+        comb.operation = 'union'
     out = tree.nodes.new("CN_NodeMeshOutput"); out.location = (220, 60)
     links = tree.links
     links.new(ring.outputs["SDF"], tilt.inputs["SDF"])

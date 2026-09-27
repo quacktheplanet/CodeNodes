@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.1 (unreleased, draft)
+
+### Code nodes in Geometry Nodes
+- **Add › CodeNodes** in the Geometry Nodes editor: Code Mesh (SDF), Code Shape and Code Particles,
+  with starting templates (Donut, Rounded Box, Gyroid Ball, Blob; Desk Lamp, Vase; Swirl, Fountain).
+  Each is a Group node whose inputs are the code's sliders and whose output is the code's geometry.
+- Values typed on the node, or linked from a Value / Integer node, a reroute or the modifier's input,
+  rebuild the geometry live. Editing the code adds or removes inputs to match. Shift D gives the copy
+  its own code. Everything survives save and reopen.
+- **Node Editor › Sidebar › CodeNodes:** Edit Code, Replace with Template, Live / Animate, Rebuild, and
+  **Make Native** (a Code Mesh becomes plain Geometry Nodes through ExpressNode).
+- Renders never run GPU code, now also for blocking renders (`bpy.ops.render.render`) started from
+  scripts.
+
+### First use
+- The 3D Viewport sidebar explains where things live, shows which node graph made the selected object,
+  and has **Open Node Graph** and a clearly labelled **Edit Code** button.
+- The starter node graph makes a small Saturn instead of an unexplained blob.
+- README: a "Your first five minutes" section.
+
 ## 0.1.0 (unreleased, draft)
 
 The first public version. Tested on Blender 5.0.1 and 5.1.2, Windows 11, NVIDIA RTX A4500.

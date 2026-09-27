@@ -14,17 +14,41 @@ class CODENODES_PT_main(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         obj = context.active_object
+        from .gn_ui import code_groups_for, graph_for
         if obj is None or not getattr(obj, "codenodes", None) or not obj.codenodes.enabled:
-            layout.operator("codenodes.add", icon='ADD')
-            layout.operator("codenodes.add_shape", icon='MESH_CYLINDER')
-            layout.operator("codenodes.add_particles", icon='PARTICLES')
-            layout.operator("codenodes.new_graph", icon='NODETREE')
-            layout.label(text="Or select a Code Mesh object.")
+            graph = graph_for(obj)
+            if graph is not None:
+                box = layout.box()
+                box.label(text=f"Made by the node graph '{graph.name}'", icon='NODETREE')
+                box.operator("codenodes.open_graph", icon='WINDOW').tree = graph.name
+                box.label(text="Edit the code from the Code nodes there.")
+            groups = code_groups_for(obj)
+            if groups:
+                box = layout.box()
+                box.label(text="Code nodes in its Geometry Nodes:", icon='GEOMETRY_NODES')
+                for g in groups:
+                    box.label(text=g.name, icon='SCRIPT')
+                box.label(text="Node Editor › Sidebar (N) › CodeNodes")
+            layout.label(text="Add an object made by code:")
+            col = layout.column(align=True)
+            col.operator("codenodes.add", icon='ADD')
+            col.operator("codenodes.add_shape", icon='MESH_CYLINDER')
+            col.operator("codenodes.add_particles", icon='PARTICLES')
+            layout.label(text="Or build it from nodes:")
+            col = layout.column(align=True)
+            col.operator("codenodes.new_graph", icon='NODETREE')
+            col.operator("codenodes.open_graph", icon='WINDOW')
+            layout.label(text="In Geometry Nodes: Add › CodeNodes", icon='INFO')
             return
         s = obj.codenodes
+        from . import gn_link
+        if gn_link.SOURCES in {c.name for c in obj.users_collection}:
+            layout.label(text="Feeds a code node in Geometry Nodes", icon='GEOMETRY_NODES')
         row = layout.row(align=True)
         row.prop(s, "text", text="")
-        row.operator("codenodes.edit_code", text="", icon='TEXT')
+        row = layout.row(align=True)
+        row.scale_y = 1.2
+        row.operator("codenodes.edit_code", icon='TEXT')
         col = layout.column(align=True)
         if s.kind == 'SHAPE':
             col.prop(s, "smooth", toggle=True)

@@ -52,7 +52,8 @@ void main() {
 """
 
 TEMPLATE = """\
-// Code -> Mesh: define sdf(p). Negative inside, positive outside, in Blender units.
+// Code -> Mesh starter: five spheres melting together into a moving blob. Replace it with your own.
+// Define sdf(p): the distance to the surface, negative inside, positive outside, in Blender units.
 // Helpers: sdSphere sdBox sdRoundBox sdTorus sdCapsule sdCylinder smin smax rotateX/Y/Z noise3 fbm3
 // Time: uTime (seconds), uFrame. Sliders: declare them like the lines below.
 // @param blend 0.35 0.0 1.0
