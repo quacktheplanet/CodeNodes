@@ -60,6 +60,8 @@ class CODENODES_PT_main(bpy.types.Panel):
             box.operator("codenodes.unbake", icon='X').object_name = obj.name
         else:
             layout.operator("codenodes.bake", icon='FILE_CACHE').object_name = obj.name
+            if s.kind == 'MESH':
+                layout.operator("codenodes.bake_nodes", icon='NODETREE').object_name = obj.name
         if s.last_error:
             box = layout.box()
             box.alert = True

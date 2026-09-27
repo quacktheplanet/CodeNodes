@@ -198,7 +198,17 @@ def bake(name: str, frame_start: int | None = None, frame_end: int | None = None
 
 
 @mcp.tool()
-def remove(name: str, delete_cache: bool = False) -> dict:
+def bake_to_nodes(name: str) -> dict:
+    """Turn a Code Mesh's GLSL into a real Geometry Nodes network: no files and no GPU,
+    evaluated every frame, sliders kept on the modifier. Needs the Expression Nodes add-on.
+
+    Loops, `if` statements and noise3/fbm3 can't convert yet: the answer says which line
+    and suggests `bake` (to disk) instead, and the object is left as it was.
+    """
+    return _call("bake_to_nodes", name=name)
+
+
+name: str, delete_cache: bool = False) -> dict:
     """Delete an object that was made here."""
     return _call("remove", name=name, delete_cache=delete_cache)
 

@@ -144,7 +144,27 @@ class CODENODES_OT_unbake(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (CODENODES_OT_bake, CODENODES_OT_unbake)
+class CODENODES_OT_bake_nodes(bpy.types.Operator):
+    bl_idname = "codenodes.bake_nodes"
+    bl_label = "Bake to Nodes"
+    bl_description = ("Rebuild the code as a Geometry Nodes network: no files, no GPU, evaluated every "
+                      "frame, sliders kept (needs the Expression Nodes add-on)")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    object_name: StringProperty(options={'HIDDEN'})
+
+    def execute(self, context):
+        from . import api
+        name = self.object_name or (context.active_object.name if context.active_object else "")
+        result = api.bake_to_nodes(name)
+        if not result["ok"]:
+            self.report({'ERROR'}, result["error"])
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"'{name}' is now a node network ({result['group']})")
+        return {'FINISHED'}
+
+
+classes = (CODENODES_OT_bake, CODENODES_OT_unbake, CODENODES_OT_bake_nodes)
 
 
 def register():
