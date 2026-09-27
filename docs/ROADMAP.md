@@ -1,7 +1,23 @@
 # CodeNodes roadmap
 
-Last updated 2026-09-26. Anything marked **checked** was run on this machine in Blender 5.0.1 and
+Last updated 2026-09-27. Anything marked **checked** was run on this machine in Blender 5.0.1 and
 5.1.2 (NVIDIA RTX A4500). Everything else is research or plan.
+
+## Where the work is (2026-09-27)
+
+`main` has everything up to the four graphics showcases. Newer work sits on branches, each
+tested on both Blender versions and waiting for the user to try and merge:
+
+| branch | what it adds |
+|---|---|
+| `install-check` | the extension installed as a user installs it and driven through the real MCP process (27 checks); fixes: MCP SDK 2.x, a shadowed operator, a viewport grab covered by the splash; exact install steps in README |
+| `gn-capabilities` | `wall_network`, `rooms`, `roof`, `stairs`, `water`, terrain **Carve**; `curve(splines=...)`; the village demo |
+| `shape-sliders` | Code Shapes as live web pages: the shape language ported to JavaScript, held to the Python vertex for vertex |
+| `bake-to-nodes` | animation phase 3: the GLSL becomes a Geometry Nodes network through Expression Nodes |
+| `roadmap-refresh` | this file |
+
+They were cut from `main` separately, so README.md and the MCP tool list will need a small hand
+merge where two branches both added lines.
 
 ## The idea
 
@@ -36,10 +52,24 @@ Frames outside the baked range hold the first or last frame, so there are no mis
 The Format String node needs `format_items.new('INT', ...)` before it has a slot to fill — without
 that it silently produces an empty path.
 
-**Phase 3 — Baked to nodes (planned).** Convert the code itself into a real Geometry Nodes network,
-so there are no files at all and the maths is evaluated natively on every frame.
+**Phase 3 — Baked to nodes (done, branch `bake-to-nodes`).** The code itself becomes a real
+Geometry Nodes network, so there are no files at all and the maths is evaluated natively on every
+frame.
 
-- The **script-to-nodes** repo (currently `coding-nodes`, to be renamed) already compiles maths into
+> **Checked:** `codenodes/bake_nodes.py` translates the GLSL (local variables, maths, `?:`, user
+> helper functions, the distance helpers, `uTime`/`uFrame`) into the language of **Expression
+> Nodes** (quacktheplanet/expression-nodes, the renamed script-to-nodes repo), which builds the node
+> group; Volume Cube (density = −sdf, background far outside) → Volume to Mesh makes the surface.
+> Against the GPU mesh from the same code it gives *the same vertices* (both meshers average the
+> edge crossings of the same grid), after a slider change and on an animated frame, and the saved
+> file builds the same mesh in a Blender with no add-ons. About 8 ms per rebuild at resolution 96.
+> Loops, `if` statements and `noise3`/`fbm3` are refused with the line, pointing at Bake to Disk.
+> Next: unroll constant-count loops, and a stock-node noise so noisy shapes convert (they would no
+> longer match the GPU exactly, so it has to be opt-in).
+
+Original plan, kept for reference:
+
+- The **script-to-nodes** repo (now Expression Nodes) already compiles maths into
   GN node trees, and Blender 5 has **Field to Grid → Grid to Mesh**, which is the same shape as what
   we do on the GPU.
 - Two routes: a **"Bake to Nodes"** button that emits a standalone GN group, and a **direct
@@ -76,8 +106,8 @@ so there are no files at all and the maths is evaluated natively on every frame.
 | layer | what it is | state |
 |---|---|---|
 | **Core** | Claude's tools, scene assembly, materials, lighting, camera, and the check → render → critique → fix loop | planned |
-| **Geometry backends** | **Organic**: SDF code on the GPU — *done*. **Hard surface**: profiles, revolve, sweep, extrude, bevel, booleans, giving clean topology and UVs — planned. **Precision CAD**: a B-rep kernel (build123d/OpenCascade) for exact dimensions, threads, assemblies, STEP export — later | 1 of 3 |
-| **Domain packs** | Architecture (floor plan → house), Products and lighting (a lamp from scratch, IES profiles), Engineering, Environments | planned |
+| **Geometry backends** | **Organic**: SDF code on the GPU — *done*. **Hard surface**: profiles, revolve, sweep, extrude, bevel, booleans, giving clean topology and UVs — *done* (the shape language). **Precision CAD**: a B-rep kernel (build123d/OpenCascade) for exact dimensions, threads, assemblies, STEP export — later | 2 of 3 |
+| **Domain packs** | Architecture (floor plan → house: rooms, walls, doorways, windows, stairs and roofs are built as Geometry Nodes capabilities), Products and lighting (a lamp from scratch, IES profiles), Engineering, Environments | started |
 | **Simulation** | Blender's own (rigid body, cloth, Mantaflow), CodeNodes GPU sims, and imported results from outside solvers (FEM, CFD) | planned |
 
 Blender is excellent for design, visualisation and physically plausible simulation. For engineering
@@ -106,7 +136,11 @@ drive real solvers and CAD, not stand in for them.
    code, set_params, bake, frame, look_at, light, render, viewport, remove), 29 checks. Everything
    returns a dict and never raises for a fixable mistake.
 
-   **Still to build: our own small MCP server.** Decided 2026-09-26 after reviewing both options.
+   ~~Still to build: our own small MCP server.~~ **Built 2026-09-26** (`codenodes/rpc.py`,
+   `server.py`, `mcp/codenodes_mcp/`), and **checked end to end on 2026-09-27**: the extension zip
+   installed into a throwaway profile, the server started as the Start button does, and a real MCP
+   client driving the MCP process through 27 steps (`tests/install_check.ps1`), with MCP SDK 2.2
+   and 1.30. The reasoning, kept for reference:
 
    *Why not the third-party blender-mcp:* [issue #339](https://github.com/ahujasid/blender-mcp/issues/339)
    reports it hanging on Blender 5.1.1 / Windows 11 — this exact setup; telemetry to a hosted backend
@@ -129,7 +163,7 @@ drive real solvers and CAD, not stand in for them.
 
    *What we do differently:* expose only `codenodes.agent`'s fixed functions — no arbitrary `exec` —
    bind to localhost with a shared secret, and no telemetry.
-5. **Bake to Nodes (Phase 3).** See above.
+5. ~~**Bake to Nodes (Phase 3).**~~ **Done** (branch `bake-to-nodes`); see above.
 
 **P2 — beyond organic shapes**
 6. **Maths into models (the construct backend).** ~~Profiles, revolve, extrude~~ **done** — the
@@ -199,28 +233,38 @@ understand it entirely, and edit it on the fly."*
   unlink, insert, remove (optionally joining the flow up around it), rename, group inputs — all or
   nothing, tried on a copy first. `nodes_explain` describes a tree in words, in flow order,
   showing only what differs from a fresh node.
-- ~~**Capability library**~~ **started: five.** `terrain`, `scatter`, `wall`, `path_bridge`,
-  `along_curve`, each a Python function over a small builder (`gn/builder.py`) that emits the same
-  plain data `nodes_write` takes; `nodes_library` is the generated manifest. Tested for building
-  cleanly, seed determinism, controls that do something, geometry checked by ray (a doorway is a
-  hole a ray passes through), and the round trip. `examples/level_demo.py` composes all five.
+- ~~**Capability library**~~ **ten.** `terrain`, `scatter`, `wall`, `path_bridge`,
+  `along_curve`, and (branch `gn-capabilities`, 2026-09-27) `wall_network`, `rooms`, `roof`,
+  `stairs`, `water` plus terrain's **Carve** inputs. Each is a Python function over a small builder
+  (`gn/builder.py`) that emits the same plain data `nodes_write` takes; `nodes_library` is the
+  generated manifest. Tested for building cleanly, seed determinism, controls that do something,
+  geometry checked by measurement (volumes against hand-worked values, rays through doorways and
+  windows, tread, ridge and river-bed heights) and by rendering, and the round trip.
+  `examples/level_demo.py` composes the first five, `examples/village_demo.py` the rest.
 
-  Next capabilities, in the order a level designer would reach for them:
-  - **wall junctions** — walls that meet at a T or a corner join instead of overlapping;
-  - **rooms from a floor plan** — closed curves become rooms with walls, floors, doorways where
-    two rooms share a wall;
-  - **stairs and ramps** between two heights along a curve;
-  - **river / road** along a curve that carves or flattens the terrain under it — this needs the
-    terrain to read other objects (a "deform by curve" pass), which is a design question first;
+  Done from the old list: ~~wall junctions~~ (`wall_network`: unioned with the EXACT solver, the
+  only one that really unions pieces of one mesh; doorways keep off junctions), ~~rooms from a
+  floor plan~~ (`rooms`: one doorway per pair of rooms, windows, an entrance; plus `roof`),
+  ~~stairs and ramps~~ (`stairs`), ~~river / road~~ (terrain **Carve** reads a curve object;
+  `water` outputs its curve too, so a terrain carving along the same object still finds it).
+
+  Next, in the order a level designer would reach for them:
   - **fence** (posts plus rails, following the ground) — mostly `along_curve` plus `path_bridge`'s
     rails;
-  - **bridge height** over a gap from the two banks, not the curve.
+  - **bridge height** over a gap from the two banks, not the curve;
+  - **roofs for L- and T-shaped plans** (a straight skeleton; `roof` covers the bounding box today);
+  - **multi-storey rooms** (a floor slab and a stair between levels) and **doors and windows as
+    objects** in the openings;
+  - a **floor-plan JSON** input for `rooms`, so a plan can come from outside Blender.
 
   Lessons that shaped these, worth keeping: Object Info sees another object's *evaluated*
   geometry, so something that follows another object's curve needs that object to output its
   curve (path_bridge does, with zero radius); a swept profile's Y points *down* along an
   upright curve; profiles swept round sharp corners pinch unless the corners are filleted first;
-  the exact boolean solver collapsed a flat wall with doorways where Manifold did not.
+  the exact boolean solver collapsed a flat wall with doorways where Manifold did not — but
+  only EXACT unions overlapping pieces of one mesh (Manifold and Float hand them back untouched);
+  Fill Curve fills all splines as one shape unless each gets its own Group ID; merging points
+  averages their rotations, so two opposite facings become none.
 
 **P2.6 — headless Blender to the web** (the user's idea, 2026-09-26)
 
@@ -248,8 +292,12 @@ with declared parameters**, so the page can expose exactly those as sliders. Two
   (flat colours on the web); no Draco compression (the sandbox blocks fetching the decoder, so
   it would need inlining); a wall that follows the ground carries many points, so variants are
   ~250 KB each.
-- **Live sliders for shapes** — next: port the shape language evaluator to JavaScript so a
-  shape re-evaluates in the browser at any slider value, not only baked ones.
+- ~~**Live sliders for shapes**~~ **done** (branch `shape-sliders`). `codenodes/shapes/shapes.js`
+  is a line-for-line port of the shape language; `tests/test_shape_js.py` holds it to the Python
+  (same vertices to float32 precision, same faces in the same order, errors on the same line), and
+  `agent.web_shape` writes a ~60 KB page that rebuilds as sliders move (5-10 ms for the lamp),
+  checked in headless Edge. Shapes whose parts cut others still need Blender. The port found a
+  bug in the Python: a path's `line … steps N` could never work.
 - **webblend** can take the exporter as its core.
 
 **P2.7 — graphics showcases** (the user, 2026-09-26: "put all of those on a list and knock them
@@ -287,12 +335,13 @@ edges (dual contouring), and use fewer faces where the surface is flat.
 
 ## Decisions waiting
 
-- **MCP server**: blender-mcp (MIT, most used, Poly Haven built in) or Blender's own Lab MCP
-  (official, experimental, 5.1+). Both run arbitrary code inside Blender, so read before installing.
-- **Where the house builder lives**: its own add-on using CodeNodes, or inside CodeNodes.
+- ~~**MCP server**~~ decided and built: our own, with a fixed tool table and no exec (see P1.4).
+- **Where the house builder lives**: its own add-on using CodeNodes, or inside CodeNodes. Today
+  the pieces (`rooms`, `roof`, `stairs`, `wall_network`) are capabilities inside CodeNodes.
 - **License**: the manifest says GPL-3.0-or-later (placeholder). Infinigen is BSD-3 and Poly Haven
   assets are CC0, so both fit.
-- **Merging `node-editor` and `bake` into `main`.**
+- ~~**Merging `node-editor` and `bake` into `main`.**~~ Done. Still waiting: the five branches in
+  "Where the work is" at the top.
 
 ## Known risks
 
