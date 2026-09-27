@@ -1,0 +1,899 @@
+<title>Rampart Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --paper: #F2F4EF; --panel: rgba(242, 244, 239, 0.94); --ink: #1D2822; --muted: #5E6B63;
+  --line: #D3DAD1; --accent: #2E6A9E; --accent-ink: #FFFFFF; --hover: #E3E9E2; --danger: #A5392B;
+  --display: "Barlow Semi Condensed", "Arial Narrow", "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #131916; --panel: rgba(19, 25, 22, 0.92); --ink: #E4EBE6; --muted: #98A69D;
+    --line: #2B3530; --accent: #86B6DF; --accent-ink: #0E1A24; --hover: #1F2824; --danger: #E08A7C;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #131916; --panel: rgba(19, 25, 22, 0.92); --ink: #E4EBE6; --muted: #98A69D;
+  --line: #2B3530; --accent: #86B6DF; --accent-ink: #0E1A24; --hover: #1F2824; --danger: #E08A7C;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--paper); color: var(--ink); font-family: var(--display); overflow: hidden; font-size: 15px; }
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.bar { position: fixed; display: flex; gap: 8px; align-items: center; background: var(--panel);
+  backdrop-filter: blur(10px); border: 1px solid var(--line); border-radius: 10px; }
+#top { top: calc(12px + env(safe-area-inset-top, 0px)); left: 12px; right: 12px; padding: 8px 12px; flex-wrap: wrap; }
+#top h1 { margin: 0 8px 0 0; font-size: 22px; font-weight: 700; letter-spacing: 0.01em; }
+#top .spacer { flex: 1; }
+#tools { top: 76px; left: 12px; flex-direction: column; padding: 6px; gap: 4px; }
+button, select { font: inherit; color: var(--ink); }
+.tool { width: 132px; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  background: none; border: 1px solid transparent; border-radius: 7px; padding: 6px 9px; cursor: pointer;
+  font-weight: 600; letter-spacing: 0.02em; text-align: left; }
+.tool kbd { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.tool:hover { background: var(--hover); }
+.tool[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.tool[aria-pressed="true"] kbd { color: var(--accent-ink); border-color: transparent; }
+.btn { background: none; border: 1px solid var(--line); border-radius: 7px; padding: 5px 10px; cursor: pointer; font-weight: 600; }
+.btn:hover { background: var(--hover); }
+.btn.danger { color: var(--danger); }
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#props { top: 76px; right: 12px; width: min(270px, calc(100% - 180px)); flex-direction: column; align-items: stretch;
+  padding: 12px 14px; gap: 12px; max-height: calc(100% - 150px); overflow: auto; }
+#props h2 { margin: 0; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+#props .name { font-size: 20px; font-weight: 700; margin-top: -6px; }
+.field { display: grid; gap: 4px; }
+.field .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.field label { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; }
+.field output { font-family: var(--mono); font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.field input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
+.field select { width: 100%; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
+.check { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.check input { accent-color: var(--accent); width: 16px; height: 16px; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.note { font-size: 13px; color: var(--muted); line-height: 1.4; margin: 0; }
+.stats { font-family: var(--mono); font-size: 12px; color: var(--muted); display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; }
+#hint { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%);
+  padding: 7px 14px; font-size: 14px; max-width: calc(100% - 24px); }
+#hint b { font-weight: 700; }
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); width: min(560px, calc(100% - 32px)); padding: 16px; }
+dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+dialog h2 { margin: 0 0 6px; font-size: 20px; }
+dialog textarea { width: 100%; box-sizing: border-box; height: 240px; font-family: var(--mono); font-size: 12px;
+  background: var(--hover); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+dialog .actions { margin-top: 10px; justify-content: flex-end; }
+#status { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+@media (max-width: 720px) {
+  #tools { top: auto; bottom: calc(58px + env(safe-area-inset-bottom, 0px)); left: 8px; right: 8px; flex-direction: row; overflow-x: auto; }
+  .tool { width: auto; flex: 0 0 auto; }
+  .tool kbd { display: none; }
+  #props { top: 64px; right: 8px; width: calc(100% - 16px); max-height: 38%; }
+  #top h1 { font-size: 18px; }
+  #hint { font-size: 12px; }
+}
+</style>
+
+<div id="stage"></div>
+<header id="top" class="bar">
+  <h1>Rampart</h1>
+  <button class="btn" id="undo" type="button" title="Undo (Ctrl+Z)">Undo</button>
+  <button class="btn" id="redo" type="button" title="Redo (Ctrl+Y)">Redo</button>
+  <label class="check"><input type="checkbox" id="snap" checked> Snap 0.5 m</label>
+  <span class="spacer"></span>
+  <span id="status" role="status">Loading…</span>
+  <button class="btn" id="night" type="button" aria-pressed="false" title="Day or night (N)">Night</button>
+  <button class="btn" id="layout" type="button">Layout JSON</button>
+</header>
+<nav id="tools" class="bar" aria-label="Tools">
+  <button class="tool" type="button" data-tool="select" aria-pressed="true">Select <kbd>V</kbd></button>
+  <button class="tool" type="button" data-tool="wall" aria-pressed="false">Wall <kbd>W</kbd></button>
+  <button class="tool" type="button" data-tool="door" aria-pressed="false">Doorway <kbd>D</kbd></button>
+  <button class="tool" type="button" data-tool="bridge" aria-pressed="false">Bridge <kbd>B</kbd></button>
+  <button class="tool" type="button" data-tool="light" aria-pressed="false">Lamp <kbd>L</kbd></button>
+  <button class="tool" type="button" data-tool="tower" aria-pressed="false">Tower <kbd>T</kbd></button>
+  <button class="tool" type="button" data-tool="tree" aria-pressed="false">Tree <kbd>E</kbd></button>
+  <button class="tool" type="button" data-tool="crate" aria-pressed="false">Crate <kbd>C</kbd></button>
+</nav>
+<aside id="props" class="bar" aria-label="Selection"></aside>
+<div id="hint" class="bar" aria-live="polite"></div>
+<dialog id="layoutDialog">
+  <h2>Layout</h2>
+  <p class="note">The whole level as plain data: copy it to keep it or to build it in Blender, or paste one in and load it.</p>
+  <textarea id="layoutText" spellcheck="false" aria-label="Layout JSON"></textarea>
+  <div class="actions">
+    <button class="btn" type="button" id="copyLayout">Copy</button>
+    <button class="btn" type="button" id="loadLayout">Load pasted layout</button>
+    <button class="btn danger" type="button" id="resetLayout">Start from the sample</button>
+    <button class="btn" type="button" id="closeLayout">Close</button>
+  </div>
+  <p class="note" id="layoutMsg"></p>
+</dialog>
+
+<script>
+window.addEventListener("error", function (e) { var s = document.getElementById("status"); if (s) s.textContent = "Error: " + e.message; });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function () {
+"use strict";
+const statusEl = document.getElementById("status");
+if (!window.THREE || !THREE.OrbitControls) { statusEl.textContent = "Could not load three.js from cdn.jsdelivr.net."; return; }
+THREE.ColorManagement.legacyMode = false;
+
+// ---------------------------------------------------------------- the ground and its river
+const GROUND_SIZE = 90, WATER_Y = -0.95;
+function riverCentre(x) { return 7 + Math.sin(x * 0.07) * 3 + Math.sin(x * 0.023 + 1) * 4; }
+function groundY(x, z) {
+  const d = Math.abs(z - riverCentre(x)) / 5.2;
+  const trench = Math.exp(-Math.pow(d, 4));
+  const hills = 0.35 * Math.sin(x * 0.13) * Math.cos(z * 0.11) + 0.22 * Math.sin(x * 0.05 + z * 0.07);
+  return hills * (1 - trench) - 2.0 * trench;
+}
+
+// ---------------------------------------------------------------- the level, as data
+const SAMPLE = {
+  version: 1,
+  walls: [
+    { id: "w1", points: [[-12, -18], [4, -18], [4, -6], [-12, -6]], closed: true, height: 3.4, thickness: 0.6,
+      posts: true, battlements: true,
+      openings: [{ id: "o1", s: 8, width: 2.2, height: 2.8, style: "archdoor" },
+                 { id: "o2", s: 22, width: 1.6, height: 2.4, style: "door" },
+                 { id: "o3", s: 35, width: 2.4, height: 2.9, style: "gate" }] },
+    { id: "w2", points: [[10, -16], [22, -12], [26, -3]], closed: false, height: 2.4, thickness: 0.45,
+      posts: false, battlements: false,
+      openings: [{ id: "o4", s: 6, width: 1.4, height: 2.0, style: "opening" }] }
+  ],
+  bridges: [{ id: "b1", a: [-2, 0], b: [0, 15], width: 2.6, lift: 0.3, rails: true }],
+  lights: [{ id: "l1", p: [-3.5, -3], color: "warm", power: 1 }, { id: "l2", p: [2, -3], color: "warm", power: 1 },
+           { id: "l3", p: [-1.8, 17], color: "warm", power: 1 }, { id: "l4", p: [2.2, 17], color: "warm", power: 1 },
+           { id: "l5", p: [-4, -12], color: "cool", power: 1 }],
+  features: [{ id: "f1", kind: "tower", p: [-12, -18], rot: 0, scale: 1 }, { id: "f2", kind: "tower", p: [4, -6], rot: 0, scale: 0.8 },
+             { id: "f3", kind: "tree", p: [12, 22], rot: 0, scale: 1.2 }, { id: "f4", kind: "tree", p: [16, 19], rot: 1, scale: 0.9 },
+             { id: "f5", kind: "tree", p: [-16, 24], rot: 2, scale: 1.1 }, { id: "f6", kind: "tree", p: [-20, 18], rot: 0, scale: 0.8 },
+             { id: "f7", kind: "tree", p: [18, -24], rot: 0, scale: 1 }, { id: "f8", kind: "crate", p: [-8, -9], rot: 0.4, scale: 1 },
+             { id: "f9", kind: "crate", p: [-7, -8.2], rot: 0.1, scale: 0.8 }]
+};
+const STYLES = { opening: "Opening", door: "Door", double: "Double door", arch: "Arch", archdoor: "Arch with door", gate: "Portcullis" };
+const clone = (o) => JSON.parse(JSON.stringify(o));
+let S = load() || clone(SAMPLE);
+let uid = 100;
+function nid(p) { uid += 1; return p + uid + Math.random().toString(36).slice(2, 5); }
+function load() {
+  try { const t = localStorage.getItem("rampart-layout"); if (t) { const s = JSON.parse(t); if (s && s.walls) return s; } } catch (e) {}
+  return null;
+}
+function save() { try { localStorage.setItem("rampart-layout", JSON.stringify(S)); } catch (e) {} }
+
+// history: a snapshot before each change
+const past = [], future = [];
+function remember() { past.push(JSON.stringify(S)); if (past.length > 100) past.shift(); future.length = 0; }
+function undo() { if (!past.length) return; future.push(JSON.stringify(S)); S = JSON.parse(past.pop()); afterJump(); }
+function redo() { if (!future.length) return; past.push(JSON.stringify(S)); S = JSON.parse(future.pop()); afterJump(); }
+function afterJump() { if (selected && !findThing(selected)) selected = null; rebuildAll(); save(); showProps(); }
+
+// ---------------------------------------------------------------- three.js
+const stage = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.physicallyCorrectLights = true;
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 500);
+camera.position.set(-30, 32, 34);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(-2, 0, -4);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.47;
+controls.minDistance = 6; controls.maxDistance = 140;
+controls.update();
+
+const hemi = new THREE.HemisphereLight(0xcfe0f2, 0x4a4436, 1.2);
+const sun = new THREE.DirectionalLight(0xfff1dc, 3.2);
+sun.position.set(-30, 40, 18);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -50, right: 50, top: 50, bottom: -50, near: 1, far: 140 });
+sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04;
+scene.add(hemi, sun);
+
+const M = {
+  stone: new THREE.MeshStandardMaterial({ color: 0xbdb5a6, roughness: 0.9 }),
+  cap: new THREE.MeshStandardMaterial({ color: 0x8f877b, roughness: 0.85 }),
+  wood: new THREE.MeshStandardMaterial({ color: 0x7a5232, roughness: 0.8 }),
+  darkwood: new THREE.MeshStandardMaterial({ color: 0x4d321f, roughness: 0.85 }),
+  iron: new THREE.MeshStandardMaterial({ color: 0x2b2d31, roughness: 0.45, metalness: 0.8 }),
+  roof: new THREE.MeshStandardMaterial({ color: 0x5b3c35, roughness: 0.8 }),
+  leaves: new THREE.MeshStandardMaterial({ color: 0x3f6b35, roughness: 0.9, flatShading: true }),
+  bark: new THREE.MeshStandardMaterial({ color: 0x5a3d26, roughness: 0.9 }),
+  water: new THREE.MeshStandardMaterial({ color: 0x3f6f8f, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.85 }),
+  handle: new THREE.MeshBasicMaterial({ color: 0x2e6a9e, depthTest: false }),
+  handleSoft: new THREE.MeshBasicMaterial({ color: 0x2e6a9e, depthTest: false, transparent: true, opacity: 0.45 }),
+  ghost: new THREE.MeshStandardMaterial({ color: 0x2e6a9e, transparent: true, opacity: 0.45, depthWrite: false }),
+  glowWarm: new THREE.MeshStandardMaterial({ color: 0xffd9a0, emissive: 0xffb45a, emissiveIntensity: 0.4 }),
+  glowCool: new THREE.MeshStandardMaterial({ color: 0xd7ecff, emissive: 0x9fd0ff, emissiveIntensity: 0.4 }),
+};
+
+// the ground: one mesh, coloured by height so the river banks read without textures
+const groundGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE, 180, 180);
+groundGeo.rotateX(-Math.PI / 2);
+{
+  const pos = groundGeo.attributes.position, colours = [];
+  const grass = new THREE.Color(0x6f8f4a), dry = new THREE.Color(0x8c9656), mud = new THREE.Color(0x7a6a4e), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i), y = groundY(x, z);
+    pos.setY(i, y);
+    const t = Math.min(1, Math.max(0, -y / 1.4));
+    c.copy(grass).lerp(dry, 0.5 + 0.5 * Math.sin(x * 0.21 + z * 0.17) * Math.sin(x * 0.05)).lerp(mud, t);
+    colours.push(c.r, c.g, c.b);
+  }
+  groundGeo.setAttribute("color", new THREE.Float32BufferAttribute(colours, 3));
+  groundGeo.computeVertexNormals();
+}
+const ground = new THREE.Mesh(groundGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+ground.receiveShadow = true;
+scene.add(ground);
+const water = new THREE.Mesh(new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE), M.water);
+water.rotation.x = -Math.PI / 2; water.position.y = WATER_Y;
+scene.add(water);
+const grid = new THREE.GridHelper(GROUND_SIZE, GROUND_SIZE / 2, 0x000000, 0x000000);
+grid.material.transparent = true; grid.material.opacity = 0.06; grid.position.y = 0.02;
+scene.add(grid);
+
+const world = new THREE.Group(); scene.add(world);        // everything built from S
+const overlay = new THREE.Group(); scene.add(overlay);    // handles, previews
+const nightLights = [];
+
+// ---------------------------------------------------------------- building pieces
+function box(parent, mat, w, h, d, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(Math.max(w, 0.001), Math.max(h, 0.001), Math.max(d, 0.001)), mat);
+  m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m;
+}
+function segmentsOf(w) {
+  const out = [], n = w.points.length, count = w.closed ? n : n - 1;
+  let acc = 0;
+  for (let i = 0; i < count; i++) {
+    const a = w.points[i], b = w.points[(i + 1) % n];
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    out.push({ i, a, b, L, start: acc }); acc += L;
+  }
+  return out;
+}
+function wallLength(w) { return segmentsOf(w).reduce((t, s) => t + s.L, 0); }
+function pointAt(w, s) {
+  for (const seg of segmentsOf(w)) {
+    if (s <= seg.start + seg.L + 1e-6) {
+      const u = seg.L ? (s - seg.start) / seg.L : 0;
+      return { x: seg.a[0] + (seg.b[0] - seg.a[0]) * u, z: seg.a[1] + (seg.b[1] - seg.a[1]) * u, seg };
+    }
+  }
+  const last = w.points[w.closed ? 0 : w.points.length - 1];
+  return { x: last[0], z: last[1], seg: null };
+}
+function nearestOnWall(w, x, z) {
+  let best = { d: Infinity, s: 0 };
+  for (const seg of segmentsOf(w)) {
+    const dx = seg.b[0] - seg.a[0], dz = seg.b[1] - seg.a[1];
+    const u = seg.L ? Math.max(0, Math.min(1, ((x - seg.a[0]) * dx + (z - seg.a[1]) * dz) / (seg.L * seg.L))) : 0;
+    const px = seg.a[0] + dx * u, pz = seg.a[1] + dz * u, d = Math.hypot(x - px, z - pz);
+    if (d < best.d) best = { d, s: seg.start + u * seg.L };
+  }
+  return best;
+}
+
+function buildOpening(g, w, o, u, gy, top) {
+  // g is a segment's frame: x along the wall, z across it, y up
+  const t = w.thickness, half = o.width / 2, h = Math.min(o.height, top - gy - 0.3);
+  const part = new THREE.Group(); part.userData.pick = { kind: "opening", id: o.id, wall: w.id }; g.add(part);
+  const arch = o.style === "arch" || o.style === "archdoor";
+  const spring = arch ? h - half : h;                         // where an arch starts to curve
+  if (arch && half > 0.05) {
+    const shape = new THREE.Shape();
+    shape.moveTo(-half, 0); shape.lineTo(half, 0); shape.lineTo(half, half); shape.lineTo(-half, half); shape.lineTo(-half, 0);
+    const hole = new THREE.Path(); hole.moveTo(half, 0); hole.absarc(0, 0, half, 0, Math.PI, false); hole.lineTo(half, 0);
+    shape.holes.push(hole);
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: false, curveSegments: 18 });
+    const m = new THREE.Mesh(geo, M.stone); m.position.set(u, gy + spring, -t / 2); m.castShadow = m.receiveShadow = true; part.add(m);
+  }
+  box(part, M.stone, o.width, top - (gy + h), t, u, (gy + h + top) / 2, 0);             // above the opening
+  const frame = o.style !== "opening";
+  if (frame) {                                                                           // jambs, standing proud of the wall
+    box(part, M.cap, 0.16, spring, t + 0.12, u - half + 0.08, gy + spring / 2, 0);
+    box(part, M.cap, 0.16, spring, t + 0.12, u + half - 0.08, gy + spring / 2, 0);
+    if (!arch) box(part, M.cap, o.width, 0.18, t + 0.12, u, gy + h - 0.09, 0);
+  }
+  if (o.style === "door" || o.style === "archdoor") {                                    // one leaf, a little open
+    const hinge = new THREE.Group(); hinge.position.set(u - half + 0.16, gy, t / 2 - 0.05); hinge.rotation.y = -0.55; part.add(hinge);
+    const leafH = arch ? h - 0.05 : h - 0.2;
+    box(hinge, M.wood, o.width - 0.32, leafH, 0.08, (o.width - 0.32) / 2, leafH / 2, 0);
+    box(hinge, M.iron, o.width - 0.32, 0.08, 0.1, (o.width - 0.32) / 2, leafH * 0.25, 0);
+    box(hinge, M.iron, o.width - 0.32, 0.08, 0.1, (o.width - 0.32) / 2, leafH * 0.75, 0);
+  } else if (o.style === "double") {                                                     // two leaves, opened outward
+    const leafW = (o.width - 0.32) / 2, leafH = h - 0.2;
+    [-1, 1].forEach((side) => {
+      const hinge = new THREE.Group();
+      hinge.position.set(u + side * (half - 0.16), gy, t / 2 - 0.05); hinge.rotation.y = side * 0.7; part.add(hinge);
+      box(hinge, M.wood, leafW, leafH, 0.08, -side * leafW / 2, leafH / 2, 0);
+      box(hinge, M.iron, leafW, 0.07, 0.1, -side * leafW / 2, leafH * 0.3, 0);
+    });
+  } else if (o.style === "gate") {                                                       // a portcullis, raised a third
+    const raised = h * 0.35, barsH = h - raised;
+    for (let bx = -half + 0.25; bx <= half - 0.2; bx += 0.3) box(part, M.iron, 0.06, barsH, 0.06, u + bx, gy + raised + barsH / 2, 0);
+    for (let by = gy + raised + 0.3; by < gy + h; by += 0.5) box(part, M.iron, o.width - 0.3, 0.06, 0.06, u, by, 0);
+  }
+}
+
+function buildWall(w) {
+  const root = new THREE.Group(); root.userData.pick = { kind: "wall", id: w.id };
+  const segs = segmentsOf(w), total = wallLength(w), t = w.thickness;
+  segs.forEach((seg, k) => {
+    if (seg.L < 0.05) return;
+    const dx = seg.b[0] - seg.a[0], dz = seg.b[1] - seg.a[1];
+    const g = new THREE.Group(); g.position.set(seg.a[0], 0, seg.a[1]); g.rotation.y = -Math.atan2(dz, dx); root.add(g);
+    let low = Infinity;
+    for (let q = 0; q <= 8; q++) low = Math.min(low, groundY(seg.a[0] + dx * q / 8, seg.a[1] + dz * q / 8));
+    const top = (groundY(seg.a[0], seg.a[1]) + groundY(seg.b[0], seg.b[1])) / 2 + w.height, base = low - 0.4;
+    const joinStart = w.closed || k > 0, joinEnd = w.closed || k < segs.length - 1;
+    const ops = w.openings.filter((o) => o.s >= seg.start - 1e-6 && o.s < seg.start + seg.L + 1e-6)
+      .map((o) => ({ o, u: Math.min(Math.max(o.s - seg.start, o.width / 2 + 0.2), seg.L - o.width / 2 - 0.2) }))
+      .filter((x) => seg.L > x.o.width + 0.4).sort((p, q) => p.u - q.u);
+    let cursor = joinStart ? -t / 2 : 0;
+    const end = seg.L + (joinEnd ? t / 2 : 0);
+    for (const { o, u } of ops) {
+      const from = u - o.width / 2;
+      if (from > cursor + 0.01) box(g, M.stone, from - cursor, top - base, t, (cursor + from) / 2, (top + base) / 2, 0);
+      buildOpening(g, w, o, u, groundY(seg.a[0] + dx * u / seg.L, seg.a[1] + dz * u / seg.L), top);
+      cursor = u + o.width / 2;
+    }
+    if (end > cursor + 0.01) box(g, M.stone, end - cursor, top - base, t, (cursor + end) / 2, (top + base) / 2, 0);
+    box(g, M.cap, end - (joinStart ? -t / 2 : 0), 0.14, t + 0.1, (end + (joinStart ? -t / 2 : 0)) / 2, top + 0.07, 0);
+    if (w.battlements) {
+      for (let m = 0.45; m < seg.L - 0.3; m += 1.1) box(g, M.stone, 0.55, 0.55, t * 0.9, m, top + 0.14 + 0.27, 0);
+    }
+  });
+  if (w.posts) {
+    w.points.forEach((p) => {
+      const gy = groundY(p[0], p[1]);
+      box(root, M.cap, t * 1.7, w.height + 0.9, t * 1.7, p[0], gy + (w.height + 0.9) / 2 - 0.3, p[1]);
+    });
+  }
+  return root;
+}
+
+function buildBridge(b) {
+  const root = new THREE.Group(); root.userData.pick = { kind: "bridge", id: b.id };
+  const dx = b.b[0] - b.a[0], dz = b.b[1] - b.a[1], L = Math.hypot(dx, dz);
+  if (L < 0.5) return root;
+  const g = new THREE.Group(); g.position.set(b.a[0], 0, b.a[1]); g.rotation.y = -Math.atan2(dz, dx); root.add(g);
+  const y0 = groundY(b.a[0], b.a[1]) + b.lift, y1 = groundY(b.b[0], b.b[1]) + b.lift;
+  const deckY = Math.max(y0, y1, WATER_Y + 0.8);
+  box(g, M.wood, L + 0.6, 0.28, b.width, L / 2, deckY - 0.14, 0);
+  for (let x = 0.3; x < L; x += 0.9) box(g, M.darkwood, 0.08, 0.02, b.width, x, deckY + 0.01, 0);  // plank lines
+  if (b.rails) {
+    [-1, 1].forEach((side) => {
+      const zz = side * (b.width / 2 - 0.08);
+      for (let x = 0; x <= L + 0.01; x += Math.max(L / Math.ceil(L / 1.5), 0.5)) box(g, M.darkwood, 0.12, 1.0, 0.12, x, deckY + 0.5, zz);
+      box(g, M.wood, L + 0.1, 0.1, 0.12, L / 2, deckY + 1.0, zz);
+      box(g, M.wood, L + 0.1, 0.07, 0.08, L / 2, deckY + 0.55, zz);
+    });
+  }
+  for (let x = 2; x < L - 1; x += 3.5) {                    // pillars wherever the ground falls away
+    const gx = b.a[0] + dx * x / L, gz = b.a[1] + dz * x / L, gy = groundY(gx, gz);
+    const reach = deckY - 0.28 - gy;
+    if (reach > 0.6) [-1, 1].forEach((side) => box(g, M.cap, 0.35, reach + 0.5, 0.35, x, gy - 0.5 + (reach + 0.5) / 2, side * (b.width / 2 - 0.3)));
+  }
+  return root;
+}
+
+function buildLamp(l) {
+  const root = new THREE.Group(); root.userData.pick = { kind: "light", id: l.id };
+  const gy = groundY(l.p[0], l.p[1]);
+  root.position.set(l.p[0], gy, l.p[1]);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 3.1, 8), M.iron);
+  pole.position.y = 1.55; pole.castShadow = true; root.add(pole);
+  const glow = l.color === "cool" ? M.glowCool : M.glowWarm;
+  const lantern = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.4, 0.32), glow); lantern.position.y = 3.25; root.add(lantern);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.25, 4), M.iron); cap.position.y = 3.57; cap.rotation.y = Math.PI / 4; root.add(cap);
+  root.userData.lanternY = gy + 3.25;
+  return root;
+}
+
+function buildFeature(f) {
+  const root = new THREE.Group(); root.userData.pick = { kind: "feature", id: f.id };
+  const gy = groundY(f.p[0], f.p[1]);
+  root.position.set(f.p[0], gy, f.p[1]); root.rotation.y = f.rot || 0; root.scale.setScalar(f.scale || 1);
+  const add = (geo, mat, y) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.castShadow = m.receiveShadow = true; root.add(m); return m; };
+  if (f.kind === "tower") {
+    add(new THREE.CylinderGeometry(1.9, 2.1, 7, 16), M.stone, 3.2);
+    add(new THREE.CylinderGeometry(2.2, 2.2, 0.35, 16), M.cap, 6.8);
+    for (let a = 0; a < 12; a++) {
+      const m = add(new THREE.BoxGeometry(0.6, 0.7, 0.5), M.stone, 7.3);
+      m.position.x = Math.cos(a / 12 * Math.PI * 2) * 1.95; m.position.z = Math.sin(a / 12 * Math.PI * 2) * 1.95;
+      m.rotation.y = -a / 12 * Math.PI * 2;
+    }
+    const door = add(new THREE.BoxGeometry(1.1, 2.0, 0.2), M.wood, 1.0); door.position.z = 2.02;
+  } else if (f.kind === "tree") {
+    add(new THREE.CylinderGeometry(0.16, 0.24, 2.2, 7), M.bark, 1.1);
+    add(new THREE.ConeGeometry(1.7, 2.8, 8), M.leaves, 2.8);
+    add(new THREE.ConeGeometry(1.25, 2.3, 8), M.leaves, 3.9);
+    add(new THREE.ConeGeometry(0.8, 1.8, 8), M.leaves, 4.9);
+  } else {
+    add(new THREE.BoxGeometry(1, 1, 1), M.wood, 0.5);
+    add(new THREE.BoxGeometry(1.04, 0.1, 1.04), M.darkwood, 0.92);
+    add(new THREE.BoxGeometry(1.04, 0.1, 1.04), M.darkwood, 0.08);
+  }
+  return root;
+}
+
+// ---------------------------------------------------------------- rebuilding
+const built = new Map();   // id -> group
+function kindList(kind) { return { wall: S.walls, bridge: S.bridges, light: S.lights, feature: S.features }[kind]; }
+function findThing(sel) {
+  if (!sel) return null;
+  if (sel.kind === "opening") { const w = S.walls.find((x) => x.id === sel.wall); return w && w.openings.find((o) => o.id === sel.id); }
+  return (kindList(sel.kind) || []).find((x) => x.id === sel.id);
+}
+function buildOne(kind, item) {
+  return kind === "wall" ? buildWall(item) : kind === "bridge" ? buildBridge(item) : kind === "light" ? buildLamp(item) : buildFeature(item);
+}
+function rebuild(kind, id) {
+  const old = built.get(id);
+  if (old) { world.remove(old); dispose(old); built.delete(id); }
+  const item = (kindList(kind) || []).find((x) => x.id === id);
+  if (item) { const g = buildOne(kind, item); world.add(g); built.set(id, g); }
+  if (kind === "light") placeNightLights();
+}
+function rebuildAll() {
+  for (const g of built.values()) { world.remove(g); dispose(g); }
+  built.clear();
+  for (const [kind, list] of [["wall", S.walls], ["bridge", S.bridges], ["light", S.lights], ["feature", S.features]]) {
+    for (const item of list) { const g = buildOne(kind, item); world.add(g); built.set(item.id, g); }
+  }
+  placeNightLights(); drawOverlay(); updateStats();
+}
+function dispose(g) { g.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
+
+// ---------------------------------------------------------------- day and night
+let night = false;
+function placeNightLights() {
+  nightLights.forEach((l) => scene.remove(l)); nightLights.length = 0;
+  if (!night) return;
+  S.lights.slice(0, 24).forEach((l) => {
+    const pl = new THREE.PointLight(l.color === "cool" ? 0xbfe0ff : 0xffb86a, 60 * (l.power || 1), 16, 2);
+    pl.position.set(l.p[0], groundY(l.p[0], l.p[1]) + 3.2, l.p[1]);
+    scene.add(pl); nightLights.push(pl);
+  });
+}
+function setNight(on) {
+  night = on;
+  const btn = document.getElementById("night");
+  btn.setAttribute("aria-pressed", String(on)); btn.textContent = on ? "Day" : "Night";
+  const sky = new THREE.Color(on ? 0x0d1526 : 0xa9c6e3);
+  scene.background = sky; scene.fog = new THREE.Fog(sky, 70, 170);
+  hemi.intensity = on ? 0.12 : 1.2; hemi.color.set(on ? 0x5a70a0 : 0xcfe0f2);
+  sun.intensity = on ? 0.35 : 3.2; sun.color.set(on ? 0x9fb4ff : 0xfff1dc);
+  M.glowWarm.emissiveIntensity = on ? 4 : 0.4; M.glowCool.emissiveIntensity = on ? 4 : 0.4;
+  placeNightLights();
+}
+
+// ---------------------------------------------------------------- selection and the overlay
+let selected = null;   // {kind, id, wall?}
+function select(sel) { selected = sel; drawOverlay(); showProps(); }
+function sphere(x, y, z, r, mat, data) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), mat);
+  m.position.set(x, y, z); m.renderOrder = 10; m.userData.handle = data; overlay.add(m); return m;
+}
+function drawOverlay() {
+  while (overlay.children.length) { const c = overlay.children.pop(); if (c.geometry) c.geometry.dispose(); }
+  const item = findThing(selected);
+  if (item && selected.kind === "wall") {
+    const w = item, top = (p) => groundY(p[0], p[1]) + w.height + 0.6;
+    const pts = w.points.map((p) => new THREE.Vector3(p[0], top(p), p[1]));
+    if (w.closed) pts.push(pts[0].clone());
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x2e6a9e, depthTest: false }));
+    line.renderOrder = 9; overlay.add(line);
+    w.points.forEach((p, i) => sphere(p[0], top(p), p[1], 0.38, M.handle, { type: "vertex", wall: w.id, index: i }));
+    segmentsOf(w).forEach((seg) => {
+      const mx = (seg.a[0] + seg.b[0]) / 2, mz = (seg.a[1] + seg.b[1]) / 2;
+      sphere(mx, groundY(mx, mz) + w.height + 0.6, mz, 0.24, M.handleSoft, { type: "insert", wall: w.id, index: seg.i + 1 });
+    });
+  } else if (item && selected.kind === "opening") {
+    const w = S.walls.find((x) => x.id === selected.wall), p = pointAt(w, item.s);
+    sphere(p.x, groundY(p.x, p.z) + item.height + 0.4, p.z, 0.34, M.handle, { type: "opening", wall: w.id, id: item.id });
+  } else if (item && selected.kind === "bridge") {
+    [["a", item.a], ["b", item.b]].forEach(([end, p]) => sphere(p[0], groundY(p[0], p[1]) + item.lift + 1.4, p[1], 0.36, M.handle, { type: "end", id: item.id, end }));
+  } else if (item) {
+    const p = item.p, h = selected.kind === "light" ? 4.1 : selected.kind === "feature" && item.kind === "tower" ? 8.4 * item.scale : 2.2;
+    sphere(p[0], groundY(p[0], p[1]) + h, p[1], 0.3, M.handle, { type: "move", kind: selected.kind, id: item.id });
+  }
+  if (tool === "wall" && drawing.length) drawWallPreview();
+}
+
+// ---------------------------------------------------------------- the properties panel
+const propsEl = document.getElementById("props");
+function field(label, value, min, max, step, unit, onInput) {
+  const id = "f" + Math.random().toString(36).slice(2, 8);
+  const wrap = document.createElement("div"); wrap.className = "field";
+  wrap.innerHTML = `<div class="row"><label for="${id}"></label><output for="${id}"></output></div><input type="range" id="${id}" min="${min}" max="${max}" step="${step}">`;
+  wrap.querySelector("label").textContent = label;
+  const input = wrap.querySelector("input"), out = wrap.querySelector("output");
+  input.value = value; out.textContent = (+value).toFixed(step < 1 ? (step < 0.1 ? 2 : 1) : 0) + (unit ? " " + unit : "");
+  let started = false;
+  input.addEventListener("input", () => {
+    if (!started) { remember(); started = true; }
+    out.textContent = (+input.value).toFixed(step < 1 ? (step < 0.1 ? 2 : 1) : 0) + (unit ? " " + unit : "");
+    onInput(+input.value);
+  });
+  input.addEventListener("change", () => { started = false; save(); });
+  return wrap;
+}
+function check(label, value, onChange) {
+  const id = "c" + Math.random().toString(36).slice(2, 8);
+  const wrap = document.createElement("label"); wrap.className = "check";
+  wrap.innerHTML = `<input type="checkbox" id="${id}">`; wrap.append(document.createTextNode(label));
+  const input = wrap.querySelector("input"); input.checked = value;
+  input.addEventListener("change", () => { remember(); onChange(input.checked); save(); });
+  return wrap;
+}
+function choice(label, value, options, onChange) {
+  const id = "s" + Math.random().toString(36).slice(2, 8);
+  const wrap = document.createElement("div"); wrap.className = "field";
+  wrap.innerHTML = `<div class="row"><label for="${id}"></label></div><select id="${id}"></select>`;
+  wrap.querySelector("label").textContent = label;
+  const sel = wrap.querySelector("select");
+  Object.entries(options).forEach(([k, v]) => { const o = document.createElement("option"); o.value = k; o.textContent = v; sel.append(o); });
+  sel.value = value;
+  sel.addEventListener("change", () => { remember(); onChange(sel.value); save(); });
+  return wrap;
+}
+function button(label, onClick, cls) {
+  const b = document.createElement("button"); b.type = "button"; b.className = "btn" + (cls ? " " + cls : ""); b.textContent = label;
+  b.addEventListener("click", onClick); return b;
+}
+function showProps() {
+  propsEl.replaceChildren();
+  const item = findThing(selected);
+  const head = (kind, name) => { const h = document.createElement("h2"); h.textContent = kind; const n = document.createElement("div"); n.className = "name"; n.textContent = name; propsEl.append(h, n); };
+  const actions = document.createElement("div"); actions.className = "actions";
+  if (!item) {
+    head("Level", "Nothing selected");
+    const p = document.createElement("p"); p.className = "note";
+    p.textContent = "Pick a tool on the left. With Select, click anything to edit it and drag the blue handles. Drag empty ground to orbit, scroll to zoom.";
+    propsEl.append(p, statsEl);
+    return;
+  }
+  if (selected.kind === "wall") {
+    const w = item;
+    head("Wall", `${w.points.length} corners · ${wallLength(w).toFixed(1)} m`);
+    const re = () => { rebuild("wall", w.id); drawOverlay(); };
+    propsEl.append(
+      field("Height", w.height, 1, 8, 0.1, "m", (v) => { w.height = v; re(); }),
+      field("Thickness", w.thickness, 0.2, 1.6, 0.05, "m", (v) => { w.thickness = v; re(); }),
+      check("Corner posts", w.posts, (v) => { w.posts = v; re(); }),
+      check("Battlements", w.battlements, (v) => { w.battlements = v; re(); }),
+      check("Closed loop", w.closed, (v) => { w.closed = v; re(); }));
+    actions.append(button("Add doorway", () => { remember(); const s = wallLength(w) / 2; w.openings.push({ id: nid("o"), s, width: 1.6, height: 2.4, style: "door" }); re(); save(); showProps(); }),
+      button("Delete wall", () => removeSelected(), "danger"));
+    const p = document.createElement("p"); p.className = "note"; p.textContent = "Drag a corner to move it; drag a faint midpoint to add a corner. Alt-click a corner to remove it.";
+    propsEl.append(actions, p);
+  } else if (selected.kind === "opening") {
+    const w = S.walls.find((x) => x.id === selected.wall), o = item;
+    head("Doorway", STYLES[o.style]);
+    const re = () => { rebuild("wall", w.id); drawOverlay(); };
+    propsEl.append(
+      choice("Style", o.style, STYLES, (v) => { o.style = v; re(); propsEl.querySelector(".name").textContent = STYLES[v]; }),
+      field("Width", o.width, 0.8, 4.5, 0.1, "m", (v) => { o.width = v; re(); }),
+      field("Height", o.height, 1.5, 6, 0.1, "m", (v) => { o.height = v; re(); }));
+    actions.append(button("Select wall", () => select({ kind: "wall", id: w.id })), button("Delete doorway", () => removeSelected(), "danger"));
+    const p = document.createElement("p"); p.className = "note"; p.textContent = "Drag the handle, or the doorway itself, to slide it along the wall.";
+    propsEl.append(actions, p);
+  } else if (selected.kind === "bridge") {
+    const b = item, re = () => { rebuild("bridge", b.id); drawOverlay(); };
+    head("Bridge", `${Math.hypot(b.b[0] - b.a[0], b.b[1] - b.a[1]).toFixed(1)} m span`);
+    propsEl.append(field("Width", b.width, 1, 6, 0.1, "m", (v) => { b.width = v; re(); }),
+      field("Deck lift", b.lift, 0, 3, 0.1, "m", (v) => { b.lift = v; re(); }),
+      check("Railings", b.rails, (v) => { b.rails = v; re(); }));
+    actions.append(button("Delete bridge", () => removeSelected(), "danger"));
+    propsEl.append(actions);
+  } else if (selected.kind === "light") {
+    const l = item, re = () => { rebuild("light", l.id); drawOverlay(); };
+    head("Lamp", night ? "Lit" : "Switch to night to see it lit");
+    propsEl.append(choice("Colour", l.color, { warm: "Warm", cool: "Cool" }, (v) => { l.color = v; re(); }),
+      field("Brightness", l.power || 1, 0.2, 3, 0.1, "×", (v) => { l.power = v; placeNightLights(); }));
+    actions.append(button("Delete lamp", () => removeSelected(), "danger"));
+    propsEl.append(actions);
+  } else {
+    const f = item, re = () => { rebuild("feature", f.id); drawOverlay(); };
+    head("Feature", { tower: "Tower", tree: "Tree", crate: "Crate" }[f.kind]);
+    propsEl.append(field("Size", f.scale, 0.4, 2.5, 0.05, "×", (v) => { f.scale = v; re(); }),
+      field("Turn", ((f.rot || 0) * 180 / Math.PI) % 360, 0, 360, 5, "°", (v) => { f.rot = v * Math.PI / 180; re(); }));
+    actions.append(button("Delete", () => removeSelected(), "danger"));
+    propsEl.append(actions);
+  }
+}
+const statsEl = document.createElement("div"); statsEl.className = "stats";
+function updateStats() {
+  const doors = S.walls.reduce((t, w) => t + w.openings.length, 0), metres = S.walls.reduce((t, w) => t + wallLength(w), 0);
+  statsEl.innerHTML = "";
+  [["Walls", `${S.walls.length} · ${metres.toFixed(0)} m`], ["Doorways", doors], ["Bridges", S.bridges.length], ["Lamps", S.lights.length],
+   ["Towers, trees, crates", S.features.length]].forEach(([k, v]) => { const a = document.createElement("span"); a.textContent = k; const b = document.createElement("span"); b.textContent = v; statsEl.append(a, b); });
+}
+function removeSelected() {
+  if (!selected) return;
+  remember();
+  if (selected.kind === "opening") { const w = S.walls.find((x) => x.id === selected.wall); w.openings = w.openings.filter((o) => o.id !== selected.id); rebuild("wall", w.id); }
+  else { const list = kindList(selected.kind); const i = list.findIndex((x) => x.id === selected.id); if (i >= 0) list.splice(i, 1); rebuild(selected.kind, selected.id); }
+  select(null); updateStats(); save();
+}
+
+// ---------------------------------------------------------------- tools and pointer handling
+let tool = "select";
+const hints = {
+  select: "<b>Select</b> · click a wall, doorway or anything else · drag handles to reshape · Delete removes",
+  wall: "<b>Wall</b> · click to place corners · click the first corner to close · Enter or double-click to finish · Esc cancels",
+  door: "<b>Doorway</b> · click on a wall to cut a doorway there",
+  bridge: "<b>Bridge</b> · click where it starts, then where it ends",
+  light: "<b>Lamp</b> · click to place · switch to night (N) to see them lit",
+  tower: "<b>Tower</b> · click to place", tree: "<b>Tree</b> · click to place", crate: "<b>Crate</b> · click to place",
+};
+const hintEl = document.getElementById("hint");
+function setTool(t) {
+  tool = t; drawing = []; bridgeStart = null;
+  document.querySelectorAll(".tool").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tool === t)));
+  hintEl.innerHTML = hints[t]; ghost.visible = false; drawOverlay();
+}
+document.querySelectorAll(".tool").forEach((b) => b.addEventListener("click", () => setTool(b.dataset.tool)));
+
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+function toMouse(e) { const r = renderer.domElement.getBoundingClientRect(); mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(mouse, camera); }
+function snapV(v) { return document.getElementById("snap").checked ? Math.round(v * 2) / 2 : Math.round(v * 100) / 100; }
+function groundPoint() { const hit = ray.intersectObject(ground, false)[0]; return hit ? [snapV(hit.point.x), snapV(hit.point.z)] : null; }
+// Objects rebuilt since the last frame have stale world matrices until it is drawn, and a
+// ray tests against those — so bring them up to date before any pick.
+function fresh(group) { group.updateMatrixWorld(true); }
+function pickWorld() {
+  fresh(world);
+  const hits = ray.intersectObjects(world.children, true);
+  for (const h of hits) { let o = h.object; while (o && !o.userData.pick) o = o.parent; if (o) return { pick: o.userData.pick, point: h.point }; }
+  return null;
+}
+function pickHandle() { fresh(overlay); const h = ray.intersectObjects(overlay.children, false).find((x) => x.object.userData.handle); return h ? Object.assign({ y: h.object.position.y }, h.object.userData.handle) : null; }
+// Drags run on a level plane at the height of whatever was grabbed: the cursor always
+// meets it (the ground can be missed past its edge), and the grabbed point stays under it.
+const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), planeHit = new THREE.Vector3();
+function planePoint(y) { dragPlane.constant = -y; return ray.ray.intersectPlane(dragPlane, planeHit) ? [planeHit.x, planeHit.z] : null; }
+
+// a ghost of what the tool would place, following the pointer
+const ghost = new THREE.Group(); ghost.visible = false; scene.add(ghost);
+function setGhost(kind) {
+  ghost.clear();
+  const item = kind === "light" ? { id: "g", p: [0, 0], color: "warm" } : { id: "g", kind, p: [0, 0], rot: 0, scale: 1 };
+  const g = kind === "light" ? buildLamp(item) : buildFeature(item);
+  g.position.set(0, 0, 0); g.traverse((o) => { if (o.isMesh) { o.material = M.ghost; o.castShadow = false; } });
+  ghost.add(g); ghost.userData.kind = kind;
+}
+
+let drawing = [], bridgeStart = null, drag = null, downAt = null, lastClick = 0;
+function drawWallPreview() {
+  const pts = drawing.map((p) => new THREE.Vector3(p[0], groundY(p[0], p[1]) + 0.15, p[1]));
+  if (hover) pts.push(new THREE.Vector3(hover[0], groundY(hover[0], hover[1]) + 0.15, hover[1]));
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x2e6a9e, depthTest: false }));
+  line.renderOrder = 9; overlay.add(line);
+  drawing.forEach((p, i) => sphere(p[0], groundY(p[0], p[1]) + 0.15, p[1], i === 0 ? 0.45 : 0.3, M.handle, null));
+}
+let hover = null;
+
+renderer.domElement.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  toMouse(e); downAt = { x: e.clientX, y: e.clientY };
+  if (tool !== "select") return;
+  const h = pickHandle();
+  if (h) {
+    if (h.type === "vertex" && e.altKey) {
+      const w = S.walls.find((x) => x.id === h.wall);
+      if (w.points.length > 2) { remember(); w.points.splice(h.index, 1); fixOpenings(w); rebuild("wall", w.id); drawOverlay(); save(); }
+      return;
+    }
+    const gp = planePoint(h.y);
+    if (!gp) return;
+    remember();
+    if (h.type === "insert") {
+      const w = S.walls.find((x) => x.id === h.wall), a = w.points[h.index - 1], b = w.points[h.index % w.points.length];
+      const mid = [snapV((a[0] + b[0]) / 2), snapV((a[1] + b[1]) / 2)];
+      w.points.splice(h.index, 0, mid);
+      drag = { type: "vertex", wall: w.id, index: h.index, ref: mid };
+    } else {
+      drag = Object.assign({}, h, { ref: handleRef(h) });
+    }
+    // handles float above what they move, so the pointer meets the ground somewhere else:
+    // keep that offset, or the corner would jump to the pointer on the first move
+    drag.planeY = h.y;
+    if (drag.ref) drag.offset = [drag.ref[0] - gp[0], drag.ref[1] - gp[1]];
+    controls.enabled = false; e.preventDefault(); return;
+  }
+  const hit = pickWorld();
+  if (hit && selected && samePick(hit.pick, selected)) {        // drag what is already selected
+    remember();
+    const y = hit.point.y;
+    drag = hit.pick.kind === "opening" ? { type: "opening", wall: hit.pick.wall, id: hit.pick.id, planeY: y }
+      : { type: "body", kind: hit.pick.kind, id: hit.pick.id, planeY: y, from: planePoint(y) };
+    controls.enabled = false; e.preventDefault();
+  }
+});
+function samePick(a, b) { return a && b && a.kind === b.kind && a.id === b.id; }
+function handleRef(h) {
+  if (h.type === "vertex") return S.walls.find((x) => x.id === h.wall).points[h.index].slice();
+  if (h.type === "end") return S.bridges.find((x) => x.id === h.id)[h.end].slice();
+  if (h.type === "move") return kindList(h.kind).find((x) => x.id === h.id).p.slice();
+  return null;                   // a doorway follows the pointer along its wall
+}
+
+renderer.domElement.addEventListener("pointermove", (e) => {
+  toMouse(e);
+  if (drag) { const dp = planePoint(drag.planeY); if (dp) applyDrag(dp); return; }
+  const gp = groundPoint();
+  hover = gp;
+  if (tool === "wall" && drawing.length) drawOverlay();
+  if (["light", "tower", "tree", "crate"].includes(tool) && gp) {
+    if (ghost.userData.kind !== tool) setGhost(tool);
+    ghost.visible = true; ghost.position.set(gp[0], groundY(gp[0], gp[1]), gp[1]);
+  } else ghost.visible = false;
+  renderer.domElement.style.cursor = tool === "select" ? (pickHandle() ? "grab" : pickWorld() ? "pointer" : "default") : "crosshair";
+});
+
+window.addEventListener("pointerup", (e) => {
+  if (drag) { drag = null; controls.enabled = true; save(); updateStats(); showProps(); return; }
+  if (!downAt || e.button !== 0) return;
+  const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y); downAt = null;
+  if (moved > 5 || e.target !== renderer.domElement) return;       // that was an orbit, not a click
+  toMouse(e); click(e);
+});
+
+function click(e) {
+  const gp = groundPoint(), now = performance.now(), double = now - lastClick < 320; lastClick = now;
+  if (tool === "select") {
+    const hit = pickWorld();
+    select(hit ? hit.pick : null); return;
+  }
+  if (tool === "wall") {
+    if (double && drawing.length >= 2) { finishWall(false); return; }
+    if (!gp) return;
+    if (drawing.length >= 3 && Math.hypot(gp[0] - drawing[0][0], gp[1] - drawing[0][1]) < 0.9) { finishWall(true); return; }
+    const last = drawing[drawing.length - 1];
+    if (!last || Math.hypot(gp[0] - last[0], gp[1] - last[1]) > 0.3) drawing.push(gp);
+    drawOverlay(); return;
+  }
+  if (tool === "door") {
+    const hit = pickWorld();
+    if (!hit || (hit.pick.kind !== "wall" && hit.pick.kind !== "opening")) { flash("Click on a wall to put a doorway in it."); return; }
+    const w = S.walls.find((x) => x.id === (hit.pick.wall || hit.pick.id));
+    remember();
+    const o = { id: nid("o"), s: nearestOnWall(w, hit.point.x, hit.point.z).s, width: 1.6, height: Math.min(2.4, w.height - 0.4), style: "door" };
+    w.openings.push(o); rebuild("wall", w.id); save(); select({ kind: "opening", id: o.id, wall: w.id }); updateStats(); return;
+  }
+  if (!gp) return;
+  if (tool === "bridge") {
+    if (!bridgeStart) { bridgeStart = gp; flash("Now click where the bridge ends."); return; }
+    remember();
+    const b = { id: nid("b"), a: bridgeStart, b: gp, width: 2.4, lift: 0.3, rails: true };
+    bridgeStart = null; S.bridges.push(b); rebuild("bridge", b.id); save(); select({ kind: "bridge", id: b.id }); updateStats(); return;
+  }
+  remember();
+  if (tool === "light") { const l = { id: nid("l"), p: gp, color: "warm", power: 1 }; S.lights.push(l); rebuild("light", l.id); select({ kind: "light", id: l.id }); }
+  else { const f = { id: nid("f"), kind: tool, p: gp, rot: Math.random() * 6.28, scale: tool === "tree" ? 0.8 + Math.random() * 0.5 : 1 }; S.features.push(f); rebuild("feature", f.id); select({ kind: "feature", id: f.id }); }
+  save(); updateStats();
+}
+
+function finishWall(closed) {
+  if (drawing.length < 2) return;
+  remember();
+  const w = { id: nid("w"), points: drawing.slice(), closed, height: 3, thickness: 0.5, posts: closed, battlements: false, openings: [] };
+  S.walls.push(w); drawing = []; rebuild("wall", w.id); save(); updateStats();
+  select({ kind: "wall", id: w.id });
+}
+
+function fixOpenings(w) { const L = wallLength(w); w.openings.forEach((o) => { o.s = Math.min(Math.max(o.s, 0), L); }); }
+
+function applyDrag(gp) {
+  if (drag.offset) gp = [snapV(gp[0] + drag.offset[0]), snapV(gp[1] + drag.offset[1])];
+  if (drag.type === "vertex") {
+    const w = S.walls.find((x) => x.id === drag.wall);
+    w.points[drag.index] = gp; fixOpenings(w); rebuild("wall", w.id);
+  } else if (drag.type === "opening") {
+    const w = S.walls.find((x) => x.id === drag.wall), o = w.openings.find((x) => x.id === drag.id);
+    o.s = nearestOnWall(w, gp[0], gp[1]).s; rebuild("wall", w.id);
+  } else if (drag.type === "end") {
+    const b = S.bridges.find((x) => x.id === drag.id); b[drag.end] = gp; rebuild("bridge", b.id);
+  } else if (drag.type === "move") {
+    const item = kindList(drag.kind).find((x) => x.id === drag.id); item.p = gp; rebuild(drag.kind, item.id);
+  } else if (drag.type === "body") {
+    if (!drag.from) { drag.from = gp; return; }
+    const dx = gp[0] - drag.from[0], dz = gp[1] - drag.from[1];
+    if (!dx && !dz) return;
+    drag.from = gp;
+    const item = kindList(drag.kind).find((x) => x.id === drag.id);
+    if (drag.kind === "wall") item.points = item.points.map((p) => [p[0] + dx, p[1] + dz]);
+    else if (drag.kind === "bridge") { item.a = [item.a[0] + dx, item.a[1] + dz]; item.b = [item.b[0] + dx, item.b[1] + dz]; }
+    else item.p = [item.p[0] + dx, item.p[1] + dz];
+    rebuild(drag.kind, item.id);
+  }
+  drawOverlay();
+}
+
+let flashTimer = null;
+function flash(text) { hintEl.textContent = text; clearTimeout(flashTimer); flashTimer = setTimeout(() => { hintEl.innerHTML = hints[tool]; }, 2200); }
+
+window.addEventListener("keydown", (e) => {
+  if (e.target.closest && e.target.closest("input, textarea, select, dialog")) return;
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); redo(); return; }
+  if (k === "escape") { if (drawing.length) { drawing = []; drawOverlay(); } else { bridgeStart = null; select(null); } return; }
+  if (k === "enter" && tool === "wall") { finishWall(false); return; }
+  if (k === "delete" || k === "backspace") { removeSelected(); return; }
+  if (k === "r" && selected && selected.kind === "feature") { remember(); const f = findThing(selected); f.rot = (f.rot || 0) + Math.PI / 12; rebuild("feature", f.id); save(); showProps(); return; }
+  const map = { v: "select", w: "wall", d: "door", b: "bridge", l: "light", t: "tower", e: "tree", c: "crate" };
+  if (map[k]) setTool(map[k]);
+  if (k === "n") setNight(!night);
+});
+document.getElementById("undo").addEventListener("click", undo);
+document.getElementById("redo").addEventListener("click", redo);
+document.getElementById("night").addEventListener("click", () => setNight(!night));
+
+// ---------------------------------------------------------------- layout in and out
+const dlg = document.getElementById("layoutDialog"), txt = document.getElementById("layoutText"), msg = document.getElementById("layoutMsg");
+document.getElementById("layout").addEventListener("click", () => { txt.value = JSON.stringify(S, null, 1); msg.textContent = ""; dlg.showModal(); });
+document.getElementById("closeLayout").addEventListener("click", () => dlg.close());
+document.getElementById("copyLayout").addEventListener("click", () => {
+  navigator.clipboard.writeText(txt.value).then(() => { msg.textContent = "Copied."; }, () => { txt.select(); msg.textContent = "Copying is blocked here; the text is selected, so press Ctrl+C."; });
+});
+document.getElementById("loadLayout").addEventListener("click", () => {
+  try {
+    const s = JSON.parse(txt.value);
+    if (!s || !Array.isArray(s.walls)) throw new Error("it has no walls list");
+    ["bridges", "lights", "features"].forEach((k) => { if (!Array.isArray(s[k])) s[k] = []; });
+    s.walls.forEach((w) => { w.openings = w.openings || []; });
+    remember(); S = s; select(null); rebuildAll(); save(); msg.textContent = "Loaded."; dlg.close();
+  } catch (err) { msg.textContent = "That is not a layout: " + err.message; }
+});
+document.getElementById("resetLayout").addEventListener("click", () => { remember(); S = clone(SAMPLE); select(null); rebuildAll(); save(); dlg.close(); });
+
+// ---------------------------------------------------------------- go
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+resize(); setNight(false); rebuildAll(); setTool("select"); showProps();
+statusEl.textContent = "Autosaves in this browser";
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+// a small handle for automated checks of the page
+window.rampart = {
+  state: () => S, select, setTool, setNight, rebuildAll, undo,
+  screen(x, z, up) {             // where a point on the ground (plus a height) is on screen
+    const v = new THREE.Vector3(x, groundY(x, z) + (up || 0), z).project(camera), r = renderer.domElement.getBoundingClientRect();
+    return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height];
+  },
+  probe(px, py) {                // what is under a point on screen, as the editor sees it
+    toMouse({ clientX: px, clientY: py });
+    const w = pickWorld();
+    const r = renderer.domElement.getBoundingClientRect();
+    const handles = overlay.children.filter((o) => o.userData.handle).map((o) => {
+      const v = o.position.clone().project(camera);
+      return [o.userData.handle.type, Math.round(r.left + (v.x + 1) / 2 * r.width), Math.round(r.top + (1 - v.y) / 2 * r.height)];
+    });
+    return { handle: pickHandle(), pick: w && w.pick, ground: groundPoint(), dragging: !!drag, drag, tool, handles,
+             canvas: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] };
+  },
+};
+})();
+</script>
