@@ -28,14 +28,14 @@ start: when Blender is open with the add-on enabled, the tools find it by themse
 | a building from a floor-plan spec (experimental) | `plan_site` → `build_plan` → `place_equipment` → `verify` |
 | a web page with sliders | `web_page`, `web_shape` |
 
-`code_node` makes what a person gets from Add › Mesh › Code Mesh / Code Shape / Code
-Particles: an object whose Geometry Nodes tree holds one code node wired to the output,
-with the code's sliders as inputs on that node. The result names the object, its tree
+`code_node` makes what a person gets from Shift A › CodeNodes: an object whose Geometry
+Nodes tree holds one code node (plus a Make Real node after a GPU node, unless
+`make_real=false`), with the code's sliders and the node's settings as inputs on that node. The result names the object, its tree
 (`tree`) and the node group (`node`), so `nodes_read(tree)` and `nodes_edit(tree, ...)`
 can wire it into more nodes (a Transform, a Join, an Instance on Points). Update it with
 `code_node(object=..., code=..., values={...})`.
 
-## The three kinds of code
+## The kinds of code
 
 - **shape** (the shape language, not GLSL): the best choice for manufactured things —
   lamps, bottles, vases, columns, furniture parts, walls. Exact edges, clean quads, real
@@ -47,9 +47,18 @@ can wire it into more nodes (a Transform, a Join, an Instance on Points). Update
 - **mesh** (GLSL): `float sdf(vec3 p)` returns the signed distance to the surface in
   metres (negative inside). Best for organic, blended, carved forms (smin blends, gyroids).
   It rounds sharp corners and has no useful UVs. `// @param name default min max`.
-- **particles** (GLSL): `void spawn(inout Particle p)` and `void update(inout Particle p,
-  float dt)`; Particle has position, velocity, age, life, seed. Shade with the `speed`
-  attribute, not `velocity` (Blender reserves that name).
+- **particles** (GLSL, GPU Particles): `void spawn(inout Particle p)` and `void update(inout
+  Particle p, float dt)`; Particle has position, velocity, age, life, seed. Optional `vec4
+  look(Particle p)` colours them live. `emitPoint(seed)` / `emitNormal(seed)` spawn on the
+  node's Emit From object. Drawn live on the GPU (millions are fine); Make Real turns them into
+  points with `velocity`, `speed`, `age`, `life`. Shade with `speed`, not `velocity`.
+- **deform** (GLSL, GPU Mesh): `void deform(inout Vertex v)` runs on every vertex of the mesh
+  wired into the node's Mesh input; Vertex has position, normal, color (vec4), value, index.
+  Make Real gives the same topology with new positions and `color` / `value` attributes.
+
+GPU nodes (mesh, particles, deform) are drawn live in the viewport and are not real
+geometry until a Make Real node follows them; `code_node` adds one by default. `render()`
+includes live-only GPU nodes too (they're made real just for that frame).
 
 Mistakes come back as `{"ok": false, "error": "line 3: ..."}` with the line in the code
 you wrote. Read it, fix the code, call again. Slider values survive code edits.

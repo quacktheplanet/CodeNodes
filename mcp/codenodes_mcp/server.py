@@ -488,18 +488,29 @@ def use_blender(port: int) -> dict:
 
 @mcp.tool()
 def code_node(kind: str = "mesh", code: str | None = None, template: str | None = None,
-              name: str | None = None, object: str | None = None, values: dict | None = None) -> dict:
+              name: str | None = None, object: str | None = None, values: dict | None = None,
+              make_real: bool = True) -> dict:
     """Geometry made by code as a node inside Geometry Nodes, the way a person makes it
-    (Add › Mesh › Code Mesh / Shape / Particles). The code's sliders become inputs on the node.
+    (Shift A › CodeNodes). The code's sliders and the node's settings are inputs on the node.
 
-    New: leave `object` out (or give a new name) and pass kind ("mesh" = `float sdf(vec3 p)`,
-    "shape" = the shape language, "particles" = spawn/update) with `code` or a `template`
-    ("Donut", "Rounded Box", "Gyroid Ball", "Blob"; "Desk Lamp", "Vase"; "Swirl", "Fountain").
-    Update: pass the `object` it returned, with new `code` and/or `values` ({"major": 1.2}).
-    The result names the object, its Geometry Nodes tree and the node, so nodes_edit and
-    nodes_read can wire it into more nodes. Errors in the code come back with the line.
+    New: leave `object` out (or give a new name, which the object gets exactly) and pass kind
+    with `code` or a `template`:
+      "particles" (GPU Particles: `spawn`/`update`, optional `vec4 look(Particle p)`):
+          "Galaxy", "Flow", "Attractor", "Swirl", "Fountain"
+      "mesh" (GPU Surface: `float sdf(vec3 p)`, optional `vec3 color(vec3 p)`):
+          "Castle", "Planet", "Saturn", "Donut", "Rounded Box", "Gyroid Ball", "Blob"
+      "deform" (GPU Mesh: `void deform(inout Vertex v)` on the mesh wired into it):
+          "Wave", "Noise Displace", "Twist"
+      "shape" (the shape language): "Desk Lamp", "Vase"
+    GPU nodes draw live on the GPU; `make_real` (default true) puts a Make Real node after a new
+    one so it is real geometry that renders and later nodes can use.
+    Update: pass the `object` it returned, with new `code` and/or `values` by input name
+    ({"size": 3.0, "Count": 500000, "Emit From": "Plane", "Resolution": 160}; Resolution, Max
+    Points and When live on the Make Real node and are found there).
+    The result names the object, its tree and the node, so nodes_edit and nodes_read can wire
+    it into more nodes. Errors in the code come back with the line.
     """
-    args = {"kind": kind}
+    args = {"kind": kind, "make_real": make_real}
     for key, value in (("code", code), ("template", template), ("name", name),
                        ("object", object), ("values", values)):
         if value is not None:

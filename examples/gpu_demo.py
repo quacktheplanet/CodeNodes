@@ -152,10 +152,10 @@ def build():
     freal = gn_link.insert_make_real(ftree, fnode)
     inst = ftree.nodes.new("GeometryNodeInstanceOnPoints")
     ico = ftree.nodes.new("GeometryNodeMeshIcoSphere")
-    ico.inputs["Radius"].default_value = 0.018
+    ico.inputs["Radius"].default_value = 0.011
     ico.inputs["Subdivisions"].default_value = 1
     fmat = ftree.nodes.new("GeometryNodeSetMaterial")
-    fmat.inputs["Material"].default_value = material("Firefly Glow", color=(1.0, 0.7, 0.25), emission=12.0)
+    fmat.inputs["Material"].default_value = material("Firefly Glow", color=(1.0, 0.42, 0.08), emission=4.0)
     ftree.links.remove(next(l for l in ftree.links if l.to_node == fgout))
     ftree.links.new(freal.outputs["Geometry"], inst.inputs["Points"])
     ftree.links.new(ico.outputs["Mesh"], inst.inputs["Instance"])
@@ -167,8 +167,8 @@ def build():
     gn_link.sync()
     # settings on the nodes themselves
     creal.inputs["When"].default_value = "Only for Render"
-    freal.inputs["Max Points"].default_value = 6000
-    fnode.inputs["Count"].default_value = 6000
+    freal.inputs["Max Points"].default_value = 2500
+    fnode.inputs["Count"].default_value = 2500
     fnode.inputs["Emit From"].default_value = plateau
     fnode.inputs["Pre-warm"].default_value = 4.0
     fnode.inputs["Colour By"].default_value = "Code"
@@ -219,7 +219,7 @@ def views(win):
         if area.type == 'VIEW_3D':
             sp = area.spaces.active
             sp.shading.type = 'SOLID'
-            sp.shading.color_type = 'ATTRIBUTE'
+            sp.shading.color_type = 'VERTEX'          # the plateau's GPU-made colour attribute
             sp.shading.light = 'STUDIO'
             sp.overlay.show_floor = False
             sp.overlay.show_axis_x = sp.overlay.show_axis_y = False

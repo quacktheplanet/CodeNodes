@@ -352,11 +352,17 @@ def render(path=None, samples=48, width=800, engine='CYCLES', denoise=True, aspe
     s.render.resolution_y = max(1, int(width * aspect))
     out = _out_path(path, "render")
     s.render.filepath = out
+    from . import render_ops
+    sources = render_ops.gpu_sources()
+    temporary = []
     try:
+        # GPU nodes take turns with the renderer: made real first, then this frame renders
+        temporary = render_ops.prepare_frame(s, s.frame_current, sources)
         bpy.ops.render.render(write_still=True)
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     finally:
+        render_ops.finish(sources, temporary)
         s.render.engine, s.render.resolution_x, s.render.resolution_y, s.render.filepath = previous
     return {"ok": True, "path": out, "frame": s.frame_current, "engine": engine,
             "exists": os.path.exists(out)}

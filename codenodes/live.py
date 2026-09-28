@@ -100,6 +100,13 @@ def build_deform(obj):
             attr = new.attributes.new(name, kind, 'POINT')
         attr.data.foreach_set("color" if kind == 'FLOAT_COLOR' else "value",
                               np.ascontiguousarray(data, np.float32).ravel())
+    try:                                    # the colour shows in Solid view (Attribute) and renders by default
+        ca = new.color_attributes.get("color")
+        if ca is not None:
+            new.color_attributes.active_color = ca
+            new.color_attributes.render_color_index = new.color_attributes.active_color_index
+    except (AttributeError, TypeError):
+        pass
     new.update()
     old = obj.data
     old_name = old.name

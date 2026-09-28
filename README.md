@@ -62,6 +62,12 @@ After installing (see [Install](#install)):
 | **GPU Mesh** | `void deform(inout Vertex v)`, run on every vertex of the mesh wired into it | Wave, Noise Displace, Twist |
 | **Code Shape** | a small shape language (profiles, revolve, extrude, sweep); real geometry straight away | Desk Lamp, Vase |
 
+![The demo scene in the Geometry Nodes workspace: GPU Particles → Make Real → Instance on Points → Set Material, with the live castle in the viewport](docs/gpu_workspace.jpg)
+
+*The demo open in Blender. The fireflies' tree runs GPU Particles (emitting from the Plateau) → Make
+Real → Instance on Points → Set Material. Every setting is on the nodes, and the castle is raymarched
+live in the viewport.*
+
 **Live, and made real.** A GPU node on its own draws its result straight from GPU memory into the
 viewport:
 - a million particles at about 190 fps (4.2 million at about 160)
