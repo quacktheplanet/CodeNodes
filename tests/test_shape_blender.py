@@ -225,7 +225,94 @@ sweep
     bpy.data.images.remove(img)
     check(float(px.reshape(-1, 4)[:, :3].mean()) > 0.02, "and the picture is not black")
 
+    closed_rings_and_checked_booleans()
     print(f"\nALL {_checks} CHECKS PASSED", flush=True)
+
+
+RING_ROCKET = """
+part body
+  profile
+    move 0, 0
+    line 0.3, 0
+    line 0.3, 1.2
+    line 0, 1.6
+  revolve segments 32
+part ring
+  profile
+    move -0.06, -0.06
+    line 0.06, -0.06
+    line 0.06, 0.06
+    line -0.06, 0.06
+    close
+  path
+    helix radius 0.3 pitch 0 turns 1
+  sweep
+  translate z 0.4
+part port subtract
+  profile
+    move 0, 0
+    line 0.12, 0
+    line 0.12, 1
+    line 0, 1
+    close
+  revolve segments 24
+  rotate x 90
+  translate z 0.9
+"""
+
+
+def closed_rings_and_checked_booleans():
+    """A ring swept on a closed helix, plus a subtract part: the booleans keep every part.
+    And a boolean fed a broken solid is an error that names the part, not a quiet fragment."""
+    from codenodes import shape_build
+    from codenodes.shapes import ShapeError, parse
+    r = api.code_to_shape(RING_ROCKET, name="RingRocket")
+    check(r["ok"], f"a body + a ring on a closed helix + a subtract builds ({r.get('error')})")
+    me = bpy.data.objects["RingRocket"].data
+    co = np.empty(len(me.vertices) * 3)
+    me.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    lo, hi = co.min(axis=0), co.max(axis=0)
+    check(abs(hi[2] - 1.6) < 1e-3 and abs(lo[2]) < 1e-3, f"the body's full height is kept (z {lo[2]:.3f}..{hi[2]:.3f})")
+    check(abs(hi[0] - 0.36) < 5e-3, f"and so is the ring around it (reaches x {hi[0]:.3f}, wants 0.36)")
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    open_edges = sum(1 for e in bm.edges if not e.is_manifold)
+    volume = bm.calc_volume()
+    bm.free()
+    check(open_edges == 0, f"and the result is manifold ({open_edges} open edges)")
+    body = parse(RING_ROCKET.split("part ring")[0]).build_parts({})[0].solid
+    body_volume = abs(float(shapes.solids._signed_volume(body))) / 6
+    check(volume > body_volume * 0.95, f"with the body's volume kept ({volume:.4f} vs body {body_volume:.4f} m³)")
+    # a profile that crosses itself: Blender's EXACT boolean returns an empty mesh for it,
+    # which used to be handed back as a successful (and empty) shape
+    eight = RING_ROCKET.split("part ring")[0] + """
+part eight
+  profile
+    move 0.1, 0.2
+    line 0.5, 0.6
+    line 0.5, 0.2
+    line 0.1, 0.6
+    close
+  revolve segments 24
+""" + "part port" + RING_ROCKET.split("part port")[1]
+    r = api.code_to_shape(eight, name="BrokenRocket")
+    check(not r["ok"] and "part 'eight'" in (r.get("error") or ""),
+          f"a broken solid gives an error naming its part, not a partial mesh ({(r.get('error') or 'no error')[:110]})")
+    try:
+        shape_build._combine(parse(eight).build_parts({}), smooth=False)
+        msg = "no error"
+    except ShapeError as exc:
+        msg = str(exc)
+    check("empty" in msg, "the error says what went wrong")
+    check(shape_build.check_boolean('UNION', (1.0, (np.zeros(3), np.ones(3))), (0.5, (np.zeros(3), np.ones(3))),
+                                    (0.1, (np.zeros(3), np.ones(3)))) != "",
+          "a union that lost most of the volume is flagged")
+    check(shape_build.check_boolean('DIFFERENCE', (1.0, (np.zeros(3), np.ones(3))), (0.2, (np.zeros(3), np.ones(3))),
+                                    (0.85, (np.zeros(3), np.ones(3)))) == "",
+          "an ordinary cut is not")
+    check(shape_build.check_boolean('DIFFERENCE', (1.0, (np.zeros(3), np.ones(3))), (0.2, (np.zeros(3), np.ones(3))),
+                                    (0.0, None)) != "", "an empty result is flagged")
 
 
 def main():

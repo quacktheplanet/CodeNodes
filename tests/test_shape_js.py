@@ -119,6 +119,62 @@ part row subtract
   scale -1, 1, 1
   array 3 x 0.3
 """, [{}, {"n": 11}]),
+    "named components (rotate x, translate z, scale z)": ("""
+param size 1 0.5 3
+part rod
+  profile
+    move 0, 0
+    line 0.1, 0
+    line 0.1, size
+    line 0, size
+    close
+  revolve segments 16
+  rotate x 90
+  translate z 1
+part cap
+  profile
+    move 0, 0
+    line 0.2, 0
+    line 0.2, 0.1
+    line 0, 0.1
+    close
+  revolve segments 12
+  scale z 2
+  translate y 1 z 2
+  array 3 x 0.5
+part knob
+  profile
+    move 0, 0
+    line 0.05, 0
+    line 0.05, 0.05
+    line 0, 0.05
+    close
+  revolve segments 8
+  scale 2
+""", [{}, {"size": 2}]),
+    "ring on a closed helix, and a twisted ring": ("""
+param r 0.5 0.2 1
+part ring
+  profile
+    move -0.05, -0.05
+    line 0.05, -0.05
+    line 0.05, 0.05
+    line -0.05, 0.05
+    close
+  path
+    helix radius r pitch 0 turns 1
+  sweep
+part band
+  profile
+    move -0.02, -0.08
+    line 0.02, -0.08
+    line 0.02, 0.08
+    line -0.02, 0.08
+    close
+  path
+    helix radius r * 1.5 pitch 0 turns 1 steps 48
+  sweep twist 360
+""", [{}, {"r": 0.8}]),
     "if-else and ranges": ("""
 param bumps 3 1 8
 part wavy

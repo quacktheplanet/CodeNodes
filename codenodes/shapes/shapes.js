@@ -538,31 +538,59 @@ function rotateAbout(v, axis, angle) {
   const c = Math.cos(angle), s = Math.sin(angle), cr = cross3(axis, v), d = dot3(axis, v) * (1 - c);
   return [v[0] * c + cr[0] * s + axis[0] * d, v[1] * c + cr[1] * s + axis[1] * d, v[2] * c + cr[2] * s + axis[2] * d];
 }
-function frames(points) {
+// Parallel-transport frames; on a closed path the turn left over after going round is
+// spread evenly so the ends meet (as solids.py does).
+function frames(points, closed = false) {
   const n = points.length, tan = new Array(n);
-  tan[0] = sub3(points[1], points[0]);
-  tan[n - 1] = sub3(points[n - 1], points[n - 2]);
-  for (let i = 1; i < n - 1; i++) tan[i] = sub3(points[i + 1], points[i - 1]);
+  if (closed) {
+    for (let i = 0; i < n; i++) tan[i] = sub3(points[(i + 1) % n], points[(i - 1 + n) % n]);
+  } else {
+    tan[0] = sub3(points[1], points[0]);
+    tan[n - 1] = sub3(points[n - 1], points[n - 2]);
+    for (let i = 1; i < n - 1; i++) tan[i] = sub3(points[i + 1], points[i - 1]);
+  }
   for (let i = 0; i < n; i++) tan[i] = scale3(tan[i], 1 / Math.max(norm3(tan[i]), 1e-12));
   let seed = [0, 0, 1];
   if (Math.abs(dot3(seed, tan[0])) > 0.9) seed = [1, 0, 0];
   const normal = new Array(n), first = cross3(seed, tan[0]);
   normal[0] = scale3(first, 1 / Math.max(norm3(first), 1e-12));
-  for (let i = 1; i < n; i++) {
-    const cr = cross3(tan[i - 1], tan[i]), len = norm3(cr);
-    let nrm = len < 1e-9 ? normal[i - 1] : rotateAbout(normal[i - 1], scale3(cr, 1 / len), Math.atan2(len, dot3(tan[i - 1], tan[i])));
-    nrm = sub3(nrm, scale3(tan[i], dot3(nrm, tan[i])));
-    normal[i] = scale3(nrm, 1 / Math.max(norm3(nrm), 1e-12));
+  const carry = (prev, t0, t1) => {
+    const cr = cross3(t0, t1), len = norm3(cr);
+    let nrm = len < 1e-9 ? prev.slice() : rotateAbout(prev, scale3(cr, 1 / len), Math.atan2(len, dot3(t0, t1)));
+    nrm = sub3(nrm, scale3(t1, dot3(nrm, t1)));
+    return scale3(nrm, 1 / Math.max(norm3(nrm), 1e-12));
+  };
+  for (let i = 1; i < n; i++) normal[i] = carry(normal[i - 1], tan[i - 1], tan[i]);
+  if (closed) {
+    const back = carry(normal[n - 1], tan[n - 1], tan[0]);
+    const phi = Math.atan2(dot3(cross3(back, normal[0]), tan[0]), dot3(back, normal[0]));
+    for (let i = 1; i < n; i++) normal[i] = rotateAbout(normal[i], tan[i], phi * i / n);
   }
   return [tan, normal, tan.map((t, i) => cross3(t, normal[i]))];
 }
 
+function isClosedPath(spine) {
+  if (spine.length < 4) return false;
+  let size = 0;
+  for (let k = 0; k < 3; k++) {
+    let lo = Infinity, hi = -Infinity;
+    for (const p of spine) { lo = Math.min(lo, p[k]); hi = Math.max(hi, p[k]); }
+    size = Math.max(size, hi - lo);
+  }
+  return norm3(sub3(spine[spine.length - 1], spine[0])) <= 1e-6 * Math.max(size, 1e-3);
+}
+
+// A path that ends where it starts becomes a closed loop with no end caps.
 function sweep(profile, path, twist = 0, scaleEnd = 1, cap = true) {
-  const points = profile.finish(), spine = path.finish();
+  const points = profile.finish();
+  let spine = path.finish();
+  const loop = isClosedPath(spine) && Math.abs(scaleEnd - 1) < 1e-9;
+  if (loop) spine = spine.slice(0, -1);
   const rings = spine.length, n = points.length;
   checkSize(rings, n);
-  const [, normal, binormal] = frames(spine);
-  const steps = linspace(0, 1, rings), raw = new Float64Array(rings * n * 3);
+  const [, normal, binormal] = frames(spine, loop);
+  const steps = loop ? Array.from({ length: rings }, (_, r) => r / rings) : linspace(0, 1, rings);
+  const raw = new Float64Array(rings * n * 3);
   for (let r = 0; r < rings; r++) {
     const a = twist * Math.PI / 180 * steps[r], s = 1 + (scaleEnd - 1) * steps[r];
     const ca = Math.cos(a), sa = Math.sin(a);
@@ -573,8 +601,8 @@ function sweep(profile, path, twist = 0, scaleEnd = 1, cap = true) {
       for (let k = 0; k < 3; k++) raw[o + k] = spine[r][k] + rx * normal[r][k] + ry * binormal[r][k];
     }
   }
-  const solid = new Solid(raw, stitch(rings, n, false, profile.closed), []);
-  if (cap && profile.closed) addFanCaps(solid, rings, n);
+  const solid = new Solid(raw, stitch(rings, n, loop, profile.closed), []);
+  if (cap && profile.closed && !loop) addFanCaps(solid, rings, n);
   return orientOutward(solid);
 }
 
@@ -744,12 +772,18 @@ function splitArgs(text, keywords = []) {
   return [head ? commas(head) : [], named];
 }
 
+// Three numbers from `x, y, z` (or one positional number meaning all three, as in
+// `scale 2`), or from named components (`rotate x 90`, `translate y 1 z 2`), where the
+// ones left out keep the default (0 for moves and turns, 1 for scale).
 function vector(positional, named, scope, dflt, line) {
-  let bits = positional.length ? positional : ["x", "y", "z"].map((k) => named[k]).filter((b) => b !== undefined);
-  if (!bits.length) return dflt.slice();
-  if (bits.length === 1) { const v = number(bits[0], scope, "value"); return [v, v, v]; }
-  if (bits.length !== 3) fail(line, `expected three numbers, got ${bits.length}`);
-  return bits.map((b) => number(b, scope, "value"));
+  if (positional.length) {
+    if (positional.length === 1) { const v = number(positional[0], scope, "value"); return [v, v, v]; }
+    if (positional.length !== 3) fail(line, `expected three numbers, got ${positional.length}`);
+    return positional.map((b) => number(b, scope, "value"));
+  }
+  const keys = ["x", "y", "z"];
+  if (!keys.some((k) => named[k] !== undefined && named[k] !== null)) return dflt.slice();
+  return keys.map((k, i) => (named[k] !== undefined && named[k] !== null ? number(named[k], scope, k) : dflt[i]));
 }
 
 function wrapLine(line, fn) {

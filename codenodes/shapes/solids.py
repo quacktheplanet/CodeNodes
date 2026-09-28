@@ -367,18 +367,23 @@ def _rotate_about(vector, axis, angle):
             axis * float(np.dot(axis, vector)) * (1.0 - c))
 
 
-def _frames(points):
+def _frames(points, closed=False):
     """A tangent, normal and binormal at every point, carried along without twisting.
 
     (Parallel transport: each frame is the previous one turned by the same rotation
     that turns the previous tangent into this one. Without it a swept profile spins.)
+    On a closed path the frame carried all the way round generally comes back turned;
+    that mismatch is spread evenly over the loop so the ends meet.
     """
     n = len(points)
     tan = np.zeros((n, 3))
-    tan[0] = points[1] - points[0]
-    tan[-1] = points[-1] - points[-2]
-    if n > 2:
-        tan[1:-1] = points[2:] - points[:-2]
+    if closed:
+        tan[:] = np.roll(points, -1, axis=0) - np.roll(points, 1, axis=0)
+    else:
+        tan[0] = points[1] - points[0]
+        tan[-1] = points[-1] - points[-2]
+        if n > 2:
+            tan[1:-1] = points[2:] - points[:-2]
     tan /= np.maximum(np.linalg.norm(tan, axis=1, keepdims=True), 1e-12)
 
     seed = np.array([0.0, 0.0, 1.0])
@@ -387,28 +392,53 @@ def _frames(points):
     normal = np.zeros((n, 3))
     first = np.cross(seed, tan[0])
     normal[0] = first / max(np.linalg.norm(first), 1e-12)
-    for i in range(1, n):
-        cross = np.cross(tan[i - 1], tan[i])
+
+    def carry(prev_normal, t0, t1):
+        cross = np.cross(t0, t1)
         length = float(np.linalg.norm(cross))
         if length < 1e-9:
-            normal[i] = normal[i - 1]
+            out = prev_normal.copy()
         else:
-            angle = math.atan2(length, float(np.dot(tan[i - 1], tan[i])))
-            normal[i] = _rotate_about(normal[i - 1], cross / length, angle)
-        normal[i] -= tan[i] * float(np.dot(normal[i], tan[i]))     # keep it square to the path
-        normal[i] /= max(np.linalg.norm(normal[i]), 1e-12)
+            angle = math.atan2(length, float(np.dot(t0, t1)))
+            out = _rotate_about(prev_normal, cross / length, angle)
+        out = out - t1 * float(np.dot(out, t1))            # keep it square to the path
+        return out / max(np.linalg.norm(out), 1e-12)
+
+    for i in range(1, n):
+        normal[i] = carry(normal[i - 1], tan[i - 1], tan[i])
+    if closed:
+        back = carry(normal[-1], tan[-1], tan[0])
+        phi = math.atan2(float(np.dot(np.cross(back, normal[0]), tan[0])), float(np.dot(back, normal[0])))
+        for i in range(1, n):
+            normal[i] = _rotate_about(normal[i], tan[i], phi * i / n)
     return tan, normal, np.cross(tan, normal)
 
 
+def is_closed_path(spine):
+    """Whether a path ends where it starts (a ring: a full-turn helix with no pitch, a
+    closed curve), so a sweep along it should join up rather than get two end caps."""
+    if len(spine) < 4:
+        return False
+    size = float(np.ptp(spine, axis=0).max())
+    return float(np.linalg.norm(spine[-1] - spine[0])) <= 1e-6 * max(size, 1e-3)
+
+
 def sweep(profile, path, twist=0.0, scale_end=1.0, cap=True):
-    """Carry a 2D profile along a 3D path. Tubes, handles, mouldings, screw threads."""
+    """Carry a 2D profile along a 3D path. Tubes, handles, mouldings, screw threads.
+
+    A path that ends where it starts (a ring) is joined into a closed loop with no end
+    caps, so the result is a proper closed solid (two caps on top of each other would
+    break the booleans that cut it later)."""
     points, sharp = profile.finish()
     spine = path.finish() if isinstance(path, Path) else np.asarray(path, float)
+    loop = is_closed_path(spine) and abs(float(scale_end) - 1.0) < 1e-9
+    if loop:
+        spine = spine[:-1]
     rings = len(spine)
     _check_size(rings, len(points))
-    tan, normal, binormal = _frames(spine)
+    tan, normal, binormal = _frames(spine, closed=loop)
 
-    steps = np.linspace(0.0, 1.0, rings)
+    steps = np.arange(rings) / rings if loop else np.linspace(0.0, 1.0, rings)
     angle = np.radians(float(twist)) * steps
     scale = 1.0 + (float(scale_end) - 1.0) * steps
     px, py = points[:, 0][None, :], points[:, 1][None, :]
@@ -419,15 +449,16 @@ def sweep(profile, path, twist=0.0, scale_end=1.0, cap=True):
              + ry[..., None] * binormal[:, None, :]).reshape(-1, 3)
 
     along = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(spine, axis=0), axis=1))])
-    u = along / (along[-1] or 1.0)
+    total = along[-1] + (float(np.linalg.norm(spine[0] - spine[-1])) if loop else 0.0)
+    u = along / (total or 1.0)
     across = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(points, axis=0), axis=1))])
     v = across / (across[-1] or 1.0)
 
     faces, uvs, sharp_edges = _stitch(rings, len(points), u, v,
-                                      close_rings=False, close_profile=profile.closed,
+                                      close_rings=loop, close_profile=profile.closed,
                                       sharp_along=sharp)
     solid = Solid(verts, faces, uvs, sharp_edges)
-    if cap and profile.closed:
+    if cap and profile.closed and not loop:
         _add_fan_caps(solid, rings, len(points))
     return orient_outward(solid)
 

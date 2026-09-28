@@ -284,19 +284,20 @@ def parse(source):
 
 
 def _vector(positional, named, scope, default=(0.0, 0.0, 0.0), line_no=0):
+    """Three numbers from `x, y, z` (or one positional number meaning all three, as in
+    `scale 2`), or from named components (`rotate x 90`, `translate y 1 z 2`), where the
+    ones left out keep `default` (0 for moves and turns, 1 for scale)."""
     if positional:
-        bits = positional
-    else:
-        bits = [named.get(k) for k in ("x", "y", "z")]
-        bits = [b for b in bits if b is not None]
-    if not bits:
+        if len(positional) == 1:
+            v = number(positional[0], scope, name="value")
+            return (v, v, v)
+        if len(positional) != 3:
+            _fail(line_no, f"expected three numbers, got {len(positional)}")
+        return tuple(number(b, scope, name="value") for b in positional)
+    if not any(named.get(k) is not None for k in ("x", "y", "z")):
         return tuple(default)
-    if len(bits) == 1:
-        v = number(bits[0], scope, name="value")
-        return (v, v, v)
-    if len(bits) != 3:
-        _fail(line_no, f"expected three numbers, got {len(bits)}")
-    return tuple(number(b, scope, name="value") for b in bits)
+    return tuple(number(named[k], scope, name=k) if named.get(k) is not None else float(d)
+                 for k, d in zip(("x", "y", "z"), default))
 
 
 def _bevel_options(positional, named, scope, line_no):

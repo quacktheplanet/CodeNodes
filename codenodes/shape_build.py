@@ -124,11 +124,80 @@ def _temp_object(name, solid, smooth):
     return obj
 
 
+def _measure_mesh(me):
+    """(volume, (min corner, max corner)) of a mesh; (0, None) when it's empty."""
+    import bmesh
+    if not len(me.vertices):
+        return 0.0, None
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(me)
+        volume = abs(bm.calc_volume(signed=False))
+    finally:
+        bm.free()
+    co = np.empty(len(me.vertices) * 3, np.float64)
+    me.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    return volume, (co.min(axis=0), co.max(axis=0))
+
+
+def _measure_solid(solid):
+    if not len(solid.verts):
+        return 0.0, None
+    volume = abs(float(solids._signed_volume(solid))) / 6.0
+    verts = np.asarray(solid.verts, np.float64)
+    return volume, (verts.min(axis=0), verts.max(axis=0))
+
+
+def _weld_slivers(me, distance=1e-5):
+    """Merge vertices a boolean left a hair apart (where two parts' seams line up), which
+    otherwise become zero-length edges that the next boolean trips over."""
+    import bmesh
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(me)
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=distance)
+        bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=distance)
+        bm.to_mesh(me)
+    finally:
+        bm.free()
+
+
+def check_boolean(operation, before, cutter, after):
+    """Whether a boolean result is believable, from volumes and bounding boxes. Returns
+    "" or what's wrong. (EXACT booleans on a solid that isn't closed, such as a sweep whose
+    two end caps overlap, can return a fragment without complaining.)"""
+    (v0, b0), (vc, bc), (v1, b1) = before, cutter, after
+    if b1 is None:
+        return "the result is empty"
+    tol = 0.03 * max(v0, vc, 1e-12)
+    size = float(np.max(np.maximum(b0[1], bc[1]) - np.minimum(b0[0], bc[0])))
+    slack = 0.02 * size + 1e-6
+    if operation == 'UNION':
+        if v1 < max(v0, vc) - tol:
+            return f"the result ({v1:.4g} m³) is smaller than one of the pieces ({max(v0, vc):.4g} m³)"
+        want_lo, want_hi = np.minimum(b0[0], bc[0]), np.maximum(b0[1], bc[1])
+        if np.any(b1[0] > want_lo + slack) or np.any(b1[1] < want_hi - slack):
+            return "the result doesn't reach as far as its pieces do"
+    elif operation == 'DIFFERENCE':
+        if v1 < v0 - vc - tol:
+            return (f"it removed more ({v0 - v1:.4g} m³) than the cutting part holds ({vc:.4g} m³)")
+        if v1 > v0 + tol:
+            return "cutting made it bigger"
+        if np.any(b1[0] < b0[0] - slack) or np.any(b1[1] > b0[1] + slack):
+            return "cutting made it reach further than before"
+    elif operation == 'INTERSECT':
+        if v1 > min(v0, vc) + tol:
+            return "the overlap came out bigger than either piece"
+    return ""
+
+
 def _combine(parts, smooth):
     """Apply the parts' add / subtract / intersect using Blender's boolean solver.
 
     bmesh has no boolean operator, so this goes through the Boolean modifier on throwaway
-    objects and reads the evaluated result back.
+    objects and reads the evaluated result back, one operation at a time, and checks each
+    result: a boolean that silently returns garbage becomes an error naming the part.
     """
     import bpy
     adds = [p for p in parts if p.mode == "add"]
@@ -139,6 +208,8 @@ def _combine(parts, smooth):
     # thread into its shank), and a later cut through overlapping shells goes wrong.
     base = _temp_object("cn_shape", adds[0].solid, smooth)
     temporary = [base]
+    current = _measure_solid(adds[0].solid)
+    verbs = {'UNION': "adding", 'DIFFERENCE': "subtracting", 'INTERSECT': "intersecting with"}
     try:
         operations = ([(p, 'UNION') for p in adds[1:]]
                       + [(p, 'DIFFERENCE' if p.mode == "subtract" else 'INTERSECT') for p in others])
@@ -154,11 +225,30 @@ def _combine(parts, smooth):
             mod.solver = 'EXACT'
             # deliberately not hidden: a hidden object is left out of the depsgraph, and
             # then the boolean has nothing to cut with
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-        depsgraph.update()
-        evaluated = base.evaluated_get(depsgraph)
-        result = bpy.data.meshes.new_from_object(evaluated)
-        return result
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            depsgraph.update()
+            result = bpy.data.meshes.new_from_object(base.evaluated_get(depsgraph))
+            _weld_slivers(result)
+            base.modifiers.remove(mod)
+            old, base.data = base.data, result
+            if old.users == 0:
+                bpy.data.meshes.remove(old)
+            after = _measure_mesh(result)
+            problem = check_boolean(operation, current, _measure_solid(part.solid), after)
+            if problem:
+                raise ShapeError(
+                    f"part '{part.name}': {verbs[operation]} it went wrong ({problem}). This usually "
+                    "means one of the solids isn't closed, e.g. a profile that crosses itself or "
+                    "two parts that only touch along a face")
+            current = after
+            temporary.remove(cutter)
+            data = cutter.data
+            bpy.data.objects.remove(cutter, do_unlink=True)
+            if data.users == 0:
+                bpy.data.meshes.remove(data)
+        final = base.data
+        base.data = bpy.data.meshes.new("cn_shape_empty")
+        return final
     finally:
         for obj in temporary:
             data = obj.data

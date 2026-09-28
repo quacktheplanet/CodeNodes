@@ -373,12 +373,89 @@ part rod
     check(len(divided.verts) == 5 * 3 + 2, f"a path's line can be divided with steps ({len(divided.verts)} verts)")
 
 
+CYLINDER = """
+part rod
+  profile
+    move 0, 0
+    line 0.1, 0
+    line 0.1, 1
+    line 0, 1
+    close
+  revolve segments 16
+"""
+
+
+def test_named_transforms():
+    """`rotate x 90` turns about x only, `translate z 1` moves only z, `scale 2` is uniform and
+    `scale z 2` stretches only z (named components leave the others at their default)."""
+    def box(extra):
+        v = language.parse(CYLINDER + "".join(f"  {line}" + chr(10) for line in extra)).build().verts
+        return v.min(axis=0), v.max(axis=0)
+    lo, hi = box([])
+    check(abs(hi[2] - 1.0) < 1e-6 and abs(hi[0] - 0.1) < 1e-3, "the test rod stands along z, 1 m tall")
+    lo, hi = box(["rotate x 90"])
+    check(abs(lo[1] + 1.0) < 1e-5 and abs(hi[1]) < 1e-5 and hi[2] - lo[2] < 0.21,
+          f"rotate x 90 lays a z-rod along -y (y {lo[1]:.3f}..{hi[1]:.3f}, z {lo[2]:.3f}..{hi[2]:.3f})")
+    lo, hi = box(["translate z 1"])
+    check(abs(lo[2] - 1.0) < 1e-6 and abs(hi[2] - 2.0) < 1e-6 and abs(lo[0] + 0.1) < 1e-3,
+          f"translate z 1 moves only z (z {lo[2]:.3f}..{hi[2]:.3f}, x from {lo[0]:.3f})")
+    lo, hi = box(["translate y 1 z 2"])
+    check(abs(lo[1] - 0.9) < 1e-3 and abs(lo[2] - 2.0) < 1e-6 and abs(lo[0] + 0.1) < 1e-3,
+          "translate y 1 z 2 takes two named components (x stays 0)")
+    lo, hi = box(["scale 2"])
+    check(abs(hi[2] - 2.0) < 1e-6 and abs(hi[0] - 0.2) < 2e-3, "scale 2 is uniform")
+    lo, hi = box(["scale z 2"])
+    check(abs(hi[2] - 2.0) < 1e-6 and abs(hi[0] - 0.1) < 1e-3, "scale z 2 stretches only z")
+    lo, hi = box(["array 3 x 0.5"])
+    check(abs(hi[0] - 1.1) < 2e-3 and abs(hi[2] - 1.0) < 1e-6 and abs(hi[1] - 0.1) < 2e-3,
+          "array 3 x 0.5 steps along x only")
+    check(raises(lambda: language.parse(CYLINDER + "  translate 1, 2" + chr(10)).build(), "three numbers"),
+          "two positional numbers are still refused")
+
+
+RING = """
+part ring
+  profile
+    move -0.05, -0.05
+    line 0.05, -0.05
+    line 0.05, 0.05
+    line -0.05, 0.05
+    close
+  path
+    helix radius 0.5 pitch 0 turns 1
+  sweep
+"""
+
+
+def test_closed_sweeps():
+    """A sweep along a path that ends where it starts joins into a ring with no end caps."""
+    ring = language.parse(RING).build()
+    check(solids.is_closed(ring) and len(ring.tris) == 0,
+          f"a ring on a full-turn, zero-pitch helix is one closed loop with no caps ({ring})")
+    vol = solids._signed_volume(ring) / 6
+    check(abs(vol - 0.01 * math.tau * 0.5) < 0.01 * math.tau * 0.5 * 0.02,
+          f"and encloses the right volume ({vol:.5f} m³)")
+    lo, hi = ring.verts.min(axis=0), ring.verts.max(axis=0)
+    check(abs(hi[0] - 0.55) < 1e-3 and abs(lo[0] + 0.55) < 1e-3 and abs(hi[2] - 0.05) < 1e-3,
+          "and sits where the helix and profile put it")
+    seam = np.linalg.norm(ring.verts[:4] - ring.verts[-4:], axis=1)
+    step = np.linalg.norm(ring.verts[4:8] - ring.verts[:4], axis=1)
+    check(np.abs(seam - step).max() < 1e-4,
+          f"the seam is an ordinary step, not a twist (worst difference {np.abs(seam - step).max():.1e} m)")
+    spring = language.parse(RING.replace("pitch 0", "pitch 0.3")).build()
+    check(solids.is_closed(spring) and len(spring.tris) > 0, "a helix that rises still gets its two caps")
+    twisted = language.parse(RING.replace("  sweep", "  sweep twist 360")).build()
+    check(solids.is_closed(twisted), "a ring with a full twist is still closed")
+
+
 def main():
     test_expressions()
     test_profiles_and_solids()
     test_sweep_loft_shell()
     test_language()
     test_language_extras()
+    test_named_transforms()
+    test_closed_sweeps()
     print(f"\nAll {_checks} checks passed.")
 
 
