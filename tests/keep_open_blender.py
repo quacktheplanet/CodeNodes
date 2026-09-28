@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import codenodes  # noqa: E402
 
 DONE = os.environ.get("CODENODES_CHECK_DONE", "")
-LIMIT = time.time() + 120
+LIMIT = time.time() + float(os.environ.get("CODENODES_KEEP_OPEN_S", "120"))
 print("CodeNodes test: two Blenders (this window closes by itself)", flush=True)
 codenodes.register()
 

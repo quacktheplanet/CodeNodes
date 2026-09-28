@@ -126,7 +126,7 @@ async def loop(t):
     cn2 = await t("code_node", object=cn["object"], values={"major": 1.2})
     check(cn2.get("ok") and abs(cn2["inputs"]["major"] - 1.2) < 1e-6, "code_node sets an input on the node")
     tree = await t("nodes_read", group=cn["tree"])
-    check(cn["node"] in json.dumps(tree), "its tree reads back with the code node in it")
+    check(cn["node"] in json.dumps(tree, ensure_ascii=False), "its tree reads back with the code node in it")
     cbad = await t("code_node", object=cn["object"], code="float sdf(vec3 p) { return lenght(p) - 1.0; }")
     check(cbad.get("ok") is False and "line" in cbad.get("error", ""), "bad code in a code node comes back fixable")
     cfix = await t("code_node", object=cn["object"], code=TORUS)

@@ -749,8 +749,9 @@ def code_node(kind="mesh", code=None, template=None, name=None, object=None, val
                                                       label=label)
         except KeyError as exc:
             return {"ok": False, "error": str(exc.args[0])}
-        if object and obj.name != object and object not in bpy.data.objects:
-            obj.name = object
+        wanted = object or name           # the object gets exactly the name asked for
+        if wanted and obj.name != wanted and wanted not in bpy.data.objects:
+            obj.name = wanted
         src = gn_link.source_of(node.node_tree)
     problems = []
     for key, value in (values or {}).items():
