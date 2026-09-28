@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "codenodes"
-version = "0.1.2"
+version = "0.2.0"
 name = "CodeNodes"
-tagline = "Turn GPU code into real meshes"
+tagline = "GPU code as Geometry Nodes: live particles, surfaces, mesh code"
 maintainer = "Lucas DeMeritt"
 type = "add-on"
 tags = ["Mesh", "Modeling", "Development"]

@@ -32,15 +32,245 @@ KIND_KEY = "codenodes_kind"
 PREFIX = "Code · "
 POLL_S = 0.25
 
+MAKE_REAL = "codenodes_make_real"   # on a Make Real node group
+MAKE_REAL_NAME = "Make Real"
+GPU_KINDS = ('MESH', 'PARTICLES', 'DEFORM')
+TAP = "codenodes_tap"              # on a hidden tap tree: which GPU Mesh source it feeds
+
 KINDS = {
-    'MESH': ("Code Mesh (SDF)", "A surface from a signed distance function, sampled on the GPU", 'SCRIPT'),
-    'SHAPE': ("Code Shape", "A model built from a parametric description: exact edges, clean quads",
-              'MESH_CYLINDER'),
-    'PARTICLES': ("Code Particles", "Points moved by a solver you write, on the GPU", 'PARTICLES'),
+    'PARTICLES': ("GPU Particles", "Particles moved by code you write, on the GPU. Drawn live in the viewport; "
+                                   "add Make Real to use them in nodes or renders", 'PARTICLES'),
+    'MESH': ("GPU Surface (SDF)", "A surface from a signed distance function, raymarched live on the GPU; "
+                                  "add Make Real to turn it into a mesh", 'SCRIPT'),
+    'DEFORM': ("GPU Mesh", "Code run on every vertex of the mesh wired into it (deform, displace, recolour); "
+                           "drawn live, add Make Real for the modified mesh", 'MOD_WAVE'),
+    'SHAPE': ("Code Shape", "A model built from a parametric description: exact edges, clean quads "
+                            "(real geometry straight away)", 'MESH_CYLINDER'),
+}
+
+CASTLE = """\
+// The Aerie citadel as a GPU surface: a ring wall with towers, a keep and roofs.
+// Units: the citadel is about 25 across; `scale` is metres per unit.
+// @param towers 6 3 12
+// @param radius 10 6 12.5
+// @param wallHeight 4.5 2 9
+// @param keepHeight 14 6 26
+// @param scale 0.1 0.02 1.0
+
+float citadel(vec3 p) {
+  float ring = abs(length(p.xy) - radius) - 0.7;
+  float wall = max(ring, max(-p.z - 1.0, p.z - wallHeight));
+  vec3 m = aroundZ(p, floor(towers) * 7.0);
+  wall = min(wall, sdBox(m - vec3(radius, 0.0, wallHeight + 0.45), vec3(0.7, 0.42, 0.45)));
+  float gate = min(sdBox(p - vec3(0.0, -radius, 1.0), vec3(1.4, 2.0, 2.0)),
+                   sdCylinder(rotateX(p - vec3(0.0, -radius, 3.0), 1.5708), 1.4, 2.0));
+  wall = max(wall, -gate);
+  vec3 t = aroundZ(p, floor(towers));
+  float towerH = wallHeight + 3.5;
+  float tower = sdCylinder(t - vec3(radius, 0.0, towerH * 0.5), 2.0, towerH * 0.5 + 0.5);
+  vec3 s = aroundZ(t - vec3(radius, 0.0, 0.0), 4.0);
+  tower = max(tower, -sdBox(s - vec3(2.0, 0.0, towerH * 0.62), vec3(0.5, 0.11, 0.6)));
+  float keep = sdRoundBox(p - vec3(0.0, 0.0, keepHeight * 0.5), vec3(3.6, 3.6, keepHeight * 0.5), 0.25);
+  vec3 k = aroundZ(p, 4.0);
+  float arcade = min(sdBox(k - vec3(3.6, 0.0, 1.1), vec3(0.8, 1.05, 1.1)),
+                     sdCylinder(rotateY(k - vec3(3.6, 0.0, 2.2), 1.5708), 1.05, 0.8));
+  float windows = sdBox(k - vec3(3.6, 0.0, keepHeight * 0.72), vec3(0.8, 0.35, 0.9));
+  keep = max(keep, -min(arcade, windows));
+  return min(min(wall, tower), keep);
+}
+
+float roofs(vec3 p) {
+  vec3 t = aroundZ(p, floor(towers));
+  float towerH = wallHeight + 3.5;
+  float caps = sdCone(t - vec3(radius, 0.0, towerH + 2.4), 2.4, 2.55, 0.05);
+  float spire = sdCone(p - vec3(0.0, 0.0, keepHeight + 3.4), 3.4, 4.0, 0.08);
+  return min(caps, spire);
+}
+
+float sdf(vec3 p) {
+  vec3 q = p / scale;
+  return min(citadel(q), roofs(q)) * scale;
+}
+
+// colour for the live view: terracotta roofs, weathered stone
+vec3 color(vec3 p) {
+  vec3 q = p / scale;
+  if (roofs(q) < citadel(q)) return vec3(0.72, 0.30, 0.18);
+  return vec3(0.80, 0.74, 0.64) * (0.82 + 0.18 * noise3(q * 1.7));
+}
+"""
+
+PLANET = """\
+// A small planet, Tellus-style: continents from fractal noise, shallow seas, snow on the peaks
+// and at the poles.
+// @param radius 1.0 0.3 3.0
+// @param relief 0.05 0.0 0.25
+// @param sea 0.5 0.3 0.7
+// @param seed 3.0 0.0 100.0
+
+float land(vec3 n) { return fbm3(n * 2.3 + seed); }
+
+float sdf(vec3 p) {
+  vec3 n = normalize(p);
+  float h = max(land(n), sea);
+  return (length(p) - radius - (h - sea) * relief * 2.0) * 0.8;
+}
+
+vec3 color(vec3 p) {
+  vec3 n = normalize(p);
+  float h = land(n);
+  if (h < sea) return mix(vec3(0.02, 0.07, 0.22), vec3(0.06, 0.32, 0.45), smoothstep(sea - 0.07, sea, h));
+  float e = (h - sea) / (1.0 - sea);
+  vec3 c = mix(vec3(0.16, 0.40, 0.12), vec3(0.50, 0.42, 0.28), smoothstep(0.05, 0.35, e));
+  return mix(c, vec3(0.95), smoothstep(0.55, 0.75, e + abs(n.z) * 0.55));
+}
+"""
+
+SATURN = """\
+// A ringed planet: a banded sphere and a tilted ring, one surface.
+// @param radius 0.9 0.1 2.0
+// @param ring 1.55 0.5 3.0
+// @param width 0.35 0.02 1.0
+// @param tilt 0.45 0.0 1.5
+
+float planet(vec3 p) { return sdSphere(p, radius) + 0.012 * sin(p.z * 18.0 + uTime * 3.0); }
+float band(vec3 p) {
+  vec3 q = rotateX(p, tilt);
+  vec2 r = vec2(length(q.xy) - ring, q.z);
+  return sdBox(vec3(r, 0.0), vec3(width, 0.02, 1.0));
+}
+float sdf(vec3 p) { return min(planet(p), band(p)); }
+
+vec3 color(vec3 p) {
+  if (band(p) < planet(p)) {
+    float r = length(rotateX(p, tilt).xy);
+    return vec3(0.85, 0.78, 0.62) * (0.7 + 0.3 * sin(r * 60.0));
+  }
+  return mix(vec3(0.85, 0.66, 0.42), vec3(0.95, 0.88, 0.7), 0.5 + 0.5 * sin(p.z * 18.0 + uTime * 3.0));
+}
+"""
+
+GALAXY = """\
+// Galaxy: a million stars on twisted ellipses (a density wave, as in Myriad). Each ring of orbits is
+// turned a little more than the one inside it, so the spiral arms never wind up.
+// @param size 2.4 0.5 10.0
+// @param twist 2.4 0.0 6.0
+// @param spin 0.9 0.0 3.0
+
+void spawn(inout Particle p) { p.life = 1e9; }        // stars live forever
+
+void update(inout Particle p, float dt) {
+  float s = p.seed;
+  float bulge = step(rand1(s * 1.7 + 9.0), 0.14);
+  float h = rand1(s * 2.3 + 0.5);
+  float a = bulge > 0.5 ? pow(h, 1.6) * 0.45 + 0.02 : -log(1.0 - h * 0.99) * 0.6 + 0.05;
+  float z = (rand1(s * 3.1 + 3.0) - 0.5) * (bulge > 0.5 ? 0.35 * (1.0 - a) : 0.05 * exp(-a));
+  float phase = rand1(s * 4.7 + 1.0) * 6.2831853 + spin / (a + 0.25) * uTime;
+  float squash = bulge > 0.5 ? 0.92 : 0.78;
+  float turn = a * twist + 0.3;
+  vec2 e = vec2(cos(phase) * a, sin(phase) * a * squash);
+  float c = cos(turn), sn = sin(turn);
+  vec3 q = vec3(c * e.x - sn * e.y, sn * e.x + c * e.y, z);
+  if (bulge > 0.5) q.z += sin(phase * 1.7 + rand1(s * 5.3) * 20.0) * 0.08 * (1.0 - a);
+  vec3 np = q * size;
+  p.velocity = (np - p.position) / max(dt, 1e-4);
+  p.position = np;
+}
+
+// old yellow stars in the middle, young blue ones out on the arms, a few rosy ones
+vec4 look(Particle p) {
+  float s = p.seed;
+  float bulge = step(rand1(s * 1.7 + 9.0), 0.14);
+  float r = length(p.position.xy) / size;
+  float rnd = rand1(s * 6.1 + 21.0);
+  vec3 old = vec3(1.0, 0.78, 0.5), young = vec3(0.55, 0.7, 1.0), rosy = vec3(1.0, 0.55, 0.75);
+  vec3 c = bulge > 0.5 ? old * 0.55 : mix(mix(old, young, smoothstep(0.15, 0.9, r)), rosy, step(0.985, rnd) * 0.9);
+  c *= (0.25 + 0.75 * smoothstep(0.0, 0.7, r)) * (0.6 + 0.8 * rnd);
+  return vec4(c, 1.0);
+}
+"""
+
+FLOW = """\
+// Flow: particles ride a curl-noise current (as in Myriad): crisp filaments that never clump.
+// @param scale 0.55 0.1 3.0
+// @param speed 1.9 0.1 6.0
+// @param radius 2.2 0.5 8.0
+
+void spawn(inout Particle p) {
+  p.position = randSphere(p.seed + uTime * 13.7) * radius * (0.9 + 0.2 * rand1(p.seed * 3.7));
+  p.life = 4.0 + rand1(p.seed * 1.9 + uTime) * 5.0;
+}
+
+void update(inout Particle p, float dt) {
+  vec3 q = p.position;
+  vec3 flow = curlNoise(q * scale + vec3(0.0, 0.0, uTime * 0.05)) * 0.55
+            - q * 0.04 * max(length(q) - radius * 1.1, 0.0);
+  p.velocity = flow * speed;
+  p.position += p.velocity * dt;
+  if (length(p.position) > radius * 2.7) p.age = p.life;     // wandered off: respawn
+}
+
+vec4 look(Particle p) {
+  float t = clamp(length(p.velocity) * 1.1, 0.0, 1.0);
+  vec3 a = vec3(0.15, 0.25, 0.9), b = vec3(0.3, 0.95, 0.85), c = vec3(1.0, 0.95, 0.7);
+  vec3 col = t < 0.5 ? mix(a, b, t * 2.0) : mix(b, c, t * 2.0 - 1.0);
+  return vec4(col * smoothstep(0.0, 1.0, p.life - p.age), 1.0);
+}
+"""
+
+ATTRACTOR = """\
+// Attractor: the Aizawa strange attractor, integrated on the GPU (as in Myriad).
+// @param size 2.1 0.5 8.0
+// @param rate 0.45 0.05 2.0
+
+vec3 toWorld(vec3 q) { return (q - vec3(0.0, 0.0, 0.6)) * size; }
+vec3 toAizawa(vec3 w) { return w / size + vec3(0.0, 0.0, 0.6); }
+
+void spawn(inout Particle p) {
+  p.position = toWorld((rand3(p.seed + uTime * 7.3) - 0.5) * 0.4 + vec3(0.1, 0.0, 0.0));
+  p.life = 8.0 + rand1(p.seed * 2.9 + uTime) * 20.0;
+}
+
+void update(inout Particle p, float dt) {
+  vec3 q = toAizawa(p.position);
+  const float a = 0.95, b = 0.7, c = 0.6, d = 3.5, e = 0.25, f = 0.1;
+  for (int k = 0; k < 3; k++) {
+    vec3 dq = vec3((q.z - b) * q.x - d * q.y, d * q.x + (q.z - b) * q.y,
+                   c + a * q.z - q.z * q.z * q.z / 3.0 - (q.x * q.x + q.y * q.y) * (1.0 + e * q.z) + f * q.z * q.x * q.x * q.x);
+    q += dq * dt * rate;
+  }
+  vec3 np = toWorld(q);
+  p.velocity = (np - p.position) / max(dt, 1e-4);
+  p.position = np;
+  if (length(q) > 4.0) p.age = p.life;
+}
+
+vec4 look(Particle p) {
+  float t = clamp(length(p.velocity) / size * 0.35, 0.0, 1.0);
+  vec3 a = vec3(0.6, 0.12, 0.45), b = vec3(1.0, 0.45, 0.25), c = vec3(1.0, 0.95, 0.8);
+  return vec4(t < 0.5 ? mix(a, b, t * 2.0) : mix(b, c, t * 2.0 - 1.0), 1.0);
+}
+"""
+
+# Settings a template starts with (anything not listed keeps the defaults)
+TEMPLATE_SETTINGS = {
+    "Galaxy": {"count": 1_000_000, "color_by": 'CODE', "gain": 0.45, "point_px": 1.0},
+    "Flow": {"count": 1_000_000, "color_by": 'CODE', "gain": 0.3, "point_px": 1.0, "prewarm": 3.0},
+    "Attractor": {"count": 600_000, "color_by": 'CODE', "gain": 0.3, "point_px": 1.0, "prewarm": 4.0},
+    "Swirl": {"count": 200_000, "gain": 0.4},
+    "Fountain": {"count": 100_000, "blend": 'SOLID', "point_px": 3.0, "color_by": 'AGE',
+                 "color_a": (0.6, 0.85, 1.0), "color_b": (0.1, 0.3, 0.9), "gain": 1.0},
+    "Castle": {"bounds_min": (-1.6, -1.6, -0.15), "bounds_max": (1.6, 1.6, 2.35), "resolution": 192},
+    "Planet": {"bounds_min": (-1.45, -1.45, -1.45), "bounds_max": (1.45, 1.45, 1.45), "resolution": 160},
+    "Saturn": {"bounds_min": (-2.2, -2.2, -1.2), "bounds_max": (2.2, 2.2, 1.2), "resolution": 160},
 }
 
 TEMPLATES = {
+    'DEFORM': {},                # filled from deform.TEMPLATES below
     'MESH': {
+        "Castle": CASTLE,
+        "Planet": PLANET,
+        "Saturn": SATURN,
         "Donut": """\
 // A donut. sdf(p) is the distance to the surface: negative inside, positive outside (metres).
 // Each @param line below becomes an input on the node.
@@ -90,6 +320,9 @@ part body
 """,
     },
     'PARTICLES': {
+        "Galaxy": GALAXY,
+        "Flow": FLOW,
+        "Attractor": ATTRACTOR,
         "Swirl": None,              # particles.TEMPLATE
         "Fountain": """\
 // A fountain: particles shoot up from the origin and fall back under gravity.
@@ -108,7 +341,25 @@ void update(inout Particle p, float dt) {
 """,
     },
 }
-DEFAULT_TEMPLATE = {'MESH': "Donut", 'SHAPE': "Desk Lamp", 'PARTICLES': "Swirl"}
+DEFAULT_TEMPLATE = {'MESH': "Donut", 'SHAPE': "Desk Lamp", 'PARTICLES': "Galaxy", 'DEFORM': "Wave"}
+
+
+def _fill_deform_templates():
+    from .deform import TEMPLATES as DT
+    TEMPLATES['DEFORM'].update(DT)
+
+
+_fill_deform_templates()
+
+
+def apply_template_settings(obj, key):
+    """Give a new source the settings its template was designed with (counts, colours, bounds)."""
+    s = obj.codenodes
+    for name, value in TEMPLATE_SETTINGS.get(key or "", {}).items():
+        try:
+            setattr(s, name, value)
+        except (AttributeError, TypeError, ValueError):
+            pass
 
 
 def template(kind, key=None):
@@ -127,6 +378,15 @@ def template(kind, key=None):
 
 def is_code_group(group):
     return group is not None and getattr(group, "bl_idname", "") == "GeometryNodeTree" and TAG in group
+
+
+def is_make_real(group):
+    return group is not None and getattr(group, "bl_idname", "") == "GeometryNodeTree" and MAKE_REAL in group
+
+
+def is_gpu_group(group):
+    obj = source_of(group)
+    return obj is not None and obj.codenodes.kind in GPU_KINDS
 
 
 def source_of(group):
@@ -150,7 +410,7 @@ def users():
     """{group name: [('node', tree, node) | ('mod', object, modifier)]} for every code group in use."""
     found = {}
     for tree in bpy.data.node_groups:
-        if tree.bl_idname != "GeometryNodeTree":
+        if tree.bl_idname != "GeometryNodeTree" or TAP in tree:
             continue
         for node in tree.nodes:
             if node.type == 'GROUP' and is_code_group(node.node_tree):
@@ -195,14 +455,38 @@ def _move_to_sources(obj):
     obj.location = (0.0, 0.0, 0.0)
 
 
-def make_source(kind, source, label):
-    """Build a hidden Code Mesh / Shape / Particles object from `source`. (object, error or "")."""
+def make_source(kind, source, label, key=None):
+    """Build a hidden code source object from `source`. (object, error or "").
+
+    GPU kinds (particles, SDF surfaces) start as live-only: nothing is simulated or meshed into
+    Blender until a Make Real node asks for it."""
     from . import api
     name = _unique(f"CN · {label}", bpy.data.objects)
+    if kind in GPU_KINDS:
+        # the text and settings, without running it: live drawing and Make Real run it on demand
+        obj = bpy.data.objects.new(name, bpy.data.meshes.new(name))
+        bpy.context.scene.collection.objects.link(obj)
+        s = obj.codenodes
+        ext = {'PARTICLES': 'particles', 'DEFORM': 'vertex'}.get(kind, 'sdf')
+        text = bpy.data.texts.new(f"{name}.{ext}")
+        text.from_string(source)
+        s.kind = kind
+        s.template_key = key or ""
+        s.real_mode = "NONE"
+        s.text = text
+        s.enabled = True
+        apply_template_settings(obj, key)
+        err = ""
+        try:
+            from . import props
+            props.sync_params(s, source)
+        except Exception as exc:              # bad @param lines: keep the source, report the problem
+            err = str(exc)
+        s.last_error = err
+        _move_to_sources(obj)
+        return obj, err
     if kind == 'SHAPE':
         r = api.code_to_shape(source, name=name)
-    elif kind == 'PARTICLES':
-        r = api.code_to_particles(source, name=name)
     else:
         r = api.code_to_mesh(source, name=name)
     obj = bpy.data.objects.get(r.get("object") or name)
@@ -215,49 +499,21 @@ def make_source(kind, source, label):
         s.enabled, s.text = True, text
         s.kind = kind
         s.last_error = r.get("error") or ""
+    obj.codenodes.template_key = key or ""
     _move_to_sources(obj)
     return obj, r.get("error") or ""
 
 
 def wanted_inputs(obj):
     """[(name, socket type, default, min, max)] the group should expose for this source."""
-    s = obj.codenodes
-    out = []
-    if s.kind == 'MESH':
-        out.append(("Resolution", "NodeSocketInt", int(s.resolution), 8, 512))
-    for p in s.params:
-        out.append((p.name, "NodeSocketFloat", float(p.value), float(p.min), float(p.max)))
-    return out
+    from . import gn_sockets
+    return [(w[1], w[2], w[3], w[4], w[5]) for w in gn_sockets.spec(obj)]
 
 
 def sync_interface(group, obj):
-    """Make the group's inputs match the code's sliders. Returns True if anything changed."""
-    iface = group.interface
-    wanted = wanted_inputs(obj)
-    names = [w[0] for w in wanted]
-    current = [i for i in iface.items_tree if i.item_type == 'SOCKET' and i.in_out == 'INPUT']
-    changed = False
-    for item in current:
-        if item.name not in names or item.socket_type != dict((w[0], w[1]) for w in wanted)[item.name]:
-            iface.remove(item)
-            changed = True
-    have = {i.name: i for i in iface.items_tree if i.item_type == 'SOCKET' and i.in_out == 'INPUT'}
-    for pos, (name, stype, default, lo, hi) in enumerate(wanted):
-        item = have.get(name)
-        if item is None:
-            item = iface.new_socket(name, in_out="INPUT", socket_type=stype)
-            item.default_value = default
-            changed = True
-        if (item.min_value, item.max_value) != (lo, hi):
-            item.min_value, item.max_value = lo, hi
-    # inputs in the code's order, after the Geometry output
-    for pos, name in enumerate(names):
-        item = next(i for i in iface.items_tree if i.item_type == 'SOCKET' and i.in_out == 'INPUT'
-                    and i.name == name)
-        target = pos + 1
-        if item.position != target:
-            iface.move(item, target)
-    return changed
+    """Make the group's inputs match the code and its settings. Returns True if anything changed."""
+    from . import gn_sockets
+    return gn_sockets.sync_interface(group, obj)
 
 
 def build_group(obj, label):
@@ -276,12 +532,19 @@ def build_group(obj, label):
     sync_interface(group, obj)
     nodes = group.nodes
     gin, gout = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+    gin.location, gout.location = (-400, 0), (150, 0)
+    if obj.codenodes.kind in GPU_KINDS:
+        # A GPU node's result lives on the GPU and is drawn live; its Geometry output stays empty
+        # until a Make Real node downstream turns it into real geometry.
+        group.description = ("CodeNodes GPU node: drawn live in the viewport. Add Make Real after it to use "
+                             "it in nodes or renders. Edit the code from the Node Editor sidebar (N)")
+        return group
     info = nodes.new("GeometryNodeObjectInfo")
     info.name = info.label = "Code Result"
     info.transform_space = 'ORIGINAL'
     info.inputs["Object"].default_value = obj
     group.links.new(info.outputs["Geometry"], gout.inputs["Geometry"])
-    gin.location, info.location, gout.location = (-400, 0), (-150, 0), (150, 0)
+    info.location = (-150, 0)
     return group
 
 
@@ -289,8 +552,117 @@ def create(kind, key=None, label=None, source=None):
     """A new code group and its source. Returns (group, error or "")."""
     source = source if source is not None else template(kind, key)
     label = label or key or DEFAULT_TEMPLATE[kind]
-    obj, err = make_source(kind, source, label)
+    obj, err = make_source(kind, source, label, key or (DEFAULT_TEMPLATE[kind] if source is None else None))
     return build_group(obj, label), err
+
+
+# ---- Make Real ---------------------------------------------------------------------------------
+
+def build_make_real():
+    """A Make Real node group: its input is a GPU node's result, its output real geometry.
+
+    Inside: Object Info reads the upstream GPU node's source object, which the add-on fills with
+    real points or a mesh; a Join passes through anything that is already real (e.g. after Make
+    Native), so the node is harmless on ordinary geometry.
+    """
+    group = bpy.data.node_groups.new(_unique(MAKE_REAL_NAME, bpy.data.node_groups), "GeometryNodeTree")
+    group[MAKE_REAL] = True
+    group.description = ("CodeNodes: turns the GPU node before it into real geometry (points or a mesh) that "
+                         "later nodes and renders can use, like Realize Instances. Options in the sidebar (N)")
+    if hasattr(group, "color_tag"):
+        try:
+            group.color_tag = 'GEOMETRY'
+        except TypeError:
+            pass
+    iface = group.interface
+    iface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+    iface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    nodes = group.nodes
+    gin, gout = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+    info = nodes.new("GeometryNodeObjectInfo")
+    info.name = info.label = "Real Result"
+    info.transform_space = 'ORIGINAL'
+    join = nodes.new("GeometryNodeJoinGeometry")
+    group.links.new(gin.outputs["Geometry"], join.inputs[0])
+    group.links.new(info.outputs["Geometry"], join.inputs[0])
+    group.links.new(join.outputs[0], gout.inputs["Geometry"])
+    gin.location, info.location, join.location, gout.location = (-420, 80), (-420, -120), (-120, 0), (120, 0)
+    return group
+
+
+REAL_INPUTS = {'MESH': ("Resolution", 8, 512), 'PARTICLES': ("Max Points", 0, 16_777_216)}
+
+
+def sync_real_interface(group, kind, src=None):
+    """Make Real's inputs for the kind of GPU node feeding it (When, Resolution / Max Points, ...)."""
+    from . import gn_sockets
+    gn_sockets.sync_real_interface(group, kind, src)
+
+
+def real_info_node(group):
+    return next((n for n in group.nodes if n.type == 'OBJECT_INFO'), None)
+
+
+def upstream_code_node(tree, node, depth=0):
+    """The code group node feeding a Make Real node's Geometry input (through reroutes), or None."""
+    if depth > 32 or not node.inputs:
+        return None
+    sock = node.inputs[0]
+    link = next((l for l in tree.links if l.to_socket == sock and not l.is_muted), None)
+    if link is None:
+        return None
+    src = link.from_node
+    if src.type == 'REROUTE':
+        return upstream_code_node(tree, src, depth + 1)
+    if src.type == 'GROUP' and is_code_group(src.node_tree):
+        return src
+    return None
+
+
+def insert_make_real(tree, code_node_, location=None):
+    """Put a Make Real node right after a code node, taking over its outgoing links."""
+    group = build_make_real()
+    node = tree.nodes.new("GeometryNodeGroup")
+    node.node_tree = group
+    node.location = location or (code_node_.location.x + code_node_.width + 60, code_node_.location.y)
+    node.width = 160
+    out = code_node_.outputs["Geometry"]
+    targets = [l.to_socket for l in tree.links if l.from_socket == out]
+    for l in [l for l in tree.links if l.from_socket == out]:
+        tree.links.remove(l)
+    tree.links.new(out, node.inputs["Geometry"])
+    for sock in targets:
+        tree.links.new(node.outputs["Geometry"], sock)
+    for n in tree.nodes:
+        n.select = False
+    node.select = True
+    tree.nodes.active = node
+    _dirty[0] = True
+    return node
+
+
+def make_real_node(context):
+    """The active node in the Node Editor if it's a Make Real node: (node, group, tree)."""
+    space = getattr(context, "space_data", None)
+    tree = getattr(space, "edit_tree", None)
+    node = tree.nodes.active if tree is not None else None
+    if node is None or node.type != 'GROUP' or not is_make_real(node.node_tree):
+        return None, None, None
+    return node, node.node_tree, tree
+
+
+def resolve_when(when, src):
+    """AUTO -> EVERY_FRAME for particles and code that reads the time, ON_CHANGE otherwise."""
+    if when != 'AUTO':
+        return when
+    s = src.codenodes
+    if s.kind == 'PARTICLES':
+        return 'EVERY_FRAME'
+    code = s.text.as_string() if s.text is not None else ""
+    return 'EVERY_FRAME' if ("uTime" in code or "uFrame" in code) else 'ON_CHANGE'
+
+
+_RANK = {'NONE': 0, 'RENDER_ONLY': 1, 'ON_CHANGE': 2, 'EVERY_FRAME': 3}
 
 
 def ensure_tree(context):
@@ -321,11 +693,13 @@ def ensure_tree(context):
 HOST = "codenodes_host"          # on a Geometry Nodes tree made by add_object
 
 
-def add_object(kind, key=None, source=None, label=None, location=(0.0, 0.0, 0.0), collection=None):
+def add_object(kind, key=None, source=None, label=None, location=(0.0, 0.0, 0.0), collection=None,
+               make_real=False):
     """A new object whose geometry comes from a code node in its own Geometry Nodes tree.
 
-    What Add › Mesh › Code Mesh / Code Shape / Code Particles makes. Returns
-    (object, tree, node, error or "").
+    What Add › Mesh › CodeNodes makes. A GPU node is wired straight to the output and drawn live;
+    `make_real` puts a Make Real node between them so the object gets real geometry.
+    Returns (object, tree, node, error or "").
     """
     label = label or key or DEFAULT_TEMPLATE[kind]
     group, err = create(kind, key, label, source)
@@ -341,10 +715,26 @@ def add_object(kind, key=None, source=None, label=None, location=(0.0, 0.0, 0.0)
     tree.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
     gin, gout = tree.nodes.new("NodeGroupInput"), tree.nodes.new("NodeGroupOutput")
     gin.location, gout.location = (-420, 0), (320, 0)
-    node = insert(tree, group, (-90, 60))
+    node = insert(tree, group, (-200, 60))
     tree.links.new(node.outputs["Geometry"], gout.inputs["Geometry"])
+    if kind == 'DEFORM':
+        # something for the vertex code to work on: a smooth sphere, wired into the Mesh input
+        import bmesh
+        bm = bmesh.new()
+        bmesh.ops.create_uvsphere(bm, u_segments=96, v_segments=48, radius=1.0)
+        bm.to_mesh(obj.data)
+        bm.free()
+        obj.data.shade_smooth()
+        tree.links.new(gin.outputs["Geometry"], node.inputs["Mesh"])
     mod = obj.modifiers.new("CodeNodes", 'NODES')
     mod.node_group = tree
+    if make_real and kind in GPU_KINDS:
+        insert_make_real(tree, node)
+        for n in tree.nodes:
+            n.select = False
+        node.select = True
+        tree.nodes.active = node
+    sync()
     return obj, tree, node, err
 
 
@@ -438,20 +828,10 @@ def read_values(user):
     return values
 
 
-def apply_values(obj, values):
-    """Write known input values onto the source's sliders. True if something changed."""
-    s = obj.codenodes
-    changed = False
-    res = values.get("Resolution")
-    if s.kind == 'MESH' and res is not None and int(res) != s.resolution:
-        s["resolution"] = max(8, min(512, int(res)))
-        changed = True
-    for p in s.params:
-        v = values.get(p.name)
-        if v is not None and abs(float(v) - p.value) > 1e-9:
-            p["value"] = float(v)
-            changed = True
-    return changed
+def apply_values(obj, values, user=None):
+    """Write known input values onto the source's settings and sliders. True if something changed."""
+    from . import gn_sockets
+    return gn_sockets.apply(obj, values, user)
 
 
 def split(group, user):
@@ -486,9 +866,267 @@ def split(group, user):
     return new_group
 
 
+def _hosts_of(tree):
+    return [o for o in bpy.data.objects
+            if any(m.type == 'NODES' and m.node_group == tree for m in getattr(o, "modifiers", ()))]
+
+
+def _migrate_gpu_group(group):
+    """Older files: a GPU group that still hands its source straight to its output. Now the output
+    stays empty and Make Real carries the result."""
+    for link in list(group.links):
+        if link.from_node.type == 'OBJECT_INFO' and link.from_node.name not in ("Tap",)                 and link.to_node.type in ('GROUP_OUTPUT', 'JOIN_GEOMETRY') and link.from_node.name != "CodeNodes render link":
+            group.links.remove(link)
+
+
+def sync_make_real():
+    """Point every Make Real node at the GPU node feeding it, and work out for each GPU source
+    whether (and when) it is made real. Returns {source name: [host object names]}."""
+    from . import gn_sockets, gpu_live
+    modes, host_map, limits, real_nodes = {}, {}, {}, {}
+    for tree in [t for t in bpy.data.node_groups if t.bl_idname == "GeometryNodeTree" and TAP not in t]:
+        hosts_ = None
+        seen_real = set()
+        for node in tree.nodes:
+            if node.type != 'GROUP' or node.node_tree is None:
+                continue
+            group = node.node_tree
+            if is_code_group(group):
+                src = source_of(group)
+                if src is not None and src.codenodes.kind in GPU_KINDS:
+                    hosts_ = _hosts_of(tree) if hosts_ is None else hosts_
+                    lst = host_map.setdefault(src.name, [])
+                    lst.extend(h.name for h in hosts_ if h.name not in lst)
+                    if src.codenodes.kind == 'DEFORM':
+                        ensure_tap(src, tree, node, hosts_)
+            elif is_make_real(group):
+                if group.name in seen_real or (group.users > 1 and _other_real_user(group, tree, node)):
+                    new = group.copy()                  # each Make Real node keeps its own settings
+                    new.name = _unique(MAKE_REAL_NAME, bpy.data.node_groups)
+                    node.node_tree = new
+                    group = new
+                seen_real.add(group.name)
+                up = upstream_code_node(tree, node)
+                src = source_of(up.node_tree) if up is not None else None
+                if src is not None and src.codenodes.kind not in GPU_KINDS:
+                    src = None                          # a Code Shape is real already: pass it through
+                info = real_info_node(group)
+                if info is not None and info.inputs["Object"].default_value != src:
+                    info.inputs["Object"].default_value = src
+                sync_real_interface(group, src.codenodes.kind if src is not None else None, src)
+                if src is None:
+                    label = "Make Real (nothing to make real)" if up is None else "Make Real"
+                    if node.label != label:
+                        node.label = label
+                    continue
+                s = src.codenodes
+                real_nodes.setdefault(src.name, []).append(node)
+                want = REAL_INPUTS.get(s.kind, (None,))[0]
+                sock = node.inputs.get(want) if want else None
+                val = resolve(tree, sock) if sock is not None else None
+                if val is not None:
+                    limits.setdefault(src.name, int(val))
+                when_sock = node.inputs.get("When")
+                when_name = resolve(tree, when_sock) if when_sock is not None else None
+                mode = resolve_when(gn_sockets.WHEN_MAP.get(when_name or "Automatic", 'AUTO'), src)
+                if _RANK[mode] > _RANK.get(modes.get(src.name, 'NONE'), 0):
+                    modes[src.name] = mode
+                    for key, name in (("real_keep_vel", "Keep Velocity"), ("real_keep_age", "Keep Age")):
+                        ks = node.inputs.get(name)
+                        kv = resolve(tree, ks) if ks is not None else None
+                        s[key] = True if kv is None else bool(kv)
+    col = bpy.data.collections.get(SOURCES)
+    for src in (list(col.objects) if col is not None else []):
+        s = getattr(src, "codenodes", None)
+        if s is None or not s.enabled or s.kind not in GPU_KINDS:
+            continue
+        mode = modes.get(src.name, 'NONE')
+        changed = False
+        if s.real_mode != mode:
+            s.real_mode = mode
+            changed = True
+        lim = limits.get(src.name)
+        if lim is None and s.kind == 'PARTICLES' and s.real_limit and mode == 'NONE':
+            s.real_limit = 0                           # no Make Real any more: no Max Points either
+        if lim is not None:
+            if s.kind == 'MESH' and max(8, min(512, lim)) != s.resolution:
+                s["resolution"] = max(8, min(512, lim))
+                changed = True
+            elif s.kind == 'PARTICLES' and lim != s.real_limit:
+                s.real_limit = lim
+                changed = True
+        if changed:
+            live.request(src)
+            gpu_live.redraw()
+        cost = _made_real_ms(s.stats)
+        for node in real_nodes.get(src.name, []):
+            if s.real_mode == 'RENDER_ONLY':
+                label = "Make Real · for render"
+            else:
+                label = "Make Real" + (f" · {cost} ms" if cost is not None else "")
+            if node.label != label:
+                node.label = label
+    return host_map
+
+
+def _made_real_ms(stats):
+    import re
+    m = re.search(r"made real in (\d+) ms", stats or "")
+    return int(m.group(1)) if m else None
+
+
+def _other_real_user(group, tree, node):
+    """True if another node (in any tree) uses this Make Real group too (Shift D copies share it)."""
+    for t in bpy.data.node_groups:
+        if t.bl_idname != "GeometryNodeTree" or TAP in t:
+            continue
+        for n in t.nodes:
+            if n != node and n.type == 'GROUP' and n.node_tree == group:
+                return True
+    return False
+
+
+# ---- taps: what a GPU Mesh node receives ------------------------------------------------------------
+
+def _upstream_nodes(tree, socket):
+    """Names of every node that feeds `socket` (directly or indirectly)."""
+    found, todo = set(), [socket]
+    while todo:
+        sock = todo.pop()
+        for link in tree.links:
+            if link.to_socket == sock and link.from_node.name not in found:
+                found.add(link.from_node.name)
+                todo.extend(link.from_node.inputs)
+    return found
+
+
+def _tap_signature(tree, node):
+    sock = node.inputs.get("Mesh")
+    if sock is None:
+        return None
+    names = _upstream_nodes(tree, sock)
+    parts = [tree.name]
+    for n in sorted(names):
+        nd = tree.nodes[n]
+        vals = []
+        for inp in nd.inputs:
+            v = getattr(inp, "default_value", None)
+            try:
+                vals.append(repr(tuple(v)) if hasattr(v, "__len__") and not isinstance(v, str) else repr(v))
+            except TypeError:
+                vals.append(repr(v))
+        group_name = nd.node_tree.name if getattr(nd, "node_tree", None) is not None else ""
+        parts.append(f"{n}:{nd.bl_idname}:{group_name}:{vals}")
+    parts.append(repr(sorted((l.from_node.name, l.from_socket.identifier, l.to_node.name, l.to_socket.identifier)
+                             for l in tree.links if l.to_node.name in names or l.to_node == node)))
+    return "|".join(parts)
+
+
+def ensure_tap(src, tree, node, hosts_):
+    """Keep a hidden object whose Geometry Nodes end at this GPU Mesh node's Mesh input."""
+    if not hosts_:
+        return None
+    host = hosts_[0]
+    name = f"CN Tap · {src.name}"
+    tap = bpy.data.objects.get(name)
+    sig = _tap_signature(tree, node)
+    if tap is not None and tap.get("cn_tap_sig") == sig and tap.data == host.data:
+        _copy_modifier_values(host, tree, tap)
+        return tap
+    if tap is None:
+        tap = bpy.data.objects.new(name, host.data)
+        sources_collection().objects.link(tap)
+    tap.data = host.data
+    old = tap.modifiers.get("CodeNodes Tap")
+    old_tree = old.node_group if old is not None else None
+    tap_tree = tree.copy()
+    tap_tree.name = _unique(f".CN Tap · {src.name}", bpy.data.node_groups)
+    tap_tree[TAP] = src.name
+    copy_node = tap_tree.nodes.get(node.name)
+    keep = _upstream_nodes(tap_tree, copy_node.inputs["Mesh"]) if copy_node is not None else set()
+    from_socket = None
+    if copy_node is not None:
+        link = next((l for l in tap_tree.links if l.to_socket == copy_node.inputs["Mesh"]), None)
+        from_socket = link.from_socket if link is not None else None
+    gout = next((n for n in tap_tree.nodes if n.type == 'GROUP_OUTPUT'), None)
+    if gout is not None:
+        keep.add(gout.name)
+    for n in list(tap_tree.nodes):
+        if n.name not in keep:
+            tap_tree.nodes.remove(n)
+    if gout is not None and from_socket is not None:
+        geo_in = next((sk for sk in gout.inputs if sk.bl_idname == "NodeSocketGeometry"), None)
+        if geo_in is not None:
+            tap_tree.links.new(from_socket, geo_in)
+    if old is None:
+        old = tap.modifiers.new("CodeNodes Tap", 'NODES')
+    old.node_group = tap_tree
+    if old_tree is not None and old_tree.users == 0:
+        bpy.data.node_groups.remove(old_tree)
+    tap["cn_tap_sig"] = sig
+    tap["cn_tap_host"] = host.name
+    _copy_modifier_values(host, tree, tap)
+    # the tap lives in the hidden Sources collection, which Blender only evaluates for objects
+    # something depends on: an Object Info inside the GPU Mesh group makes it a dependency
+    group = node.node_tree
+    link = group.nodes.get("Tap")
+    if link is None:
+        link = group.nodes.new("GeometryNodeObjectInfo")
+        link.name = link.label = "Tap"
+        link.location = (-150, -250)
+    if link.inputs["Object"].default_value != tap:
+        link.inputs["Object"].default_value = tap
+    from . import gpu_live
+    gpu_live.mark_deform_dirty(src.name)
+    return tap
+
+
+def _copy_modifier_values(host, tree, tap):
+    hm = next((m for m in host.modifiers if m.type == 'NODES' and m.node_group == tree), None)
+    tm = tap.modifiers.get("CodeNodes Tap")
+    if hm is None or tm is None:
+        return
+    for item in tree.interface.items_tree:
+        if item.item_type == 'SOCKET' and item.in_out == 'INPUT' and item.socket_type != "NodeSocketGeometry":
+            try:
+                if tm.get(item.identifier) != hm.get(item.identifier):
+                    tm[item.identifier] = hm[item.identifier]
+            except (KeyError, TypeError):
+                pass
+
+
+_popup = []
+
+
+def request_popup(src):
+    """Open the code of `src` in a pop-up Text Editor on the next tick (never from inside a handler)."""
+    _popup.append(src.name)
+
+    def _open():
+        from .gn_ui import open_code_popup
+        while _popup:
+            obj = bpy.data.objects.get(_popup.pop(0))
+            if obj is not None and obj.codenodes.text is not None:
+                open_code_popup(obj.codenodes.text)
+        return None
+    if not bpy.app.timers.is_registered(_open):
+        bpy.app.timers.register(_open, first_interval=0.01)
+
+
+def tap_of(src):
+    return bpy.data.objects.get(f"CN Tap · {src.name}")
+
+
 def sync():
-    """One pass: split duplicates, match inputs to code, push values, queue rebuilds."""
-    if live._rendering() or not any(is_code_group(g) for g in bpy.data.node_groups):
+    """One pass: split duplicates, match inputs to code, push values, queue rebuilds, show status."""
+    from . import gn_sockets, gpu_live
+    if live._rendering():
+        return
+    groups = list(bpy.data.node_groups)
+    if not any(is_code_group(g) or is_make_real(g) for g in groups):
+        if gpu_live.hosts:
+            gpu_live.hosts.clear()
+            gpu_live.redraw()
         return
     for gname, lst in users().items():
         group = bpy.data.node_groups.get(gname)
@@ -499,12 +1137,29 @@ def sync():
             split(group, user)
         user = lst[0]
         s = obj.codenodes
-        if s.enabled and [i[0] for i in wanted_inputs(obj)] != [
-                i.name for i in group.interface.items_tree
-                if i.item_type == 'SOCKET' and i.in_out == 'INPUT']:
+        if s.kind in GPU_KINDS:
+            _migrate_gpu_group(group)
+        if s.enabled:
             sync_interface(group, obj)
-        if s.enabled and apply_values(obj, read_values(user)) and s.live:
-            live.request(obj)
+            if user[0] == 'node':
+                gn_sockets.set_menu_defaults(user[1], user[2], obj)
+        if s.enabled and apply_values(obj, read_values(user), user):
+            if s.kind in GPU_KINDS:
+                gpu_live.redraw()
+            if s.live:
+                live.request(obj)
+        if user[0] == 'node':
+            gn_sockets.update_status(group, obj, [user[2]])
+            edit = user[2].inputs.get(gn_sockets.EDIT)
+            if edit is not None and not edit.is_linked and edit.default_value:
+                edit.default_value = False            # behaves like a button
+                request_popup(obj)
+    host_map = sync_make_real()
+    if host_map != gpu_live.hosts:
+        gpu_live.hosts.clear()
+        gpu_live.hosts.update(host_map)
+        gpu_live.mark_emitters_dirty()
+        gpu_live.redraw()
 
 
 _dirty = [True]

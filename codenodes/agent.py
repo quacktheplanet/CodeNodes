@@ -708,20 +708,35 @@ def nodes_use(capability, object=None, values=None, name=None, refresh=False):
     return result
 
 
-def code_node(kind="mesh", code=None, template=None, name=None, object=None, values=None):
-    """A code node inside Geometry Nodes: geometry made by code, with the code's sliders as
-    inputs on the node. What a person gets from Add › Mesh › Code Mesh / Shape / Particles.
+def _plain(v):
+    """A socket value as plain JSON: numbers stay, vectors and colours become lists, objects names."""
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    if isinstance(v, bpy.types.ID):
+        return v.name
+    try:
+        return [float(x) for x in v]
+    except TypeError:
+        return str(v)
 
-    Without `object` (or with a name that doesn't exist yet) it adds a new object whose
-    Geometry Nodes tree holds one code node wired to the output. With the name of an
+
+def code_node(kind="mesh", code=None, template=None, name=None, object=None, values=None, make_real=True):
+    """A code node inside Geometry Nodes: geometry made by code, with the code's settings and
+    sliders as inputs on the node. What a person gets from Add › Mesh › CodeNodes.
+
+    Without `object` (or with a name that doesn't exist yet) it adds a new object named `name`
+    whose Geometry Nodes tree holds one code node wired to the output. With the name of an
     object that already has a code node it updates that node: `code` replaces its code,
-    `values` sets its inputs by name ({"major": 1.2, "Resolution": 128}). kind is "mesh"
-    (sdf), "shape" or "particles"; `template` picks a starting template by name instead of
-    `code` (see the Add menu's templates). The result names the object, its tree, the
-    node group, and the hidden source object whose code it runs.
+    `values` sets its inputs by name ({"major": 1.2, "Count": 500000}). kind is "mesh" (a GPU
+    Surface: `float sdf(vec3 p)`), "particles" (GPU Particles: spawn/update), "deform" (GPU
+    Mesh: `void deform(inout Vertex v)` on the mesh wired into it) or "shape"; `template`
+    picks a starting template by name instead of `code`. GPU nodes are drawn live on the GPU;
+    `make_real` (default on) puts a Make Real node after a new one so it's real geometry that
+    renders and that later nodes can use. The result names the object, its tree, the node
+    group and the hidden source object whose code it runs.
     """
     from . import gn_link, live
-    kinds = {"mesh": 'MESH', "shape": 'SHAPE', "particles": 'PARTICLES'}
+    kinds = {"mesh": 'MESH', "shape": 'SHAPE', "particles": 'PARTICLES', "deform": 'DEFORM'}
     if kind not in kinds:
         return {"ok": False, "error": f"kind must be one of {', '.join(kinds)}"}
     obj = bpy.data.objects.get(object) if object else None
@@ -746,30 +761,45 @@ def code_node(kind="mesh", code=None, template=None, name=None, object=None, val
             source = code if code is not None else None
             label = name or template or None
             obj, tree, node, err = gn_link.add_object(kinds[kind], template or None, source=source,
-                                                      label=label)
+                                                      label=label, make_real=bool(make_real))
         except KeyError as exc:
             return {"ok": False, "error": str(exc.args[0])}
         wanted = object or name           # the object gets exactly the name asked for
         if wanted and obj.name != wanted and wanted not in bpy.data.objects:
             obj.name = wanted
         src = gn_link.source_of(node.node_tree)
+        gn_link.sync()
+        live.rebuild(src)
+    real = next((l.to_node for l in tree.links if l.from_node == node and l.to_node.type == 'GROUP'
+                 and gn_link.is_make_real(l.to_node.node_tree)), None)
     problems = []
     for key, value in (values or {}).items():
         sock = node.inputs.get(key)
+        if sock is None and real is not None:
+            sock = real.inputs.get(key)          # Resolution / Max Points / When live on Make Real
         if sock is None:
-            problems.append(f"no input '{key}' (it has: {', '.join(s.name for s in node.inputs)})")
+            have = [s.name for s in node.inputs] + ([s.name for s in real.inputs] if real is not None else [])
+            problems.append(f"no input '{key}' (it has: {', '.join(have)})")
             continue
         try:
+            if sock.bl_idname == "NodeSocketObject" and isinstance(value, str):
+                value = bpy.data.objects.get(value)
             sock.default_value = value
         except (TypeError, ValueError) as exc:
             problems.append(f"{key}: {exc}")
-    if values and gn_link.apply_values(src, gn_link.read_values(('node', tree, node))):
+    if values:
+        gn_link.sync()
         err = live.rebuild(src) or err
     s = src.codenodes
     result = {"ok": not err and not problems, "object": obj.name, "tree": tree.name,
               "node": node.node_tree.name, "source": src.name, "kind": s.kind.lower(),
-              "inputs": {sock.name: getattr(sock, "default_value", None) for sock in node.inputs},
-              "stats": s.stats}
+              "inputs": {sock.name: _plain(getattr(sock, "default_value", None)) for sock in node.inputs},
+              "status": node.label, "stats": s.stats}
+    if real is not None:
+        result["make_real"] = {sock.name: _plain(getattr(sock, "default_value", None)) for sock in real.inputs}
+    elif s.kind in gn_link.GPU_KINDS:
+        result["note"] = ("drawn live on the GPU only; call again with make_real on a new object, or add a Make "
+                          "Real node after it, to get real geometry")
     if err or problems:
         result["error"] = "; ".join([e for e in (err,) if e] + problems)
     return result

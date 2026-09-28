@@ -31,8 +31,8 @@ class CODENODES_PT_main(bpy.types.Panel):
             layout.label(text="Add an object made by code:")
             col = layout.column(align=True)
             col.operator_context = 'EXEC_DEFAULT'
-            for kind, text, icon in (('MESH', "Code Mesh", 'SCRIPT'), ('SHAPE', "Code Shape", 'MESH_CYLINDER'),
-                                     ('PARTICLES', "Code Particles", 'PARTICLES')):
+            for kind, text, icon in (('PARTICLES', "GPU Particles", 'PARTICLES'), ('MESH', "GPU Surface", 'SCRIPT'),
+                                     ('SHAPE', "Code Shape", 'MESH_CYLINDER')):
                 col.operator("codenodes.add_object", text=text, icon=icon).kind = kind
             layout.label(text="Each one is a code node in Geometry Nodes.", icon='INFO')
             layout.label(text="Or, in any Geometry Nodes tree: Add › CodeNodes")
@@ -97,7 +97,8 @@ class CODENODES_PT_main(bpy.types.Panel):
 
 
 def _draw_code_node(layout, tree, node):
-    """One code node of the active object: what it is, its inputs, and the buttons to edit it."""
+    """One code node of the active object: its status and the buttons Blender can't put on a node.
+    Its settings are inputs on the node itself (Geometry Nodes editor)."""
     from . import gn_link
     group = node.node_tree
     src = gn_link.source_of(group)
@@ -105,32 +106,19 @@ def _draw_code_node(layout, tree, node):
         return
     s = src.codenodes
     box = layout.box()
-    box.label(text=group.name, icon=gn_link.KINDS.get(s.kind, ("", "", 'SCRIPT'))[2])
+    box.label(text=node.label or group.name, icon=gn_link.KINDS.get(s.kind, ("", "", 'SCRIPT'))[2])
     row = box.row(align=True)
     row.scale_y = 1.2
-    row.operator("codenodes.gn_edit_code", icon='TEXT').group = group.name
     row.operator("codenodes.show_in_gn", icon='GEOMETRY_NODES', text="Show Nodes").group = group.name
-    col = box.column(align=True)
-    for sock in node.inputs:
-        if sock.is_linked:
-            col.label(text=f"{sock.name}: from a link")
-        elif hasattr(sock, "default_value"):
-            col.prop(sock, "default_value", text=sock.name)
-    row = box.row(align=True)
-    row.prop(s, "live", toggle=True)
-    row.prop(s, "animate", toggle=True)
-    row.prop(s, "smooth", toggle=True)
-    row = box.row(align=True)
-    row.operator("codenodes.gn_rebuild", icon='FILE_REFRESH').group = group.name
-    if s.kind == 'MESH':
-        row.operator("codenodes.gn_make_native", icon='NODETREE').group = group.name
+    row.operator("codenodes.gn_edit_code", icon='TEXT').group = group.name
+    if s.kind in gn_link.GPU_KINDS and s.real_mode in ("NONE", "RENDER_ONLY"):
+        box.label(text="Live on the GPU (viewport only)", icon='INFO')
+        box.operator("codenodes.gn_add_make_real", text="Add Make Real", icon='MESH_DATA').group = group.name
     if s.last_error:
         err = box.box()
         err.alert = True
         for line in s.last_error.splitlines()[:8]:
             err.label(text=line, icon='ERROR' if not line.startswith(" ") else 'BLANK1')
-    elif s.stats:
-        box.label(text=s.stats.split(" · ")[0])
 
 
 classes = (CODENODES_PT_main,)

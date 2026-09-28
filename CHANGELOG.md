@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.2.0 (unreleased, draft): GPU nodes
+
+### GPU code as nodes, drawn live
+- **GPU Particles** are stepped by a compute shader and drawn straight from GPU memory into the
+  viewport, with no copy into Blender. On an RTX A4500: 1M particles at about 190 fps, 4.2M at about
+  160. The templates Galaxy, Flow and Attractor come from Myriad; `look(p)` colours them from code.
+  **Emit From** spawns them on another object's evaluated surface (`emitPoint`, `emitNormal`).
+- **GPU Surface** raymarches `sdf(p)` live, depth-tested against your objects, with sun, sky, soft
+  shadows, ambient occlusion and fog. An optional `color(p)` colours it. New templates: Castle (from
+  Aerie), Planet (Tellus-style), Saturn.
+- **GPU Mesh** is new: `deform(v)` runs on every vertex of the mesh wired into the node (deform,
+  displace, recolour), fed through a hidden "tap" copy of your tree. Templates: Wave, Noise Displace,
+  Twist.
+
+### Make Real
+- A node (Shift A › CodeNodes › Make Real, like Realize Instances) turns the GPU node before it into
+  real geometry:
+  - particles become points with `velocity`, `speed`, `age` and `life`
+  - surfaces become a mesh
+  - GPU Mesh gives the same topology with `color` and `value`
+- Its inputs: **When** (Automatic / Every Frame / When Changed / Only for Render), **Resolution** or
+  **Max Points**, and which particle attributes to keep. Its header shows the cost.
+
+### Everything on the node
+- Settings are node inputs: the **Template** dropdown (switching keeps your edited code in a backup
+  text), Count, Emit From, and Look / Simulation / Bounds panels.
+- **✎ Edit Code**, the first input, opens the code in a pop-up Text Editor window and switches itself
+  back off. Double-click or Ctrl+E does the same. Code recompiles as you type.
+- The header shows the status (`Galaxy · live · 1.0M`, `⚠ line 12 …`). Tab in to see the code and
+  the full status in frames. The sidebar keeps only buttons and the full error.
+
+### Rendering
+- **Render › Render Image / Animation with CodeNodes:** for each frame, the GPU steps, the result is
+  made real, then that frame renders. The GPU and the renderer never overlap, so no bake is needed.
+  Live-only nodes are made real just for the render.
+- All GPU work goes through one guard that refuses it during any render; the tests count 0.
+
+### Also
+- Particle seeds use an integer hash (PCG). The old `sin`-based hash lined up in streaks at millions
+  of particles.
+- Particles are placed at reset (`update(p, 0)`), so kinematic motions like Galaxy start in shape.
+- Shader push constants stay within 128 bytes, the most Vulkan guarantees.
+- **Behaviour change:** a GPU Surface or GPU Particles node's own output is empty until a Make Real
+  node follows it. 3D View › Add › Mesh › GPU Surface adds one when asked, and so does the
+  assistant's `code_node` (`make_real`, on by default).
+
 ## 0.1.2 (unreleased, draft)
 
 ### Nodes first

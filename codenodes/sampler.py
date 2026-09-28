@@ -139,11 +139,15 @@ def sample(source, lo, hi, resolution, time_s=0.0, frame=0.0, values=None, budge
     ubo = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
     shader.uniform_block("cnParams", ubo)
 
+    from . import gpu_guard
+    if gpu_guard.rendering():
+        raise SdfCodeError("a render is running; CodeNodes never runs GPU code during a render")
+
     def run(target, tiles, w, h, z0, z1):
         shader.image("cnGrid", target)
         uniform(shader.uniform_int, "cnTiles", tiles)
         uniform(shader.uniform_int, "cnSlab", (z0, z1))
-        gpu.compute.dispatch(shader, math.ceil(w / GROUP), math.ceil(h / GROUP), 1)
+        gpu_guard.dispatch(shader, math.ceil(w / GROUP), math.ceil(h / GROUP), 1)
 
     # Time one slice on a one-tile scratch texture (reading it back waits for the GPU).
     t0 = time.perf_counter()

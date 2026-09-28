@@ -25,9 +25,18 @@ class CodeNodesPreferences(bpy.types.AddonPreferences):
         update=_link_changed,
     )
 
+    open_code_editor: BoolProperty(
+        name="Also show code next to the graph on selection",
+        description=("When you select a code node (or Tab into it) in the Geometry Nodes editor, also show its "
+                     "code in a Text Editor next to the graph, splitting the editor if needed. The node's "
+                     "Edit Code toggle, a double-click or Ctrl+E open it in a pop-up window either way"),
+        default=False,
+    )
+
     def draw(self, context):
         from . import server
         layout = self.layout
+        layout.prop(self, "open_code_editor")
         layout.prop(self, "link_enabled")
         info = server.status()
         if info["running"]:
@@ -39,6 +48,12 @@ class CodeNodesPreferences(bpy.types.AddonPreferences):
             layout.label(text=info.get("error") or "Starting…", icon='INFO')
         else:
             layout.label(text="Off", icon='RADIOBUT_OFF')
+
+
+def get():
+    """The add-on's preferences, or None (e.g. when loaded from a repo checkout in tests)."""
+    addon = bpy.context.preferences.addons.get(__package__)
+    return addon.preferences if addon is not None else None
 
 
 classes = (CodeNodesPreferences,)

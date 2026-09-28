@@ -103,7 +103,7 @@ def check_add_objects():
     from codenodes import ops
     ops.menu_add(Menu(), ctx)
     texts = [e[2] for e in labels if e[0] == "op"]
-    check(texts[:3] == ["Code Mesh", "Code Shape", "Code Particles"] and
+    check(texts[:3] == ["GPU Particles", "GPU Surface", "Code Shape"] and
           all(e[1] == "codenodes.add_object" for e in labels if e[0] == "op"),
           f"Add › Mesh lists the node versions first ({texts})")
     check(any(e[0] == "menu" and e[1] == "CODENODES_MT_add_legacy" for e in labels),
@@ -111,18 +111,30 @@ def check_add_objects():
 
     made = {}
     for kind in ("MESH", "SHAPE", "PARTICLES"):
-        r = bpy.ops.codenodes.add_object(kind=kind)
+        # a GPU Surface is drawn live; with Make Real after it the object gets the real donut
+        r = bpy.ops.codenodes.add_object(kind=kind, make_real=(kind == "MESH"))
         obj = ctx.view_layer.objects.active
         found = gn_link.host_code_nodes(obj)
         check(r == {'FINISHED'} and len(found) == 1,
               f"Add {kind.title()} makes '{obj.name}' with a code node in its Geometry Nodes")
         tree, node = found[0]
         out = next(n for n in tree.nodes if n.type == 'GROUP_OUTPUT')
-        check(any(l.from_node == node and l.to_node == out for l in tree.links),
-              f"  wired to the output ({tree.name} ← {node.node_tree.name})")
+        real = next((n for n in tree.nodes if n.type == 'GROUP' and gn_link.is_make_real(n.node_tree)), None)
+        if kind == "MESH":
+            check(real is not None and any(l.from_node == node and l.to_node == real for l in tree.links)
+                  and any(l.from_node == real and l.to_node == out for l in tree.links),
+                  f"  wired through Make Real to the output ({tree.name} ← {node.node_tree.name})")
+        else:
+            check(any(l.from_node == node and l.to_node == out for l in tree.links),
+                  f"  wired to the output ({tree.name} ← {node.node_tree.name})")
         made[kind] = (obj, tree, node)
     obj, tree, node = made['MESH']
-    check("Resolution" in node.inputs and "major" in node.inputs, "the donut's sliders are inputs on its node")
+    gn_link.sync()
+    real = next(n for n in tree.nodes if n.type == 'GROUP' and gn_link.is_make_real(n.node_tree))
+    check("major" in node.inputs and "Template" in node.inputs and "Resolution" in real.inputs,
+          f"the donut's sliders and template are on its node, Resolution on Make Real ({[s.name for s in node.inputs][:4]} / {[s.name for s in real.inputs]})")
+    from codenodes import live as _live
+    _live.rebuild(gn_link.source_of(node.node_tree))
     bpy.context.view_layer.update()
     ev = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
     size = max(ev.dimensions)
@@ -140,10 +152,8 @@ def check_sidebar(made):
     log = draw_sidebar(ctx)
     ops_drawn = {e[1] for e in log if e[0] == "op"}
     props = {e[1]: e[2] for e in log if e[0] == "prop"}
-    check({"codenodes.gn_edit_code", "codenodes.show_in_gn", "codenodes.gn_rebuild"} <= ops_drawn,
-          "the sidebar shows Edit Code, Show Nodes and Rebuild for the code node")
-    check(abs(props.get("major", 0) - 0.8) < 1e-6 and "Resolution" in props,
-          f"and the node's inputs ({sorted(k for k in props if k[0].isupper() or k in ('major', 'minor'))})")
+    check({"codenodes.gn_edit_code", "codenodes.show_in_gn"} <= ops_drawn,
+          "the 3D sidebar shows Edit Code and Show Nodes for the code node (settings live on the node)")
     node.inputs["major"].default_value = 1.2
     t0 = time.time()
     while time.time() - t0 < 3:
@@ -156,7 +166,7 @@ def check_sidebar(made):
     ctx.view_layer.update()
     size = max(obj.evaluated_get(ctx.evaluated_depsgraph_get()).dimensions)
     check(r == {'FINISHED'} and abs(size - 2 * (1.2 + 0.3)) < 0.06,
-          f"a value typed in the sidebar rebuilds it through the named-group Rebuild ({size:.3f} m)")
+          f"a value typed on the node rebuilds it through the named-group Rebuild ({size:.3f} m)")
     r = bpy.ops.codenodes.gn_edit_code(group=node.node_tree.name)
     text_areas = [a for a in ctx.screen.areas if a.type == 'TEXT_EDITOR']
     src = gn_link.source_of(node.node_tree)

@@ -35,6 +35,14 @@ float noise3(vec3 x) {
              mix(mix(cnHash(i + vec3(0, 0, 1)), cnHash(i + vec3(1, 0, 1)), f.x), mix(cnHash(i + vec3(0, 1, 1)), cnHash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
 }
 float fbm3(vec3 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise3(p); p = p * 2.03 + 11.7; a *= 0.5; } return v; }
+vec3 aroundZ(vec3 p, float n) { float s = 6.2831853 / n; float a = atan(p.y, p.x); a = mod(a + s * 0.5, s) - s * 0.5; float r = length(p.xy); return vec3(r * cos(a), r * sin(a), p.z); }
+float sdCone(vec3 p, float h, float r1, float r2) {
+  vec2 q = vec2(length(p.xy), p.z), k1 = vec2(r2, h), k2 = vec2(r2 - r1, 2.0 * h);
+  vec2 ca = vec2(q.x - min(q.x, (q.y < 0.0) ? r1 : r2), abs(q.y) - h);
+  vec2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0, 1.0);
+  float s = (cb.x < 0.0 && ca.y < 0.0) ? -1.0 : 1.0;
+  return s * sqrt(min(dot(ca, ca), dot(cb, cb)));
+}
 // ---- user code ----
 """
 

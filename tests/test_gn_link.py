@@ -22,7 +22,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.environ.get("CODENODES_EXPRESSION_NODES",
                                   os.path.join(os.path.dirname(ROOT), "ExpressNode")))
 import codenodes  # noqa: E402
-from codenodes import gn_link, gn_ui, live, sampler  # noqa: E402
+from codenodes import gn_link, gn_sockets, gn_ui, live, sampler  # noqa: E402
 
 _checks = 0
 SAVE = os.path.join(tempfile.gettempdir(), "codenodes_gn_link_test.blend")
@@ -113,7 +113,9 @@ def phase0(state):
     check(src is not None and col is not None and src.name in col.objects and col.hide_viewport and col.hide_render,
           "its source object lives in the hidden 'CodeNodes Sources' collection")
     names = [s.name for s in node.inputs]
-    check(names == ["Resolution", "major", "minor"], f"the node's inputs are the code's sliders ({names})")
+    check(names[:4] == [gn_sockets.EDIT, "Template", "major", "minor"] and "Colour" in names and "Bounds Max" in names,
+          f"the node's inputs are its template, the code's sliders, then its settings ({names})")
+    check(node.label.endswith("live"), f"alone, a GPU Surface is drawn live (label '{node.label}')")
     item = next(i for i in group.interface.items_tree if i.item_type == 'SOCKET' and i.name == "major")
     check(abs(item.default_value - 0.8) < 1e-6 and abs(item.min_value - 0.2) < 1e-6
           and abs(item.max_value - 2.0) < 1e-6, "inputs carry the @param default, min and max")
@@ -122,6 +124,13 @@ def phase0(state):
     gout = next(n for n in tree.nodes if n.type == 'GROUP_OUTPUT')
     tree.links.new(node.outputs["Geometry"], xform.inputs["Geometry"])
     tree.links.new(xform.outputs["Geometry"], gout.inputs["Geometry"])
+    check(radius_xy(host) == 0.0, "its Geometry output carries nothing until Make Real")
+    mr = gn_link.insert_make_real(tree, node)
+    gn_link.sync()
+    live._flush()
+    check(any(l.from_node == mr and l.to_node == xform for l in tree.links) and "Resolution" in mr.inputs,
+          "Make Real goes right after it, keeps its links, and has the Resolution input")
+    state["real"] = mr.name
     r = radius_xy(host)
     check(abs(r - 1.1) < 0.05, f"the code's geometry flows through the tree (outer radius {r:.3f}, expect 1.1)")
     node.inputs["major"].default_value = 1.2
@@ -152,7 +161,8 @@ def phase2(state):
     names = [s.name for s in node.inputs]
     if "squash" not in names and time.perf_counter() - state["t"] < 8:
         return False
-    check(names == ["Resolution", "major", "squash", "minor"], f"a code edit adds its new slider to the node ({names})")
+    check(names[:5] == [gn_sockets.EDIT, "Template", "major", "squash", "minor"],
+          f"a code edit adds its new slider to the node ({names})")
     check(abs(node.inputs["major"].default_value - 1.2) < 1e-6, "values typed on the node survive the code edit")
     node.inputs["squash"].default_value = 1.25
     gn_link.sync()
@@ -171,12 +181,13 @@ def phase3(state):
     group = node.node_tree
     src = gn_link.source_of(group)
 
-    # resolution input
-    node.inputs["Resolution"].default_value = 48
+    # resolution input (on Make Real)
+    mr = tree.nodes[state["real"]]
+    mr.inputs["Resolution"].default_value = 48
     gn_link.sync()
     live._flush()
-    check(src.codenodes.resolution == 48, "the Resolution input drives the sampling resolution")
-    node.inputs["Resolution"].default_value = 96
+    check(src.codenodes.resolution == 48, "Make Real's Resolution input drives the sampling resolution")
+    mr.inputs["Resolution"].default_value = 96
 
     # duplicate with the editor's own operator
     for n in tree.nodes:
@@ -191,12 +202,14 @@ def phase3(state):
     check(dup.node_tree != group and gn_link.source_of(dup.node_tree) not in (None, src),
           f"the next sync gives the copy its own group and source ('{dup.node_tree.name}')")
     dup.inputs["major"].default_value = 0.5
+    dup_real = gn_link.insert_make_real(tree, dup)
     gn_link.sync()
     live._flush()
     ra, rb = source_radius(group), source_radius(dup.node_tree)
     check(abs(ra - 1.875) < 0.07 and abs(rb - 1.0) < 0.07,
           f"the two nodes are independent (original {ra:.3f}, copy {rb:.3f})")
     tree.nodes.remove(dup)
+    tree.nodes.remove(dup_real)
 
     # a value linked from a Value node
     val = tree.nodes.new("ShaderNodeValue")
@@ -219,9 +232,13 @@ def phase3(state):
         bpy.ops.codenodes.gn_add('EXEC_DEFAULT', kind='PARTICLES', template="Fountain", use_transform=False)
     fountain = tree.nodes.active
     psrc = gn_link.source_of(fountain.node_tree)
+    check(len(psrc.data.vertices) == 0, "GPU Particles alone stay on the GPU (nothing copied into Blender)")
+    fr = gn_link.insert_make_real(tree, fountain)
+    gn_link.sync()
+    live._flush()
     bpy.context.scene.frame_set(12)
     check(len(psrc.data.vertices) > 1000 and "power" in [s.name for s in fountain.inputs],
-          f"Code Particles inserts and simulates ({len(psrc.data.vertices):,} points at frame 12)")
+          f"with Make Real, GPU Particles become real points ({len(psrc.data.vertices):,} at frame 12)")
     bpy.context.scene.frame_set(1)
     join = tree.nodes.new("GeometryNodeJoinGeometry")
     join.location = (450, -150)
@@ -235,7 +252,7 @@ def phase3(state):
     tree.links.new(lamp.outputs["Geometry"], lamp_move.inputs["Geometry"])
     tree.links.new(lamp_move.outputs["Geometry"], join.inputs["Geometry"])
     tree.links.new(join.outputs["Geometry"], gout.inputs["Geometry"])
-    lamp.location, fountain.location = (0, -250), (0, -500)
+    lamp.location, fountain.location, fr.location = (0, -250), (0, -500), (250, -500)
 
     # editing panel operators
     tree.nodes.active = node

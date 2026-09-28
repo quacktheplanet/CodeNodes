@@ -214,7 +214,7 @@ class CODENODES_MT_add_legacy(bpy.types.Menu):
 
 class CODENODES_MT_add_templates(bpy.types.Menu):
     bl_idname = "CODENODES_MT_add_templates"
-    bl_label = "Code Templates"
+    bl_label = "CodeNodes Templates"
 
     def draw(self, context):
         from . import gn_link
@@ -230,8 +230,8 @@ class CODENODES_MT_add_templates(bpy.types.Menu):
 def menu_add(self, context):
     layout = self.layout
     layout.separator()
-    for kind, text, icon in (('MESH', "Code Mesh", 'SCRIPT'), ('SHAPE', "Code Shape", 'MESH_CYLINDER'),
-                             ('PARTICLES', "Code Particles", 'PARTICLES')):
+    for kind, text, icon in (('PARTICLES', "GPU Particles", 'PARTICLES'), ('MESH', "GPU Surface", 'SCRIPT'),
+                             ('SHAPE', "Code Shape", 'MESH_CYLINDER')):
         layout.operator("codenodes.add_object", text=text, icon=icon).kind = kind
     layout.menu(CODENODES_MT_add_templates.bl_idname, icon='FILE_NEW')
     layout.menu(CODENODES_MT_add_legacy.bl_idname, icon='BLANK1')

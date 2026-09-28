@@ -24,19 +24,57 @@ import numpy as np
 
 from .sdf_code import PRELUDE, SdfCodeError, param_defines, parse_params, user_errors
 
-MAX_COUNT = 2_000_000
-ROW = 256                       # particles per texture row
+MAX_COUNT = 16_777_216          # live on the GPU; Real Geometry is capped lower (MAX_REAL)
+MAX_REAL = 4_194_304
+ROW = 256                       # particles per texture row (default; big systems use wider rows)
 GROUP = 16
 MAX_CATCHUP_STEPS = 600         # a scrub that needs more than this restarts instead
+EMIT_SAMPLES = 65536            # points sampled from an Emit From object
+
+
+def row_for(count):
+    """Texture row width: 256 keeps small systems compact, wider rows keep big ones under the
+    GPU's texture height limit."""
+    return ROW if count <= ROW * 8192 else 2048
+
 
 PARTICLE_PRELUDE = """\
 // ---- CodeNodes particle helpers ----
 struct Particle { vec3 position; vec3 velocity; float age; float life; float seed; };
-float rand1(float n) { return fract(sin(n * 12.9898 + 4.1414) * 43758.5453123); }
+// An integer hash (PCG) of the float's bits: sin()-based hashes lose precision at the seeds of
+// millions of particles, and neighbouring particles then line up in streaks.
+uint cnPcg(uint v) { uint s = v * 747796405u + 2891336453u; uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u; return (w >> 22u) ^ w; }
+float rand1(float n) { return float(cnPcg(floatBitsToUint(n) ^ 0x9E3779B9u) >> 8) / 16777216.0; }
 vec3 rand3(float n) { return vec3(rand1(n * 1.03 + 0.13), rand1(n * 1.71 + 2.71), rand1(n * 3.11 + 5.37)); }
 vec3 randBall(float n) {          // roughly even through a unit ball
   vec3 r = rand3(n) * 2.0 - 1.0;
   return normalize(r + 1e-6) * pow(rand1(n * 7.77 + 1.23), 0.3333);
+}
+vec3 randSphere(float n) {        // evenly on a unit sphere
+  vec2 h = vec2(rand1(n * 5.13 + 0.7), rand1(n * 9.41 + 3.3));
+  float z = h.x * 2.0 - 1.0, a = h.y * 6.2831853, r = sqrt(max(0.0, 1.0 - z * z));
+  return vec3(r * cos(a), r * sin(a), z);
+}
+// Emit From: points spread evenly over another object's surface (zero when there's none)
+int cnEmitIndex(float seed) { return int(rand1(seed * 3.91 + 0.37) * float(max(cnEmitCount, 1))) % max(cnEmitCount, 1); }
+vec3 emitPoint(float seed) { if (cnEmitCount == 0) return vec3(0.0); int i = cnEmitIndex(seed); return texelFetch(cnEmitP, ivec2(i % 256, i / 256), 0).xyz; }
+vec3 emitNormal(float seed) { if (cnEmitCount == 0) return vec3(0.0, 0.0, 1.0); int i = cnEmitIndex(seed); return texelFetch(cnEmitN, ivec2(i % 256, i / 256), 0).xyz; }
+// gradient noise and its curl: a flow that never piles up (as in Myriad)
+vec3 cnHash33(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx) * 2.0 - 1.0; }
+float gnoise(vec3 p) {
+  vec3 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(dot(cnHash33(i), f), dot(cnHash33(i + vec3(1, 0, 0)), f - vec3(1, 0, 0)), u.x),
+                 mix(dot(cnHash33(i + vec3(0, 1, 0)), f - vec3(0, 1, 0)), dot(cnHash33(i + vec3(1, 1, 0)), f - vec3(1, 1, 0)), u.x), u.y),
+             mix(mix(dot(cnHash33(i + vec3(0, 0, 1)), f - vec3(0, 0, 1)), dot(cnHash33(i + vec3(1, 0, 1)), f - vec3(1, 0, 1)), u.x),
+                 mix(dot(cnHash33(i + vec3(0, 1, 1)), f - vec3(0, 1, 1)), dot(cnHash33(i + vec3(1, 1, 1)), f - vec3(1, 1, 1)), u.x), u.y), u.z);
+}
+vec3 cnPotential(vec3 p) { return vec3(gnoise(p), gnoise(p + vec3(31.4, 7.1, 11.9)), gnoise(p + vec3(-17.3, 23.9, 5.3))); }
+vec3 curlNoise(vec3 p) {
+  const float e = 0.08;
+  vec3 dx = vec3(e, 0, 0), dy = vec3(0, e, 0), dz = vec3(0, 0, e);
+  vec3 px0 = cnPotential(p - dx), px1 = cnPotential(p + dx), py0 = cnPotential(p - dy), py1 = cnPotential(p + dy);
+  vec3 pz0 = cnPotential(p - dz), pz1 = cnPotential(p + dz);
+  return vec3((py1.z - py0.z) - (pz1.y - pz0.y), (pz1.x - pz0.x) - (px1.z - px0.z), (px1.y - px0.y) - (py1.x - py0.x)) / (2.0 * e);
 }
 // ---- your code ----
 """
@@ -62,6 +100,7 @@ void main() {
     p.life = 5.0;
     spawn(p);
     p.age = rand1(p.seed * 2.17) * p.life * cnStagger;   // so they don't all die together
+    update(p, 0.0);          // place it (kinematic motions set the position here) without moving it on
   } else {
     p.age += cnDt;
     if (p.age >= p.life) {
@@ -123,6 +162,34 @@ def full_source(source, params):
     return head + source + "\n" + PARTICLE_MAIN, head.count("\n")
 
 
+def has_look(source):
+    import re
+    return re.search(r"\bvec4\s+look\s*\(\s*Particle\s+\w+\s*\)", source) is not None
+
+
+def _empty_emitter():
+    import gpu
+    zero = gpu.types.Buffer('FLOAT', 4, [0.0, 0.0, 0.0, 0.0])
+    return (gpu.types.GPUTexture((1, 1), format='RGBA32F', data=zero),
+            gpu.types.GPUTexture((1, 1), format='RGBA32F', data=zero), 0)
+
+
+def emitter_textures(points, normals):
+    """Upload emit points and normals ((n, 3) arrays, n <= EMIT_SAMPLES) as 256-wide textures."""
+    import gpu
+    n = len(points)
+    if n == 0:
+        return _empty_emitter()
+    rows = max(1, math.ceil(n / 256))
+    out = []
+    for arr in (points, normals):
+        data = np.zeros((rows * 256, 4), np.float32)
+        data[:n, :3] = arr
+        out.append(gpu.types.GPUTexture((256, rows), format='RGBA32F',
+                                        data=gpu.types.Buffer('FLOAT', data.size, data.ravel())))
+    return out[0], out[1], n
+
+
 class Sim:
     """One particle system's GPU state."""
 
@@ -143,8 +210,11 @@ class Sim:
         info.uniform_buf(0, "CNParams", "cnParams")
         info.image(0, 'RGBA32F', 'FLOAT_2D', "cnPos", qualifiers={'READ', 'WRITE'})
         info.image(1, 'RGBA32F', 'FLOAT_2D', "cnVel", qualifiers={'READ', 'WRITE'})
+        info.sampler(2, 'FLOAT_2D', "cnEmitP")
+        info.sampler(3, 'FLOAT_2D', "cnEmitN")
         for kind, name in (('FLOAT', "cnDt"), ('FLOAT', "uTime"), ('FLOAT', "uFrame"),
-                           ('FLOAT', "cnStagger"), ('INT', "cnCount"), ('INT', "cnRow"), ('INT', "cnReset")):
+                           ('FLOAT', "cnStagger"), ('INT', "cnCount"), ('INT', "cnRow"), ('INT', "cnReset"),
+                           ('INT', "cnEmitCount")):
             info.push_constant(kind, name)
         info.local_group_size(GROUP, GROUP, 1)
         info.compute_source(code)
@@ -152,13 +222,25 @@ class Sim:
         if shader is None:
             raise SdfCodeError("the code didn't compile:\n" + user_errors(log, offset, source))
         self.shader = shader
-        self.rows = max(1, math.ceil(self.count / ROW))
-        self.pos = gpu.types.GPUTexture((ROW, self.rows), format='RGBA32F')
-        self.vel = gpu.types.GPUTexture((ROW, self.rows), format='RGBA32F')
+        self.row = row_for(self.count)
+        self.rows = max(1, math.ceil(self.count / self.row))
+        self.pos = gpu.types.GPUTexture((self.row, self.rows), format='RGBA32F')
+        self.vel = gpu.types.GPUTexture((self.row, self.rows), format='RGBA32F')
+        self.emit_p, self.emit_n, self.emit_count = _empty_emitter()
+        self.emit_key = None          # what the emitter textures were made from
         self.frame = None            # the frame this state represents
+        self.draw_shader = None      # made on first draw (gpu_live)
+        self.draw_key = None
+
+    def set_emitter(self, points, normals, key):
+        self.emit_p, self.emit_n, self.emit_count = emitter_textures(points, normals)
+        self.emit_key = key
 
     def _dispatch(self, dt, time_s, frame, reset, values, stagger=1.0):
         import gpu
+        from . import gpu_guard
+        if not gpu_guard.allowed():
+            return
         sh = self.shader
         sh.image("cnPos", self.pos)
         sh.image("cnVel", self.vel)
@@ -168,18 +250,24 @@ class Sim:
         # keep a reference: a temporary would be freed before the dispatch runs
         self._ubo = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
         sh.uniform_block("cnParams", self._ubo)
+        for name, tex in (("cnEmitP", self.emit_p), ("cnEmitN", self.emit_n)):
+            try:
+                sh.uniform_sampler(name, tex)
+            except ValueError:
+                pass
         for setter, name, value in ((sh.uniform_float, "cnDt", float(dt)),
                                     (sh.uniform_float, "uTime", float(time_s)),
                                     (sh.uniform_float, "uFrame", float(frame)),
                                     (sh.uniform_float, "cnStagger", float(stagger)),
                                     (sh.uniform_int, "cnCount", self.count),
-                                    (sh.uniform_int, "cnRow", ROW),
-                                    (sh.uniform_int, "cnReset", 1 if reset else 0)):
+                                    (sh.uniform_int, "cnRow", self.row),
+                                    (sh.uniform_int, "cnReset", 1 if reset else 0),
+                                    (sh.uniform_int, "cnEmitCount", self.emit_count)):
             try:
                 setter(name, value)
             except ValueError:
                 pass                  # the compiler drops uniforms the code never reads
-        gpu.compute.dispatch(sh, math.ceil(ROW / GROUP), math.ceil(self.rows / GROUP), 1)
+        gpu_guard.dispatch(sh, math.ceil(self.row / GROUP), math.ceil(self.rows / GROUP), 1)
 
     def reset(self, time_s=0.0, frame=0, values=None, stagger=1.0):
         self._dispatch(0.0, time_s, frame, True, values, stagger)
@@ -187,17 +275,19 @@ class Sim:
     def step(self, dt, time_s=0.0, frame=0, values=None):
         self._dispatch(dt, time_s, frame, False, values)
 
-    def read(self):
-        """{'position', 'velocity', 'speed', 'age', 'life'} as numpy arrays of length count.
+    def read(self, limit=0):
+        """{'position', 'velocity', 'speed', 'age', 'life'} as numpy arrays of length count
+        (or the first `limit` particles).
 
         ``speed`` is there because Blender reserves the name ``velocity`` for motion
         blur, so a shader cannot read it back — shade with ``speed`` instead.
         """
+        n = self.count if not limit else min(self.count, int(limit))
         out = {}
         for tex, names in ((self.pos, ("position", "age")), (self.vel, ("velocity", "life"))):
             buf = tex.read()
-            buf.dimensions = ROW * self.rows * 4
-            arr = np.frombuffer(buf, dtype=np.float32).reshape(-1, 4)[:self.count]
+            buf.dimensions = self.row * self.rows * 4
+            arr = np.frombuffer(buf, dtype=np.float32).reshape(-1, 4)[:n]
             out[names[0]] = np.ascontiguousarray(arr[:, :3])
             out[names[1]] = np.ascontiguousarray(arr[:, 3])
         out["speed"] = np.linalg.norm(out["velocity"], axis=1).astype(np.float32)
@@ -224,16 +314,21 @@ def forget(name=None):
         _sims.pop(name, None)
 
 
-def simulate(name, source, count, frame, frame_start, fps, values=None, substeps=1, stagger=1.0):
-    """Bring the simulation to `frame` and return its state.
+def advance(name, source, count, frame, frame_start, fps, values=None, substeps=1, stagger=1.0,
+            prewarm=0.0, emitter=None):
+    """Bring the simulation to `frame` on the GPU, without reading anything back.
 
-    Steps forward from where it already is; a jump backwards restarts from the
-    start frame. Returns (state dict, stats).
+    Steps forward from where it already is; a jump backwards restarts from the start frame
+    (pre-warming `prewarm` seconds first). `emitter` is (points, normals, key) or None.
+    Returns (sim, steps).
     """
     sim = get_sim(name, source, count)
+    if emitter is not None and emitter[2] != sim.emit_key:
+        sim.set_emitter(*emitter)
+    elif emitter is None and sim.emit_key is not None:
+        sim.set_emitter(np.zeros((0, 3)), np.zeros((0, 3)), None)
     substeps = max(1, min(int(substeps), 20))
     dt = 1.0 / (fps * substeps)
-    t0 = time.perf_counter()
     frame = int(frame)
     start = int(frame_start)
     steps = 0
@@ -242,7 +337,13 @@ def simulate(name, source, count, frame, frame_start, fps, values=None, substeps
         return (f - start) / fps
 
     if frame <= start or sim.frame is None or frame < sim.frame or frame - sim.frame > MAX_CATCHUP_STEPS:
-        sim.reset(seconds(start), start, values, stagger)
+        warm = int(round(max(0.0, prewarm) * fps))
+        sim.reset(seconds(start) - warm / fps, start, values, stagger)
+        for k in range(warm):                     # "opens in shape": run the warm-up before frame 1
+            t = seconds(start) - (warm - k - 1) / fps
+            for _ in range(substeps):
+                sim.step(dt, t, start, values)
+                steps += 1
         sim.frame = start
     while sim.frame < frame:
         nxt = sim.frame + 1
@@ -250,8 +351,17 @@ def simulate(name, source, count, frame, frame_start, fps, values=None, substeps
             sim.step(dt, seconds(nxt), nxt, values)
             steps += 1
         sim.frame = nxt
-    state = sim.read()
-    return state, {"count": sim.count, "steps": steps, "sim_s": time.perf_counter() - t0,
+    return sim, steps
+
+
+def simulate(name, source, count, frame, frame_start, fps, values=None, substeps=1, stagger=1.0,
+             prewarm=0.0, emitter=None, limit=0):
+    """Bring the simulation to `frame` and return its state. Returns (state dict, stats)."""
+    t0 = time.perf_counter()
+    sim, steps = advance(name, source, count, frame, frame_start, fps, values, substeps, stagger,
+                         prewarm, emitter)
+    state = sim.read(limit)
+    return state, {"count": len(state["position"]), "steps": steps, "sim_s": time.perf_counter() - t0,
                    "frame": sim.frame}
 
 

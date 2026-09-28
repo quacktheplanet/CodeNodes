@@ -25,6 +25,22 @@ def _sim_changed(self, context):
         live.request(obj)
 
 
+def _real_changed(self, context):
+    from . import gn_link
+    gn_link._dirty[0] = True
+
+
+def _look_changed(self, context):
+    from . import gpu_live
+    gpu_live.redraw()
+
+
+def _emitter_changed(self, context):
+    from . import gpu_live, particles
+    particles.forget(self.id_data.name)
+    gpu_live.redraw()
+
+
 class CN_Param(bpy.types.PropertyGroup):
     name: StringProperty()
     value: FloatProperty(update=_changed)
@@ -39,9 +55,53 @@ class CN_ObjectSettings(bpy.types.PropertyGroup):
         ('PARTICLES', "Particles", "Points moved by your own solver on the GPU"),
         ('SHAPE', "Shape", "A model built from a parametric description: profiles, "
                            "revolve, extrude — exact edges and clean quads"),
+        ('DEFORM', "GPU Mesh", "Code run on every vertex of a mesh coming in from Geometry Nodes"),
     ])
-    count: IntProperty(name="Particles", default=20000, min=1, max=2_000_000, soft_max=500_000,
-                       update=_sim_changed)
+    template_key: StringProperty(description="The template this code started from (the node's Template menu)")
+    count: IntProperty(name="Particles", default=20000, min=1, max=16_777_216, soft_max=4_194_304,
+                       update=_sim_changed,
+                       description="How many particles. Live on GPU handles millions; Real Geometry is "
+                                   "comfortable up to about 100,000")
+    # Set by the Geometry Nodes sync from the Make Real nodes this code node feeds (never by hand):
+    # NONE (drawn live only), EVERY_FRAME, ON_CHANGE or RENDER_ONLY.
+    real_mode: StringProperty(default="STANDALONE")
+    real_limit: IntProperty(default=0, min=0)
+    # live particles: how they look
+    color_by: EnumProperty(name="Colour", default='SPEED', update=_look_changed, items=[
+        ('SPEED', "Speed", "Blend the two colours by speed"),
+        ('AGE', "Age", "Blend the two colours by age / life"),
+        ('CODE', "Code", "Use the code's own look() function"),
+    ])
+    color_a: FloatVectorProperty(name="Slow / Young", subtype='COLOR', size=3, min=0.0, soft_max=1.0,
+                                 default=(0.15, 0.3, 1.0), update=_look_changed)
+    color_b: FloatVectorProperty(name="Fast / Old", subtype='COLOR', size=3, min=0.0, soft_max=1.0,
+                                 default=(1.0, 0.55, 0.2), update=_look_changed)
+    speed_range: FloatProperty(name="Speed Range", default=2.0, min=1e-4, soft_max=20.0, update=_look_changed,
+                               description="The speed that counts as fully 'fast' for colouring")
+    blend: EnumProperty(name="Blend", default='ADD', update=_look_changed, items=[
+        ('ADD', "Glow", "Additive: overlapping particles add up to light, like Myriad"),
+        ('SOLID', "Solid", "Opaque round points that hide what's behind them"),
+    ])
+    point_px: FloatProperty(name="Point Size (px)", default=1.5, min=0.5, max=32.0, update=_look_changed)
+    gain: FloatProperty(name="Brightness", default=0.35, min=0.0, soft_max=4.0, update=_look_changed)
+    prewarm: FloatProperty(name="Pre-warm (s)", default=0.0, min=0.0, max=120.0, update=_sim_changed,
+                           description="Seconds simulated before the first frame, so it opens in shape")
+    emitter: PointerProperty(type=bpy.types.Object, name="Emit From", update=_emitter_changed,
+                             description="Particles can spawn on this object's evaluated geometry "
+                                         "(emitPoint / emitNormal in the code)")
+    # live surfaces: how they're lit
+    quality: FloatProperty(name="Resolution", default=0.6, min=0.15, max=1.0, subtype='FACTOR',
+                           update=_look_changed,
+                           description="Fraction of the viewport's pixels the live surface is traced at")
+    surface_color: FloatVectorProperty(name="Colour", subtype='COLOR', size=3, min=0.0, max=1.0,
+                                       default=(0.72, 0.66, 0.58), update=_look_changed,
+                                       description="Used when the code has no color(p) function")
+    shadows: BoolProperty(name="Shadows", default=True, update=_look_changed)
+    ao: BoolProperty(name="Ambient Occlusion", default=True, update=_look_changed)
+    fog: FloatProperty(name="Fog", default=0.0, min=0.0, soft_max=0.2, update=_look_changed,
+                       description="Distance haze density")
+    sky: BoolProperty(name="Sky Background", default=False, update=_look_changed,
+                      description="Paint a sky behind everything (Blender objects still draw in front)")
     substeps: IntProperty(name="Substeps", default=1, min=1, max=20, update=_sim_changed,
                           description="Solver steps per frame; raise it if fast particles jitter")
     point_radius: FloatProperty(name="Point Size", default=0.02, min=0.0, soft_max=0.5, update=_changed)
@@ -64,6 +124,20 @@ class CN_ObjectSettings(bpy.types.PropertyGroup):
     code_hash: StringProperty()
 
 
+class CN_RealSettings(bpy.types.PropertyGroup):
+    """Settings of a Make Real node (stored on its node group)."""
+    when: EnumProperty(name="When", default='AUTO', update=_real_changed, items=[
+        ('AUTO', "Automatic", "Every frame for particles and animated code; when something changes otherwise"),
+        ('EVERY_FRAME', "Every Frame", "Make it real on every frame change (animation plays in real geometry)"),
+        ('ON_CHANGE', "When Changed", "Only when the code or an input changes; the result stays frozen in time"),
+        ('RENDER_ONLY', "Only for Render", "Keep it live in the viewport; make it real just for 'Render with "
+                                           "CodeNodes' (Blender's own F12 won't see it)"),
+    ])
+    keep_velocity: BoolProperty(name="velocity / speed", default=True, update=_real_changed)
+    keep_age: BoolProperty(name="age / life", default=True, update=_real_changed)
+    stats: StringProperty()
+
+
 def sync_params(settings, source, kind='MESH'):
     """Match the sliders to what the code declares. Existing values are kept."""
     if kind == 'SHAPE':
@@ -81,16 +155,18 @@ def sync_params(settings, source, kind='MESH'):
     return {p.name: p.value for p in settings.params}
 
 
-classes = (CN_Param, CN_ObjectSettings)
+classes = (CN_Param, CN_ObjectSettings, CN_RealSettings)
 
 
 def register():
     for c in classes:
         bpy.utils.register_class(c)
     bpy.types.Object.codenodes = PointerProperty(type=CN_ObjectSettings)
+    bpy.types.NodeTree.codenodes_real = PointerProperty(type=CN_RealSettings)
 
 
 def unregister():
+    del bpy.types.NodeTree.codenodes_real
     del bpy.types.Object.codenodes
     for c in reversed(classes):
         bpy.utils.unregister_class(c)

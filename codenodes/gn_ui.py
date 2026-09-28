@@ -1,5 +1,9 @@
-"""Geometry Nodes editor side of CodeNodes: Add › CodeNodes, the sidebar panel, and the
-operators behind them. The work is done in gn_link."""
+"""Geometry Nodes editor side of CodeNodes: Add › CodeNodes, the Make Real node, showing a code
+node's code automatically, and the small sidebar fallback. The work is done in gn_link.
+
+Everything you set lives on the nodes themselves (see gn_sockets). The sidebar only keeps what
+Blender can't put on a node: buttons (Edit Code, Add Make Real) and the full error text.
+"""
 
 from __future__ import annotations
 
@@ -14,11 +18,20 @@ def _in_geometry_nodes(context):
     return getattr(space, "type", "") == 'NODE_EDITOR' and getattr(space, "tree_type", "") == "GeometryNodeTree"
 
 
+def _place_at_cursor(context, event):
+    space = context.space_data
+    if getattr(space, "edit_tree", None) is not None and context.region.type == 'WINDOW':
+        area = context.area
+        px, py = int(area.width / 10), int(area.height / 10)
+        space.cursor_location_from_region(min(max(px, event.mouse_region_x), area.width - px),
+                                          min(max(py, event.mouse_region_y), area.height - py))
+
+
 class CODENODES_OT_gn_add(bpy.types.Operator):
     bl_idname = "codenodes.gn_add"
     bl_label = "Add Code Node"
-    bl_description = ("Add a node whose geometry is made by code. Its inputs are the code's sliders; "
-                      "edit the code from the sidebar (N) › CodeNodes")
+    bl_description = ("Add a node run by code. Its settings and the code's sliders are inputs on the node; "
+                      "its code opens in a Text Editor when you select it")
     bl_options = {'REGISTER', 'UNDO'}
 
     kind: EnumProperty(name="Kind", items=[(k, v[0], v[1]) for k, v in gn_link.KINDS.items()])
@@ -38,18 +51,66 @@ class CODENODES_OT_gn_add(bpy.types.Operator):
         space = context.space_data
         loc = tuple(space.cursor_location) if getattr(space, "edit_tree", None) is not None else (0.0, 0.0)
         node = gn_link.insert(tree, group, loc)
+        gn_link.sync()
         if err:
             self.report({'WARNING'}, f"{node.node_tree.name}: {err.splitlines()[0]}")
         return {'FINISHED'}
 
     def invoke(self, context, event):
-        space = context.space_data
-        if getattr(space, "edit_tree", None) is not None and context.region.type == 'WINDOW':
-            area = context.area
-            px, py = int(area.width / 10), int(area.height / 10)
-            space.cursor_location_from_region(min(max(px, event.mouse_region_x), area.width - px),
-                                              min(max(py, event.mouse_region_y), area.height - py))
+        _place_at_cursor(context, event)
         result = self.execute(context)
+        space = context.space_data
+        if self.use_transform and 'FINISHED' in result and getattr(space, "edit_tree", None) is not None:
+            bpy.ops.node.translate_attach_remove_on_cancel('INVOKE_DEFAULT')
+        return result
+
+
+class CODENODES_OT_gn_add_make_real(bpy.types.Operator):
+    bl_idname = "codenodes.gn_add_make_real"
+    bl_label = "Make Real"
+    bl_description = ("Add a Make Real node: it turns the GPU node before it into real geometry (points or a "
+                      "mesh) that later nodes and renders can use, like Realize Instances. With a GPU node "
+                      "selected, it goes right after it")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    use_transform: BoolProperty(default=True, options={'HIDDEN', 'SKIP_SAVE'})
+    group: StringProperty(options={'HIDDEN', 'SKIP_SAVE'},
+                          description="Put it after the node using this code group (empty: the active node)")
+
+    @classmethod
+    def poll(cls, context):
+        return _in_geometry_nodes(context) or context.area is None or context.area.type == 'VIEW_3D'
+
+    def execute(self, context):
+        tree, after = None, None
+        if self.group:
+            group = bpy.data.node_groups.get(self.group)
+            tree, after = gn_link.find_user(group) if group is not None else (None, None)
+        else:
+            tree = getattr(context.space_data, "edit_tree", None)
+            after = tree.nodes.active if tree is not None else None
+            if after is not None and not (after.type == 'GROUP' and gn_link.is_code_group(after.node_tree)):
+                after = None
+        if tree is None:
+            self.report({'ERROR'}, "open a Geometry Nodes tree first")
+            return {'CANCELLED'}
+        if after is not None:
+            node = gn_link.insert_make_real(tree, after)
+            self.use_transform = False
+        else:
+            group = gn_link.build_make_real()
+            space = context.space_data
+            loc = tuple(space.cursor_location) if getattr(space, "edit_tree", None) is not None else (0.0, 0.0)
+            node = gn_link.insert(tree, group, loc)
+            node.width = 160
+        gn_link.sync()
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        if _in_geometry_nodes(context):
+            _place_at_cursor(context, event)
+        result = self.execute(context)
+        space = context.space_data
         if self.use_transform and 'FINISHED' in result and getattr(space, "edit_tree", None) is not None:
             bpy.ops.node.translate_attach_remove_on_cancel('INVOKE_DEFAULT')
         return result
@@ -78,11 +139,13 @@ class CODENODES_OT_add_object(bpy.types.Operator):
     bl_idname = "codenodes.add_object"
     bl_label = "Add Code Object"
     bl_description = ("Add an object whose geometry comes from a code node in its own Geometry Nodes "
-                      "tree. The code's sliders are inputs on that node")
+                      "tree. The node's settings and the code's sliders are inputs on that node")
     bl_options = {'REGISTER', 'UNDO'}
 
     kind: EnumProperty(name="Kind", items=[(k, v[0], v[1]) for k, v in gn_link.KINDS.items()])
     template: StringProperty(name="Template", description="Starting code (empty: the default one)")
+    make_real: BoolProperty(name="Make Real", default=False,
+                            description="Put a Make Real node after it, so the object gets real geometry")
 
     def execute(self, context):
         if context.mode != 'OBJECT':
@@ -91,7 +154,8 @@ class CODENODES_OT_add_object(bpy.types.Operator):
             except RuntimeError:
                 pass
         obj, tree, node, err = gn_link.add_object(self.kind, self.template or None,
-                                                  location=tuple(context.scene.cursor.location))
+                                                  location=tuple(context.scene.cursor.location),
+                                                  make_real=self.make_real)
         for o in context.selected_objects:
             o.select_set(False)
         obj.select_set(True)
@@ -103,6 +167,9 @@ class CODENODES_OT_add_object(bpy.types.Operator):
                 area.tag_redraw()          # it follows the active object's modifier by itself
         if err:
             self.report({'WARNING'}, f"{node.node_tree.name}: {err.splitlines()[0]}")
+        elif self.kind in gn_link.GPU_KINDS and not self.make_real:
+            self.report({'INFO'}, f"Added '{obj.name}': drawn live on the GPU. Its node is in the Geometry "
+                                  "Nodes editor; add Make Real after it to use it in nodes or renders")
         else:
             self.report({'INFO'}, f"Added '{obj.name}': its code node is in the Geometry Nodes editor")
         return {'FINISHED'}
@@ -170,27 +237,28 @@ class CODENODES_OT_gn_edit_code(bpy.types.Operator):
 class CODENODES_OT_gn_template(bpy.types.Operator):
     bl_idname = "codenodes.gn_template"
     bl_label = "Use Template"
-    bl_description = "Replace this node's code with a starting template"
+    bl_description = "Replace this node's code with a starting template (the old code is kept in a backup text)"
     bl_options = {'REGISTER', 'UNDO'}
 
     template: StringProperty()
     group: _GROUP
 
     def execute(self, context):
-        node, group, obj, _tree = _active(context, self, self.group)
+        from . import gn_sockets
+        node, group, obj, tree = _active(context, self, self.group)
         if obj is None:
             return {'CANCELLED'}
-        kind = obj.codenodes.kind
-        try:
-            source = gn_link.template(kind, self.template)
-        except KeyError as exc:
-            self.report({'ERROR'}, str(exc))
+        if self.template not in gn_link.TEMPLATES.get(obj.codenodes.kind, {}):
+            self.report({'ERROR'}, f"no template called '{self.template}'")
             return {'CANCELLED'}
-        obj.codenodes.text.from_string(source)
-        if group.name.startswith(gn_link.PREFIX):
-            group.name = gn_link._unique(gn_link.PREFIX + self.template, bpy.data.node_groups)
+        user = ('node', tree, node) if node is not None and tree is not None else None
+        gn_sockets.switch_template(obj, self.template, user)
+        if node is not None and node.inputs.get("Template") is not None:
+            try:
+                node.inputs["Template"].default_value = self.template
+            except (TypeError, ValueError):
+                pass
         err = live.rebuild(obj)
-        gn_link.sync_interface(group, obj)
         if err:
             self.report({'WARNING'}, err.splitlines()[0])
         return {'FINISHED'}
@@ -209,7 +277,7 @@ class CODENODES_OT_gn_rebuild(bpy.types.Operator):
         if obj is None:
             return {'CANCELLED'}
         if node is not None and tree is not None:
-            gn_link.apply_values(obj, gn_link.read_values(('node', tree, node)))
+            gn_link.apply_values(obj, gn_link.read_values(('node', tree, node)), ('node', tree, node))
         err = live.rebuild(obj)
         gn_link.sync_interface(group, obj)
         if err:
@@ -223,7 +291,7 @@ class CODENODES_OT_gn_make_native(bpy.types.Operator):
     bl_idname = "codenodes.gn_make_native"
     bl_label = "Make Native"
     bl_description = ("Replace this code node with real Geometry Nodes that do the same maths: no GPU, "
-                      "no add-on needed to open it. Code Mesh only; needs the ExpressNode add-on")
+                      "no add-on needed to open it. GPU Surface only; needs the ExpressNode add-on")
     bl_options = {'REGISTER', 'UNDO'}
 
     group: _GROUP
@@ -310,6 +378,8 @@ def show_node_editor(context):
     return area
 
 
+# ---- menus ---------------------------------------------------------------------------------------
+
 class CODENODES_MT_gn_add(bpy.types.Menu):
     bl_idname = "CODENODES_MT_gn_add"
     bl_label = "CodeNodes"
@@ -317,6 +387,8 @@ class CODENODES_MT_gn_add(bpy.types.Menu):
     def draw(self, context):
         layout = self.layout
         layout.operator_context = 'INVOKE_REGION_WIN'
+        layout.operator(CODENODES_OT_gn_add_make_real.bl_idname, icon='MESH_DATA')
+        layout.separator()
         for kind, (label, _desc, icon) in gn_link.KINDS.items():
             layout.label(text=label, icon=icon)
             for key in gn_link.TEMPLATES[kind]:
@@ -325,19 +397,8 @@ class CODENODES_MT_gn_add(bpy.types.Menu):
             layout.separator()
 
 
-class CODENODES_MT_gn_templates(bpy.types.Menu):
-    bl_idname = "CODENODES_MT_gn_templates"
-    bl_label = "Template"
-
-    def draw(self, context):
-        _node, _group, obj = gn_link.code_node(context)
-        if obj is None:
-            return
-        for key in gn_link.TEMPLATES[obj.codenodes.kind]:
-            self.layout.operator(CODENODES_OT_gn_template.bl_idname, text=key).template = key
-
-
 class CODENODES_PT_gn(bpy.types.Panel):
+    """A small fallback: the node holds every setting, but Blender can't put buttons on a node."""
     bl_label = "CodeNodes"
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'
@@ -350,47 +411,27 @@ class CODENODES_PT_gn(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         node, group, obj = gn_link.code_node(context)
+        rnode, rgroup, _rtree = gn_link.make_real_node(context)
+        if rnode is not None:
+            layout.label(text="Make Real: settings are on the node.", icon='MESH_DATA')
+            layout.label(text=rnode.label)
+            return
         if obj is None:
-            layout.label(text="Geometry made by code:")
-            col = layout.column(align=True)
-            col.operator_context = 'EXEC_DEFAULT'
-            for kind, (label, _d, icon) in gn_link.KINDS.items():
-                op = col.operator(CODENODES_OT_gn_add.bl_idname, text=label, icon=icon)
-                op.kind, op.use_transform = kind, False
-            layout.label(text="Or Add (Shift A) › CodeNodes.", icon='INFO')
-            layout.label(text="Select a code node to edit it here.")
+            layout.label(text="Add (Shift A) › CodeNodes", icon='INFO')
+            layout.label(text="Settings live on the nodes;")
+            layout.label(text="code opens in a Text Editor.")
             return
         s = obj.codenodes
-        box = layout.box()
-        box.label(text=group.name, icon=gn_link.KINDS[s.kind][2])
-        box.label(text=gn_link.KINDS[s.kind][0])
+        layout.label(text=node.label or group.name, icon=gn_link.KINDS.get(s.kind, ("", "", 'SCRIPT'))[2])
         row = layout.row(align=True)
-        row.scale_y = 1.3
         row.operator(CODENODES_OT_gn_edit_code.bl_idname, icon='TEXT')
-        layout.menu(CODENODES_MT_gn_templates.bl_idname, text="Replace with Template", icon='FILE_NEW')
-        col = layout.column(align=True)
-        if s.kind == 'MESH':
-            col.label(text="Resolution is an input on the node.")
-            col.prop(s, "bounds_min", text="Bounds Min")
-            col.prop(s, "bounds_max", text="Bounds Max")
-        elif s.kind == 'PARTICLES':
-            col.prop(s, "count")
-            col.prop(s, "substeps")
-        row = layout.row(align=True)
-        row.prop(s, "live", toggle=True)
-        row.prop(s, "animate", toggle=True)
-        row.prop(s, "smooth", toggle=True)
-        layout.operator(CODENODES_OT_gn_rebuild.bl_idname, icon='FILE_REFRESH')
-        if s.kind == 'MESH':
-            layout.operator(CODENODES_OT_gn_make_native.bl_idname, icon='NODETREE')
+        if s.kind in gn_link.GPU_KINDS:
+            row.operator(CODENODES_OT_gn_add_make_real.bl_idname, text="Add Make Real", icon='MESH_DATA')
         if s.last_error:
             box = layout.box()
             box.alert = True
             for line in s.last_error.splitlines()[:12]:
                 box.label(text=line, icon='ERROR' if not line.startswith(" ") else 'BLANK1')
-        elif s.stats:
-            for part in s.stats.split(" · ")[:3]:
-                layout.label(text=part)
 
 
 def _add_menu(self, context):
@@ -399,9 +440,159 @@ def _add_menu(self, context):
         self.layout.menu(CODENODES_MT_gn_add.bl_idname, icon='SCRIPT')
 
 
-classes = (CODENODES_OT_gn_add, CODENODES_OT_add_object, CODENODES_OT_show_in_gn, CODENODES_OT_gn_edit_code, CODENODES_OT_gn_template,
-           CODENODES_OT_gn_rebuild, CODENODES_OT_gn_make_native, CODENODES_OT_open_graph,
-           CODENODES_MT_gn_add, CODENODES_MT_gn_templates, CODENODES_PT_gn)
+# ---- the code in a pop-up window ---------------------------------------------------------------------
+
+def open_code_popup(text):
+    """A small separate window with a Text Editor showing `text`: what the node's Edit Code toggle,
+    double-clicking a code node and Ctrl+E open. Returns the window, or None."""
+    wm = bpy.context.window_manager
+    if not wm.windows:
+        return None
+    before = {w.as_pointer() for w in wm.windows}
+    base = bpy.context.window or wm.windows[0]
+    try:
+        with bpy.context.temp_override(window=base, screen=base.screen):
+            bpy.ops.screen.userpref_show('INVOKE_DEFAULT')     # Blender's small one-area window
+    except Exception:
+        return None
+    win = next((w for w in wm.windows if w.as_pointer() not in before), None)
+    if win is None:                                            # it was open already: reuse it
+        win = next((w for w in wm.windows if getattr(w.screen, "is_temporary", False)), None)
+    if win is None or not win.screen.areas:
+        return None
+    area = win.screen.areas[0]
+    area.type = 'TEXT_EDITOR'
+    sp = area.spaces.active
+    sp.text = text
+    try:
+        text.cursor_set(0)                 # start at the top, not at the end of the file
+    except (AttributeError, TypeError):
+        pass
+    sp.top = 0
+    for attr, value in (("show_line_numbers", True), ("show_syntax_highlight", True),
+                        ("show_line_highlight", True)):
+        try:
+            setattr(sp, attr, value)
+        except (AttributeError, TypeError):
+            pass
+    return win
+
+
+class CODENODES_OT_edit_code_popup(bpy.types.Operator):
+    bl_idname = "codenodes.edit_code_popup"
+    bl_label = "Edit Code"
+    bl_description = "Open this code node's code in a pop-up Text Editor (it rebuilds live as you type)"
+
+    group: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
+    @classmethod
+    def poll(cls, context):
+        if not _in_geometry_nodes(context):
+            return False                  # the double-click / Ctrl+E keys stay free everywhere else
+        tree = getattr(context.space_data, "edit_tree", None)
+        node = tree.nodes.active if tree is not None else None
+        return (node is not None and node.type == 'GROUP' and gn_link.is_code_group(node.node_tree)) or \
+            gn_link.is_code_group(tree)
+
+    def execute(self, context):
+        if self.group:
+            obj = gn_link.source_of(bpy.data.node_groups.get(self.group))
+        else:
+            tree = getattr(context.space_data, "edit_tree", None)
+            node = tree.nodes.active if tree is not None else None
+            if gn_link.is_code_group(tree):
+                obj = gn_link.source_of(tree)
+            else:
+                obj = gn_link.source_of(node.node_tree) if node is not None and node.type == 'GROUP' else None
+        if obj is None or obj.codenodes.text is None:
+            return {'CANCELLED'}
+        if open_code_popup(obj.codenodes.text) is None:
+            from .ops import show_text
+            show_text(context, obj.codenodes.text, self)
+        return {'FINISHED'}
+
+
+# ---- showing the code automatically (off by default) ---------------------------------------------------
+
+_last_shown = {}      # screen name -> (tree name, node name) last acted on
+
+
+def _code_for_area(area):
+    """The Text block of the code node the Geometry Nodes editor in `area` is looking at, or None:
+    the active node when it's a code node, or the code group you've Tabbed into."""
+    space = area.spaces.active
+    tree = getattr(space, "edit_tree", None)
+    if tree is None:
+        return None, None
+    if gn_link.is_code_group(tree):
+        obj = gn_link.source_of(tree)
+        return (obj.codenodes.text if obj is not None else None), (tree.name, "(inside)")
+    node = tree.nodes.active
+    if node is None or not node.select or node.type != 'GROUP' or not gn_link.is_code_group(node.node_tree):
+        return None, None
+    obj = gn_link.source_of(node.node_tree)
+    return (obj.codenodes.text if obj is not None else None), (tree.name, node.name)
+
+
+def _show_code_tick():
+    from . import prefs
+    try:
+        p = prefs.get()
+        if p is None or not p.open_code_editor:            # off unless asked for in Preferences
+            return 0.4
+        if live._rendering():
+            return 0.4
+        wm = bpy.context.window_manager
+        for win in wm.windows:
+            screen = win.screen
+            for area in screen.areas:
+                if area.type != 'NODE_EDITOR' or getattr(area.spaces.active, "tree_type", "") != "GeometryNodeTree":
+                    continue
+                text, key = _code_for_area(area)
+                if text is None:
+                    continue
+                if _last_shown.get(screen.name) == key:
+                    continue
+                _last_shown[screen.name] = key
+                _show_text_beside(win, screen, area, text)
+                break
+    except Exception:
+        import traceback
+        traceback.print_exc()
+    return 0.4
+
+
+def _show_text_beside(win, screen, node_area, text):
+    editors = [a for a in screen.areas if a.type == 'TEXT_EDITOR']
+    if editors:
+        editors[0].spaces.active.text = text
+        return
+    before = set(a.as_pointer() for a in screen.areas)
+    region = next((r for r in node_area.regions if r.type == 'WINDOW'), None)
+    try:
+        with bpy.context.temp_override(window=win, screen=screen, area=node_area, region=region):
+            bpy.ops.screen.area_split(direction='VERTICAL', factor=0.62)
+    except Exception:
+        return
+    new = next((a for a in screen.areas if a.as_pointer() not in before), None)
+    if new is None:
+        return
+    new.type = 'TEXT_EDITOR'
+    sp = new.spaces.active
+    sp.text = text
+    for attr in ("show_line_numbers", "show_syntax_highlight", "show_word_wrap"):
+        try:
+            setattr(sp, attr, attr != "show_word_wrap")
+        except (AttributeError, TypeError):
+            pass
+
+
+classes = (CODENODES_OT_edit_code_popup, CODENODES_OT_gn_add, CODENODES_OT_gn_add_make_real, CODENODES_OT_add_object, CODENODES_OT_show_in_gn,
+           CODENODES_OT_gn_edit_code, CODENODES_OT_gn_template, CODENODES_OT_gn_rebuild,
+           CODENODES_OT_gn_make_native, CODENODES_OT_open_graph, CODENODES_MT_gn_add, CODENODES_PT_gn)
+
+
+_keymaps = []
 
 
 def register():
@@ -409,9 +600,24 @@ def register():
         bpy.utils.register_class(c)
     bpy.types.NODE_MT_add.append(_add_menu)
     gn_link.register()
+    bpy.app.timers.register(_show_code_tick, first_interval=0.6, persistent=True)
+    kc = bpy.context.window_manager.keyconfigs.addon
+    if kc is not None:
+        km = kc.keymaps.new(name="Node Editor", space_type='NODE_EDITOR')
+        for key, value, ctrl in (('LEFTMOUSE', 'DOUBLE_CLICK', False), ('E', 'PRESS', True)):
+            kmi = km.keymap_items.new(CODENODES_OT_edit_code_popup.bl_idname, key, value, ctrl=ctrl)
+            _keymaps.append((km, kmi))
 
 
 def unregister():
+    for km, kmi in _keymaps:
+        try:
+            km.keymap_items.remove(kmi)
+        except (ReferenceError, RuntimeError):
+            pass
+    _keymaps.clear()
+    if bpy.app.timers.is_registered(_show_code_tick):
+        bpy.app.timers.unregister(_show_code_tick)
     gn_link.unregister()
     bpy.types.NODE_MT_add.remove(_add_menu)
     for c in reversed(classes):

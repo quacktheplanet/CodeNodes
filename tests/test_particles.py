@@ -153,7 +153,7 @@ def run():
     # --- counts -----------------------------------------------------------------------
     small = api.code_to_particles(FALL, name="Few", count=500)
     check(small["ok"] and len(bpy.data.objects["Few"].data.vertices) == 500, "a different count works")
-    huge = api.code_to_particles(FALL, name="Huge", count=5_000_000)
+    huge = api.code_to_particles(FALL, name="Huge", count=20_000_000)
     check(not huge["ok"] and "between 1 and" in huge["error"], "an absurd count is refused")
 
     # --- the material reaches the points (Mesh to Points drops it on its own) -----------

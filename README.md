@@ -1,19 +1,27 @@
 # CodeNodes
 
-**Code that becomes real Blender geometry.** You (or an AI assistant) write a little code: a GLSL
-distance function, a density, a particle solver, or a few lines of a small shape language.
-CodeNodes turns it into a mesh, a volume or a point cloud that Blender treats like anything else:
-light it, render it in EEVEE or Cycles, add modifiers, export it.
+**GPU code as Geometry Nodes.** You (or an AI assistant) write a little code, and CodeNodes runs it on
+the graphics card as a node in your Geometry Nodes tree:
+- particles you program yourself: millions of them, drawn live
+- surfaces from distance functions, raymarched live
+- code that runs on every vertex of a mesh
+
+Add **Make Real** after any of them and you have ordinary Blender geometry: instance on it, shade it,
+render it in EEVEE or Cycles, export it.
 
 It also lets an assistant build, read and edit ordinary **Geometry Nodes** setups, and publish
 scenes as interactive web pages.
 
-![Code → Mesh, Code → Shape and Code → Volume](docs/code_gallery.jpg)
+![A raymarched castle on a plateau shaped by GPU code, with fireflies emitted from its surface](docs/gpu_demo.jpg)
 
-*Left to right: a GLSL distance function meshed on the GPU, a lamp written in the shape language,
-and smoke from a density function. All three come from the snippets below.*
+*The demo scene (`examples/gpu_demo.py`):*
+- *a flat grid shaped into a plateau by a GPU Mesh node*
+- *the Aerie citadel as a GPU Surface, raymarched live*
+- *fireflies born on the plateau's surface, made real and instanced*
 
-> **Status: early (v0.1).** Everything listed as *works* is covered by tests on Blender 5.0.1 and
+*Rendered with Render › Render Image with CodeNodes.*
+
+> **Status: early (v0.2).** Everything listed as *works* is covered by tests on Blender 5.0.1 and
 > 5.1.2, on Windows 11 with an NVIDIA GPU. Other platforms haven't been tried yet.
 >
 > **Licence: to be decided.** Until a licence file is added, please ask before reusing the code.
@@ -22,65 +30,86 @@ and smoke from a density function. All three come from the snippets below.*
 
 After installing (see [Install](#install)):
 
-1. In the 3D Viewport: **Add › Mesh › Code Mesh.** You get an object called *Code Donut*. It's an
-   ordinary object with a Geometry Nodes modifier, and in its node tree is one **code node**,
-   *Code · Donut*, wired to the output.
-2. Open the **Sidebar (N) › CodeNodes** tab. It shows that code node's inputs (`major`, `minor`,
-   `Resolution`): drag one and the donut rebuilds.
-3. **Edit Code** opens the code in a Text Editor. Change it and the donut rebuilds as you type; a new
-   `// @param` line becomes a new input on the node.
-4. **Show Nodes** opens the Geometry Nodes editor on that tree. The code node is a node like any
-   other: wire its Geometry into Transform, Join Geometry, Set Material, Instance on Points…
+1. Select a mesh, open the **Geometry Nodes** editor, and press **Shift A › CodeNodes › GPU Particles
+   › Galaxy**. Wire its Geometry into the Group Output. A million stars appear in the 3D viewport, drawn
+   straight from the GPU. The node's header says `Galaxy · live · 1.0M`.
+2. Everything you can change is **on the node**:
+   - **Template** is a dropdown.
+   - **Count** is the number of particles.
+   - `size`, `twist` and `spin` are sliders declared in its code.
+   - **Look** and **Simulation** unfold for colours, glow, point size, pre-warm and so on.
+3. Switch on **✎ Edit Code**, the node's first input. The code pops up in a Text Editor window, and
+   the toggle switches itself back off. Double-clicking the node or pressing Ctrl+E does the same.
+   Change the code and the galaxy follows as you type. A new `// @param` line becomes a new input
+   on the node.
+4. **Shift A › CodeNodes › Make Real** with the Galaxy selected puts a Make Real node after it. Now
+   the stars are real points with `velocity`, `speed`, `age` and `life`. Wire them into Instance on
+   Points, Set Material or anything else. Make Real's own inputs:
+   - **When:** Automatic, Every Frame, When Changed or Only for Render
+   - **Max Points**
+   - which attributes to keep
 
-Everything CodeNodes adds lives in four places:
+   Its header shows what making it real costs.
+5. **Render › Render Image with CodeNodes** renders with the GPU nodes included, even ones without
+   Make Real.
 
-| Where | What you'll find |
-|---|---|
-| **3D Viewport › Add › Mesh** | **Code Mesh**, **Code Shape**, **Code Particles**: each makes an object whose Geometry Nodes tree holds a code node. **Code Templates** has every starting template; **Scripted (no nodes)** has the older objects driven by code without Geometry Nodes. |
-| **3D Viewport › Sidebar (N) › CodeNodes** | For the selected object's code nodes: their inputs, **Edit Code**, **Show Nodes**, Live / Animate, Rebuild, Make Native. |
-| **Geometry Nodes editor › Add (Shift A) › CodeNodes** | The same code nodes, to drop into any Geometry Nodes tree you already have. |
-| **Geometry Nodes editor › Sidebar (N) › CodeNodes** | The same controls, for the selected code node. |
+**The kinds of code node** (all in Shift A › CodeNodes, and in 3D View › Add › Mesh):
 
-![Code nodes wired into a Geometry Nodes tree, with the CodeNodes sidebar](docs/gn_integration.png)
+| Node | You write | Templates |
+|---|---|---|
+| **GPU Particles** | `spawn(p)` and `update(p, dt)`; optional `look(p)` for colour | Galaxy, Flow, Attractor (from Myriad), Swirl, Fountain |
+| **GPU Surface (SDF)** | `float sdf(vec3 p)`, the distance to the surface; optional `vec3 color(vec3 p)` | Castle (from Aerie), Planet (Tellus-style), Saturn, Donut, Rounded Box, Gyroid Ball, Blob |
+| **GPU Mesh** | `void deform(inout Vertex v)`, run on every vertex of the mesh wired into it | Wave, Noise Displace, Twist |
+| **Code Shape** | a small shape language (profiles, revolve, extrude, sweep); real geometry straight away | Desk Lamp, Vase |
 
-*A Code Mesh, a Code Shape and Code Particles in a normal Geometry Nodes tree. The sidebar edits
-the selected one.*
+**Live, and made real.** A GPU node on its own draws its result straight from GPU memory into the
+viewport:
+- a million particles at about 190 fps (4.2 million at about 160)
+- a raymarched castle beside them at about 190 fps
+- all depth-tested against your objects
 
-**What each kind of code makes:**
+That's a viewport picture: it isn't selectable, and later nodes and Blender's own F12 can't see it.
+**Make Real** turns it into geometry. [docs/GPU_NODES.md](docs/GPU_NODES.md) has the design, the
+numbers and the limits.
 
-- **Code Mesh (SDF):** you write `float sdf(vec3 p)`, the distance from `p` to the surface (negative
-  inside). The GPU samples it and makes a watertight mesh. Good for soft, organic or mathematical
-  forms. Templates: Donut, Rounded Box, Gyroid Ball, Blob.
-- **Code Shape:** a short description of profiles that get revolved, extruded or swept. The mesh is
-  constructed, not sampled, so edges are exact and the quads are clean. Good for lamps, bottles,
-  furniture. Templates: Desk Lamp, Vase.
-- **Code Particles:** `spawn()` and `update()` functions that move points on the GPU as the timeline
-  plays. Templates: Swirl, Fountain.
+**Rendering.** Running GPU code while Blender renders crashes Blender, so CodeNodes takes turns.
+**Render › Render Image / Animation with CodeNodes** does this for each frame:
+1. step the GPU nodes to that frame
+2. make them real
+3. render that frame, then move on
+
+No bake is needed. Blender's own F12 renders what's real (Make Real, bakes) and CodeNodes stays off
+the GPU while it runs. For command-line or farm renders, bake first.
+
+**Tab into a code node** to see its code in a frame, and its full status or error in another. The
+Node Editor sidebar (N) only has what Blender can't put on a node: an Edit Code button, an Add Make
+Real button, and the full error text.
 
 **How a code node works under the hood.** Blender doesn't let add-ons define new nodes inside
-Geometry Nodes, so a code node is an ordinary **Group node**. Inside it, an Object Info node reads a
-hidden object in the *CodeNodes Sources* collection, which CodeNodes rebuilds whenever the code or an
-input changes. Each node you add (or duplicate with Shift D) gets its own code. Values that come in
-through a link are followed back to a Value or Integer node, a reroute, or the modifier's own input;
-values computed by other nodes can't be read, so the number typed on the socket is used instead.
-Renders read the stored result and never run GPU code. **Make Native** replaces a Code Mesh node with
-real Geometry Nodes that do the same maths (needs the ExpressNode add-on), so the file no longer
-needs CodeNodes at all.
+Geometry Nodes, so a code node is an ordinary **Group node**, and its settings are the group's inputs.
+Each node you add (or duplicate with Shift D) gets its own code. Values that come in through a link
+are followed back to a Value or Integer node, a reroute, or the modifier's own input; values computed
+by other nodes can't be read, so the number typed on the socket is used instead.
+**Make Native** replaces a GPU Surface node with real Geometry Nodes that do the same maths (needs
+the ExpressNode add-on), so the file no longer needs CodeNodes at all.
 
 **The separate CodeNodes node editor** (Sidebar › **New Node Graph**, or switch any Node Editor's
-type to *CodeNodes*) is for combining several pieces of code into one GPU program: code nodes,
-Combine (union, subtract, blend), Transform and Offset, feeding a Mesh Output that builds an object.
-The starter graph makes a small Saturn.
+type to *CodeNodes*) combines several distance functions into one GPU program with Combine (union,
+subtract, blend), Transform and Offset nodes. The starter graph makes a small Saturn.
 
 ## What's in it
 
 | Feature | What it does | Status |
 |---|---|---|
-| **Code → Mesh** | GLSL signed distance function → watertight quad mesh, sampled on the GPU | works |
+| **Code → Mesh** (scripted object) | GLSL signed distance function → watertight quad mesh, sampled on the GPU | works |
 | **Code → Shape** | a small shape language → exact, constructed meshes with sharp edges and real UVs | works |
 | **Code → Volume** | GLSL density → OpenVDB volume that renders natively | works (script/API only, no panel yet) |
-| **Code → Particles** | your own GPU particle solver → a point cloud with velocity, age and life | works |
-| **Code nodes in Geometry Nodes** | Add › CodeNodes in the Geometry Nodes editor: code as a node, its sliders as inputs, rebuilt live | works |
+| **GPU Particles** | your own GPU particle solver, drawn live (millions); Emit From another object's surface; Make Real → points with velocity, age and life | works |
+| **GPU Surface** | a distance function raymarched live in the viewport, lit, depth-tested with your objects; Make Real → a watertight mesh | works |
+| **GPU Mesh** | code run on every vertex of the mesh wired into it; Make Real → the same topology with new positions, `color` and `value` | works |
+| **Make Real** | the node that turns a GPU node's result into real geometry: When (every frame / when changed / only for render), limits, attributes | works |
+| **Render with CodeNodes** | Render › Render Image / Animation with CodeNodes: GPU and renderer take turns per frame, no bake needed | works |
+| **Everything on the node** | settings as node inputs (Template dropdown, count, colours, toggles), status in the header, ✎ Edit Code toggle opens a code pop-up | works |
 | **Node editor** | code nodes with typed sockets that compile into one GPU program | works |
 | **Bake to Disk** | animations written to files that play back with stock nodes; renders with no GPU and no add-on | works |
 | **Bake to Nodes** | the GLSL itself becomes a Geometry Nodes network | experimental (needs the ExpressNode add-on, not public yet) |
@@ -123,8 +152,8 @@ claude plugin marketplace add quacktheplanet/CodeNodes
 claude plugin install codenodes@codenodes
 ```
 
-(While this work is on the `gn-integration` branch, add the branch:
-`claude plugin marketplace add "quacktheplanet/CodeNodes#gn-integration"`.)
+(While this work is on the `gpu-nodes` branch, add the branch:
+`claude plugin marketplace add "quacktheplanet/CodeNodes#gpu-nodes"`.)
 
 Then open Blender (with the add-on installed) and ask Claude for something: *"use CodeNodes to make a
 vase with a wavy rim and render it"*, or *"make a donut code node and wire three copies into a
@@ -145,9 +174,11 @@ are open).
 
 | To try | Do this |
 |---|---|
-| Code → Mesh | Add › Mesh › **Code Mesh**, then Sidebar (N) › **CodeNodes**. Edit the code in its Text block; the mesh rebuilds. |
-| Code → Shape | Add › Mesh › **Code Shape**. Sliders appear for every `param` line. |
-| Code → Particles | Add › Mesh › **Code Particles**, then play the timeline. |
+| GPU Particles | Geometry Nodes › Shift A › CodeNodes › **GPU Particles › Galaxy** (or Flow, Attractor…), wired to the output; play the timeline. |
+| GPU Surface | Shift A › CodeNodes › **GPU Surface › Castle**; add **Make Real** after it for a real mesh. |
+| GPU Mesh | Wire any mesh into Shift A › CodeNodes › **GPU Mesh › Wave**, then **Make Real** for the modified mesh. |
+| The demo scene | `blender --factory-startup --python examples/gpu_demo.py -- out` builds `out/codenodes_gpu_demo.blend` and renders it. |
+| Code → Shape | Add › Mesh › **Code Shape**. Sliders appear on the node for every `param` line. |
 | Code → Volume | From the Python console: `from bl_ext.user_default.codenodes import api, volume` then `api.code_to_volume(volume.TEMPLATE, name="Smoke")`. |
 | Node editor | Open a Node Editor and switch its type to **CodeNodes** (or Sidebar › CodeNodes › **New Node Graph**). |
 | Geometry Nodes capabilities | From a clone of this repo: `blender -b --factory-startup --python examples/village_demo.py -- out` builds and renders the village above into `out/`. |

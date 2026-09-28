@@ -40,7 +40,7 @@ def compute_object(obj):
 
 def simulate_object(obj):
     """Bring a particle object's simulation to the current frame and show it."""
-    from . import particles
+    from . import gpu_live, particles
     s = obj.codenodes
     if s.text is None:
         raise SdfCodeError("no code: pick a text block")
@@ -49,11 +49,81 @@ def simulate_object(obj):
     values = props.sync_params(s, source)
     scene = bpy.context.scene
     fps = scene.render.fps / (scene.render.fps_base or 1.0)
+    emitter = gpu_live.emitter_for(obj) if s.emitter is not None else None
+    limit = min(s.real_limit or s.count, particles.MAX_REAL)
     state, st = particles.simulate(obj.name, source, s.count, scene.frame_current, scene.frame_start,
-                                   fps, values, s.substeps, s.stagger)
+                                   fps, values, s.substeps, s.stagger, s.prewarm, emitter, limit)
+    keep = []
+    if s.get("real_keep_vel", True):
+        keep += ["velocity", "speed"]
+    if s.get("real_keep_age", True):
+        keep += ["age", "life"]
     particles.ensure_object(obj.name, s.point_radius)
-    particles.fill_points(obj.data, state)
+    particles.fill_points(obj.data, state, extra=tuple(keep))
     return state, st
+
+
+def build_deform(obj):
+    """GPU Mesh made real: the incoming mesh (topology, UVs, attributes kept) with the code's positions,
+    a `color` and a `value` attribute."""
+    import numpy as np
+    from . import gn_link, gpu_live
+    s = obj.codenodes
+    if s.text is None:
+        raise SdfCodeError("no code: pick a text block")
+    source = s.text.as_string()
+    s.code_hash = hashlib.sha1(source.encode()).hexdigest()
+    props.sync_params(s, source)
+    tap = gn_link.tap_of(obj)
+    if tap is None:
+        raise SdfCodeError("nothing is wired into the Mesh input")
+    inp = gpu_live.deform_input(obj)
+    if inp is None or len(inp[0]) == 0:
+        raise SdfCodeError("the mesh wired into the Mesh input is empty")
+    state = gpu_live.run_deform(obj, bpy.context.scene)
+    if state is None:
+        raise SdfCodeError("the GPU Mesh code could not run")
+    pos, value, color = state.read()
+    deps = bpy.context.evaluated_depsgraph_get()
+    new = bpy.data.meshes.new_from_object(tap.evaluated_get(deps), preserve_all_data_layers=True,
+                                          depsgraph=deps)
+    if len(new.vertices) != len(pos):
+        bpy.data.meshes.remove(new)
+        raise SdfCodeError("the incoming mesh changed while the code ran; try again")
+    new.vertices.foreach_set("co", np.ascontiguousarray(pos, np.float32).ravel())
+    for name, data, kind in (("color", color, 'FLOAT_COLOR'), ("value", value, 'FLOAT')):
+        attr = new.attributes.get(name)
+        if attr is not None and (attr.domain != 'POINT' or attr.data_type != kind):
+            new.attributes.remove(attr)
+            attr = None
+        if attr is None:
+            attr = new.attributes.new(name, kind, 'POINT')
+        attr.data.foreach_set("color" if kind == 'FLOAT_COLOR' else "value",
+                              np.ascontiguousarray(data, np.float32).ravel())
+    new.update()
+    old = obj.data
+    old_name = old.name
+    for mat in old.materials:
+        new.materials.append(mat)
+    obj.data = new
+    if old.users == 0:
+        bpy.data.meshes.remove(old)
+    new.name = old_name
+    return {"verts": len(new.vertices), "faces": len(new.polygons)}
+
+
+def is_live_only(obj):
+    """A GPU node that nothing makes real right now: drawn by gpu_live, nothing to build."""
+    s = obj.codenodes
+    return s.kind in ('MESH', 'PARTICLES', 'DEFORM') and s.real_mode in ("NONE", "RENDER_ONLY")
+
+
+def clear_live(obj):
+    """Empty a live-only source's mesh, so no stale real result shows next to the live one."""
+    me = obj.data
+    if me is not None and (len(me.vertices) or len(me.polygons)):
+        me.clear_geometry()
+        me.update()
 
 
 def build_shape(obj):
@@ -75,6 +145,25 @@ def rebuild(obj):
     """Rebuild one object now. Returns "" or an error message (also stored on the object)."""
     s = obj.codenodes
     try:
+        if is_live_only(obj) and not _force_real[0]:
+            if s.text is not None:
+                source = s.text.as_string()
+                s.code_hash = hashlib.sha1(source.encode()).hexdigest()
+                props.sync_params(s, source)
+            clear_live(obj)
+            s.last_error = ""
+            what = {'PARTICLES': f"{s.count:,} particles", 'MESH': "raymarched", 'DEFORM': "vertex code"}[s.kind]
+            s.stats = f"live on the GPU · {what} · add Make Real to use it in nodes or renders"
+            from . import gpu_live
+            gpu_live.redraw()
+            return ""
+        t_make = time.perf_counter()
+        if s.kind == 'DEFORM':
+            st = build_deform(obj)
+            s.last_error = ""
+            s.stats = (f"{st['verts']:,} vertices · {st['faces']:,} faces · "
+                       f"made real in {(time.perf_counter() - t_make) * 1000:.0f} ms")
+            return ""
         if s.kind == 'SHAPE':
             _solid, st = build_shape(obj)
             s.last_error = ""
@@ -86,7 +175,8 @@ def rebuild(obj):
             state, st = simulate_object(obj)
             s.last_error = ""
             s.stats = (f"{st['count']:,} particles · frame {st['frame']} · "
-                       f"{st['steps']} step{'s' if st['steps'] != 1 else ''} · {st['sim_s'] * 1000:.0f} ms")
+                       f"{st['steps']} step{'s' if st['steps'] != 1 else ''} · "
+                       f"made real in {(time.perf_counter() - t_make) * 1000:.0f} ms")
             return ""
         result, st = compute_object(obj)
         build.swap_mesh(obj, result, s.smooth)
@@ -100,7 +190,8 @@ def rebuild(obj):
     nx, ny, nz = st["dims"]
     s.last_error = ""
     s.stats = (f"{st['faces']:,} faces · grid {nx}×{ny}×{nz} · "
-               f"GPU {st['sample_s'] * 1000:.0f} ms · mesh {st['mesh_s'] * 1000:.0f} ms")
+               f"GPU {st['sample_s'] * 1000:.0f} ms · mesh {st['mesh_s'] * 1000:.0f} ms · "
+               f"made real in {(time.perf_counter() - t_make) * 1000:.0f} ms")
     if not st["faces"]:
         s.stats = "no surface inside the bounds · " + s.stats
     return ""
@@ -126,6 +217,16 @@ def request(obj):
 
 
 _render_active = [False]
+_force_real = [False]          # set by the CodeNodes render loop: make live-only nodes real too
+
+
+def make_real_now(obj):
+    """Build a GPU node's real geometry now even if it's live-only (render loop)."""
+    _force_real[0] = True
+    try:
+        return rebuild(obj)
+    finally:
+        _force_real[0] = False
 
 
 @bpy.app.handlers.persistent
@@ -171,7 +272,7 @@ def _on_frame(scene, depsgraph=None):
     try:
         for obj in scene.objects:
             s = getattr(obj, "codenodes", None)
-            if s is not None and s.enabled and s.animate:
+            if s is not None and s.enabled and (s.animate or s.real_mode == 'EVERY_FRAME'):
                 rebuild(obj)
     except Exception:
         traceback.print_exc()
