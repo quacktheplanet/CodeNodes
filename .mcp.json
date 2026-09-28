@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "codenodes": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/run_server.py"],
+      "timeout": 900000
+    }
+  }
+}

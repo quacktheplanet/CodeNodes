@@ -10,8 +10,9 @@ from . import live, sdf_code
 
 class CODENODES_OT_add(bpy.types.Operator):
     bl_idname = "codenodes.add"
-    bl_label = "Code Mesh"
-    bl_description = "Add a mesh object built from sdf code"
+    bl_label = "Scripted Code Mesh"
+    bl_description = ("Legacy: a mesh object driven straight by sdf code, without Geometry Nodes. "
+                      "Add › Mesh › Code Mesh gives you the node version")
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -36,9 +37,9 @@ class CODENODES_OT_add(bpy.types.Operator):
 
 class CODENODES_OT_add_shape(bpy.types.Operator):
     bl_idname = "codenodes.add_shape"
-    bl_label = "Code Shape"
-    bl_description = ("Add a model built from a parametric description — profiles, revolve, "
-                      "extrude — with exact edges and clean quads")
+    bl_label = "Scripted Code Shape"
+    bl_description = ("Legacy: a model driven straight by a shape description, without Geometry "
+                      "Nodes. Add › Mesh › Code Shape gives you the node version")
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -63,8 +64,9 @@ class CODENODES_OT_add_shape(bpy.types.Operator):
 
 class CODENODES_OT_add_particles(bpy.types.Operator):
     bl_idname = "codenodes.add_particles"
-    bl_label = "Code Particles"
-    bl_description = "Add a GPU particle system you write yourself"
+    bl_label = "Scripted Code Particles"
+    bl_description = ("Legacy: GPU particles driven straight by code, without Geometry Nodes. "
+                      "Add › Mesh › Code Particles gives you the node version")
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -199,15 +201,45 @@ def show_text(context, text, op=None):
     return True
 
 
-classes = (CODENODES_OT_add, CODENODES_OT_add_shape, CODENODES_OT_add_particles,
-           CODENODES_OT_profile_to_curve, CODENODES_OT_rebuild, CODENODES_OT_make_plain,
-           CODENODES_OT_edit_code)
+class CODENODES_MT_add_legacy(bpy.types.Menu):
+    bl_idname = "CODENODES_MT_add_legacy"
+    bl_label = "Scripted (no nodes)"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator(CODENODES_OT_add.bl_idname, icon='SCRIPT')
+        layout.operator(CODENODES_OT_add_shape.bl_idname, icon='MESH_CYLINDER')
+        layout.operator(CODENODES_OT_add_particles.bl_idname, icon='PARTICLES')
+
+
+class CODENODES_MT_add_templates(bpy.types.Menu):
+    bl_idname = "CODENODES_MT_add_templates"
+    bl_label = "Code Templates"
+
+    def draw(self, context):
+        from . import gn_link
+        layout = self.layout
+        for kind, (label, _desc, icon) in gn_link.KINDS.items():
+            layout.label(text=label, icon=icon)
+            for key in gn_link.TEMPLATES[kind]:
+                op = layout.operator("codenodes.add_object", text=f"    {key}")
+                op.kind, op.template = kind, key
+            layout.separator()
 
 
 def menu_add(self, context):
-    self.layout.operator(CODENODES_OT_add.bl_idname, icon='SCRIPT')
-    self.layout.operator(CODENODES_OT_add_shape.bl_idname, icon='MESH_CYLINDER')
-    self.layout.operator(CODENODES_OT_add_particles.bl_idname, icon='PARTICLES')
+    layout = self.layout
+    layout.separator()
+    for kind, text, icon in (('MESH', "Code Mesh", 'SCRIPT'), ('SHAPE', "Code Shape", 'MESH_CYLINDER'),
+                             ('PARTICLES', "Code Particles", 'PARTICLES')):
+        layout.operator("codenodes.add_object", text=text, icon=icon).kind = kind
+    layout.menu(CODENODES_MT_add_templates.bl_idname, icon='FILE_NEW')
+    layout.menu(CODENODES_MT_add_legacy.bl_idname, icon='BLANK1')
+
+
+classes = (CODENODES_OT_add, CODENODES_OT_add_shape, CODENODES_OT_add_particles,
+           CODENODES_OT_profile_to_curve, CODENODES_OT_rebuild, CODENODES_OT_make_plain,
+           CODENODES_OT_edit_code, CODENODES_MT_add_legacy, CODENODES_MT_add_templates)
 
 
 def register():

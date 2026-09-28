@@ -708,6 +708,72 @@ def nodes_use(capability, object=None, values=None, name=None, refresh=False):
     return result
 
 
+def code_node(kind="mesh", code=None, template=None, name=None, object=None, values=None):
+    """A code node inside Geometry Nodes: geometry made by code, with the code's sliders as
+    inputs on the node. What a person gets from Add › Mesh › Code Mesh / Shape / Particles.
+
+    Without `object` (or with a name that doesn't exist yet) it adds a new object whose
+    Geometry Nodes tree holds one code node wired to the output. With the name of an
+    object that already has a code node it updates that node: `code` replaces its code,
+    `values` sets its inputs by name ({"major": 1.2, "Resolution": 128}). kind is "mesh"
+    (sdf), "shape" or "particles"; `template` picks a starting template by name instead of
+    `code` (see the Add menu's templates). The result names the object, its tree, the
+    node group, and the hidden source object whose code it runs.
+    """
+    from . import gn_link, live
+    kinds = {"mesh": 'MESH', "shape": 'SHAPE', "particles": 'PARTICLES'}
+    if kind not in kinds:
+        return {"ok": False, "error": f"kind must be one of {', '.join(kinds)}"}
+    obj = bpy.data.objects.get(object) if object else None
+    found = gn_link.host_code_nodes(obj) if obj is not None else []
+    if obj is not None and not found:
+        return {"ok": False, "error": f"'{object}' has no code node. Leave object out to make a new "
+                                      "one, or use nodes_* to edit its Geometry Nodes"}
+    err = ""
+    if found:
+        tree, node = found[0]
+        src = gn_link.source_of(node.node_tree)
+        if code is not None or template:
+            try:
+                source = code if code is not None else gn_link.template(src.codenodes.kind, template)
+            except KeyError as exc:
+                return {"ok": False, "error": str(exc.args[0])}
+            src.codenodes.text.from_string(source)
+            err = live.rebuild(src) or ""
+            gn_link.sync_interface(node.node_tree, src)
+    else:
+        try:
+            source = code if code is not None else None
+            label = name or template or None
+            obj, tree, node, err = gn_link.add_object(kinds[kind], template or None, source=source,
+                                                      label=label)
+        except KeyError as exc:
+            return {"ok": False, "error": str(exc.args[0])}
+        if object and obj.name != object and object not in bpy.data.objects:
+            obj.name = object
+        src = gn_link.source_of(node.node_tree)
+    problems = []
+    for key, value in (values or {}).items():
+        sock = node.inputs.get(key)
+        if sock is None:
+            problems.append(f"no input '{key}' (it has: {', '.join(s.name for s in node.inputs)})")
+            continue
+        try:
+            sock.default_value = value
+        except (TypeError, ValueError) as exc:
+            problems.append(f"{key}: {exc}")
+    if values and gn_link.apply_values(src, gn_link.read_values(('node', tree, node))):
+        err = live.rebuild(src) or err
+    s = src.codenodes
+    result = {"ok": not err and not problems, "object": obj.name, "tree": tree.name,
+              "node": node.node_tree.name, "source": src.name, "kind": s.kind.lower(),
+              "inputs": {sock.name: getattr(sock, "default_value", None) for sock in node.inputs},
+              "stats": s.stats}
+    if err or problems:
+        result["error"] = "; ".join([e for e in (err,) if e] + problems)
+    return result
+
+
 def nodes_set_inputs(object, values, modifier=None):
     """Change the sliders on an object's Geometry Nodes modifier, by input name."""
     obj = bpy.data.objects.get(object)

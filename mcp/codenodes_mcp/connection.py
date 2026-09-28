@@ -4,8 +4,11 @@
     with Connection() as blender:
         blender.call("make", kind="mesh", code=..., name="Ball")
 
-The server is localhost-only and needs the token Blender wrote next to its config, so
-this looks in the obvious places (or `CODENODES_TOKEN` / `CODENODES_TOKEN_FILE`).
+Every Blender running CodeNodes registers itself in <home>/instances/<pid>.json (home is
+CODENODES_HOME, else ~/.codenodes) with its port and token, so this finds Blender by
+itself: the newest one, or the one picked with `use(port)`. CODENODES_PORT and
+CODENODES_TOKEN / CODENODES_TOKEN_FILE still override, and older CodeNodes (no registry)
+are found on port 9877 with the token from Blender's config folder.
 """
 
 from __future__ import annotations
@@ -22,8 +25,56 @@ DEFAULT_PORT = 9877
 TOKEN_FILE = "codenodes_token.json"
 
 
+NOT_RUNNING = ("no Blender with CodeNodes is open. Open Blender with the CodeNodes add-on "
+               "enabled; it lets assistants connect by itself (Preferences › Add-ons › CodeNodes › "
+               "'Let assistants connect')")
+
+
 class BlenderNotRunning(RuntimeError):
-    """Nothing is listening: Blender is closed, or its server has not been started."""
+    """Nothing is listening: Blender is closed, or CodeNodes' link is off."""
+
+
+def home():
+    return os.environ.get("CODENODES_HOME") or os.path.join(os.path.expanduser("~"), ".codenodes")
+
+
+def _alive(pid):
+    if not pid:
+        return False
+    if os.name == "nt":
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))   # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return code.value == 259                                                # STILL_ACTIVE
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except OSError:
+        return False
+
+
+def instances():
+    """Running Blenders with CodeNodes, newest first. Files left by a crashed Blender go."""
+    found = []
+    for path in glob.glob(os.path.join(home(), "instances", "*.json")):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                info = json.load(fh)
+        except Exception:
+            continue
+        if not _alive(info.get("pid")):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            continue
+        found.append(info)
+    found.sort(key=lambda i: i.get("started") or 0, reverse=True)
+    return found
 
 
 def blender_config_dirs():
@@ -63,23 +114,48 @@ class Connection:
 
     def __init__(self, host=HOST, port=None, token=None, timeout=300.0):
         self.host = host
-        self.port = int(port or os.environ.get("CODENODES_PORT") or DEFAULT_PORT)
-        self.token = token if token is not None else find_token()
+        self._fixed_port = int(port or os.environ.get("CODENODES_PORT") or 0) or None
+        self._fixed_token = token
+        self.port = self._fixed_port or DEFAULT_PORT
+        self.token = token
         self.timeout = timeout
         self._sock = None
         self._buffer = bytearray()
         self._id = 0
 
     # -- plumbing ---------------------------------------------------------------------
+    def use(self, port):
+        """Talk to the Blender on this port from now on (see `instances`)."""
+        self.close()
+        self._fixed_port = int(port)
+        return self._target()
+
+    def _target(self):
+        """Pick the port and token: a fixed port if one was chosen, else the newest Blender."""
+        live = instances()
+        if self._fixed_port:
+            info = next((i for i in live if i.get("port") == self._fixed_port), None)
+        else:
+            info = live[0] if live else None
+        if info is not None:
+            self.port = int(info["port"])
+            if self._fixed_token is not None:
+                self.token = self._fixed_token
+            else:
+                self.token = os.environ.get("CODENODES_TOKEN") or info.get("token")
+        else:
+            self.port = self._fixed_port or DEFAULT_PORT
+            self.token = self._fixed_token if self._fixed_token is not None else find_token()
+        return info
+
     def connect(self):
         if self._sock is not None:
             return
+        self._target()
         try:
             self._sock = socket.create_connection((self.host, self.port), timeout=10)
-        except OSError as exc:
-            raise BlenderNotRunning(
-                f"nothing is listening on {self.host}:{self.port} — open Blender, then "
-                f"View3D › Sidebar (N) › CodeNodes › Assistant › Start ({exc})") from None
+        except OSError:
+            raise BlenderNotRunning(NOT_RUNNING) from None
         self._buffer.clear()
 
     def close(self):

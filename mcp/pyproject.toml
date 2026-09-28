@@ -1,9 +1,9 @@
 [project]
 name = "codenodes-mcp"
-version = "0.1.0"
+version = "0.1.2"
 description = "MCP server for CodeNodes: write GPU code, get real Blender geometry, look at the result"
 requires-python = ">=3.10"
-dependencies = ["mcp[cli]>=1.2"]
+dependencies = []          # standard library only
 
 [project.scripts]
 codenodes-mcp = "codenodes_mcp.server:main"

@@ -2,8 +2,10 @@
 
     <python with mcp + codenodes-mcp> tests/mcp_e2e.py <output folder>
 
-Needs Blender open with CodeNodes' server started (tests/install_check.ps1 does all of it).
-It spawns `python -m codenodes_mcp` over stdio, exactly as Claude Code would, and calls the
+Needs Blender open with CodeNodes enabled (its link starts by itself; tests/install_check.ps1
+does all of it). It spawns `python -m codenodes_mcp` over stdio (or, with
+CODENODES_MCP_SCRIPT=<path to mcp/run_server.py>, the way the Claude Code plugin starts it),
+exactly as Claude Code would, and calls the
 tools: make a Code→Mesh and a Code Shape, build and edit a Geometry Nodes capability,
 explain it, bake particles, render and screenshot, and write a web page. Prints each check
 and ends with "ALL n CHECKS PASSED" or "FAIL: ...".
@@ -96,7 +98,9 @@ async def loop(t):
           f"the MCP server lists {len(names)} tools, none of them exec")
 
     st = await t("status")
-    check(st.get("running"), f"status: Blender is listening on port {st.get('port')}")
+    cur = st.get("current") or {}
+    check(st.get("connected") and cur.get("running"),
+          f"status: found Blender by itself on port {cur.get('port')} ({len(st.get('blenders', []))} listed)")
     g = await t("guide")
     check(bool(g) and "error" not in g, "guide returns the writing guide")
 
@@ -114,6 +118,21 @@ async def loop(t):
     check("sdTorus" in code.get("code", ""), "get_code gives the code back to edit")
     sh = await t("make", kind="shape", code=LAMP, name="Lamp")
     check(sh.get("ok") and sh.get("faces", 0) > 100, f"make shape: {sh.get('faces')} faces")
+
+    # --- code nodes inside Geometry Nodes -----------------------------------------------------
+    cn = await t("code_node", kind="mesh", template="Donut", name="Donut")
+    check(cn.get("ok") and cn.get("tree") and "major" in cn.get("inputs", {}),
+          f"code_node makes a node-backed object: {cn.get('object')} / {cn.get('tree')} / {cn.get('node')}")
+    cn2 = await t("code_node", object=cn["object"], values={"major": 1.2})
+    check(cn2.get("ok") and abs(cn2["inputs"]["major"] - 1.2) < 1e-6, "code_node sets an input on the node")
+    tree = await t("nodes_read", group=cn["tree"])
+    check(cn["node"] in json.dumps(tree), "its tree reads back with the code node in it")
+    cbad = await t("code_node", object=cn["object"], code="float sdf(vec3 p) { return lenght(p) - 1.0; }")
+    check(cbad.get("ok") is False and "line" in cbad.get("error", ""), "bad code in a code node comes back fixable")
+    cfix = await t("code_node", object=cn["object"], code=TORUS)
+    check(cfix.get("ok") and "radius" in cfix.get("inputs", {}), "new code gives the node new inputs")
+    cv2 = await t("code_node", kind="shape", template="Vase")
+    check(cv2.get("ok") and "height" in cv2.get("inputs", {}), f"a Code Shape node: {cv2.get('object')}")
 
     # --- Geometry Nodes capability ----------------------------------------------------------
     lib = await t("nodes_library")
@@ -180,9 +199,12 @@ async def loop(t):
 
 
 async def main():
-    env = {k: os.environ[k] for k in ("CODENODES_TOKEN_FILE", "CODENODES_TOKEN", "CODENODES_PORT")
-           if k in os.environ}
-    params = StdioServerParameters(command=sys.executable, args=["-m", "codenodes_mcp"], env=env)
+    env = {k: os.environ[k] for k in ("CODENODES_TOKEN_FILE", "CODENODES_TOKEN", "CODENODES_PORT",
+                                      "CODENODES_HOME") if k in os.environ}
+    script = os.environ.get("CODENODES_MCP_SCRIPT")
+    args = [script] if script else ["-m", "codenodes_mcp"]
+    print(f"  (server: python {' '.join(args)})", flush=True)
+    params = StdioServerParameters(command=sys.executable, args=args, env=env)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

@@ -6,7 +6,7 @@ import bpy
 
 
 class CODENODES_PT_main(bpy.types.Panel):
-    bl_label = "Code → Mesh"
+    bl_label = "CodeNodes"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "CodeNodes"
@@ -14,31 +14,31 @@ class CODENODES_PT_main(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         obj = context.active_object
-        from .gn_ui import code_groups_for, graph_for
+        from . import gn_link
+        from .gn_ui import graph_for
         if obj is None or not getattr(obj, "codenodes", None) or not obj.codenodes.enabled:
+            found = gn_link.host_code_nodes(obj) if obj is not None else []
+            for tree, node in found:
+                _draw_code_node(layout, tree, node)
             graph = graph_for(obj)
             if graph is not None:
                 box = layout.box()
                 box.label(text=f"Made by the node graph '{graph.name}'", icon='NODETREE')
                 box.operator("codenodes.open_graph", icon='WINDOW').tree = graph.name
                 box.label(text="Edit the code from the Code nodes there.")
-            groups = code_groups_for(obj)
-            if groups:
-                box = layout.box()
-                box.label(text="Code nodes in its Geometry Nodes:", icon='GEOMETRY_NODES')
-                for g in groups:
-                    box.label(text=g.name, icon='SCRIPT')
-                box.label(text="Node Editor › Sidebar (N) › CodeNodes")
+            if found or graph is not None:
+                return
             layout.label(text="Add an object made by code:")
             col = layout.column(align=True)
-            col.operator("codenodes.add", icon='ADD')
-            col.operator("codenodes.add_shape", icon='MESH_CYLINDER')
-            col.operator("codenodes.add_particles", icon='PARTICLES')
-            layout.label(text="Or build it from nodes:")
+            col.operator_context = 'EXEC_DEFAULT'
+            for kind, text, icon in (('MESH', "Code Mesh", 'SCRIPT'), ('SHAPE', "Code Shape", 'MESH_CYLINDER'),
+                                     ('PARTICLES', "Code Particles", 'PARTICLES')):
+                col.operator("codenodes.add_object", text=text, icon=icon).kind = kind
+            layout.label(text="Each one is a code node in Geometry Nodes.", icon='INFO')
+            layout.label(text="Or, in any Geometry Nodes tree: Add › CodeNodes")
             col = layout.column(align=True)
             col.operator("codenodes.new_graph", icon='NODETREE')
             col.operator("codenodes.open_graph", icon='WINDOW')
-            layout.label(text="In Geometry Nodes: Add › CodeNodes", icon='INFO')
             return
         s = obj.codenodes
         from . import gn_link
@@ -94,6 +94,43 @@ class CODENODES_PT_main(bpy.types.Panel):
         elif s.stats:
             layout.label(text=s.stats)
         layout.operator("codenodes.make_plain", icon='MESH_DATA')
+
+
+def _draw_code_node(layout, tree, node):
+    """One code node of the active object: what it is, its inputs, and the buttons to edit it."""
+    from . import gn_link
+    group = node.node_tree
+    src = gn_link.source_of(group)
+    if src is None:
+        return
+    s = src.codenodes
+    box = layout.box()
+    box.label(text=group.name, icon=gn_link.KINDS.get(s.kind, ("", "", 'SCRIPT'))[2])
+    row = box.row(align=True)
+    row.scale_y = 1.2
+    row.operator("codenodes.gn_edit_code", icon='TEXT').group = group.name
+    row.operator("codenodes.show_in_gn", icon='GEOMETRY_NODES', text="Show Nodes").group = group.name
+    col = box.column(align=True)
+    for sock in node.inputs:
+        if sock.is_linked:
+            col.label(text=f"{sock.name}: from a link")
+        elif hasattr(sock, "default_value"):
+            col.prop(sock, "default_value", text=sock.name)
+    row = box.row(align=True)
+    row.prop(s, "live", toggle=True)
+    row.prop(s, "animate", toggle=True)
+    row.prop(s, "smooth", toggle=True)
+    row = box.row(align=True)
+    row.operator("codenodes.gn_rebuild", icon='FILE_REFRESH').group = group.name
+    if s.kind == 'MESH':
+        row.operator("codenodes.gn_make_native", icon='NODETREE').group = group.name
+    if s.last_error:
+        err = box.box()
+        err.alert = True
+        for line in s.last_error.splitlines()[:8]:
+            err.label(text=line, icon='ERROR' if not line.startswith(" ") else 'BLANK1')
+    elif s.stats:
+        box.label(text=s.stats.split(" · ")[0])
 
 
 classes = (CODENODES_PT_main,)

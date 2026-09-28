@@ -1,10 +1,15 @@
 ﻿# Install check: the extension zip, installed the way a user installs it, driven end to end
-# through the real MCP server process by a real MCP client. Never touches your own Blender
-# profile: everything goes into a throwaway folder via BLENDER_USER_RESOURCES.
+# through the real MCP server process by a real MCP client. Nobody presses anything in
+# Blender: the add-on's link starts by itself and the MCP server finds it. Never touches your
+# own Blender profile: everything goes into a throwaway folder (BLENDER_USER_RESOURCES,
+# CODENODES_HOME).
 #
-#   powershell -File tests\install_check.ps1 -Python <python with mcp + codenodes-mcp installed> -Work <scratch folder>
+#   powershell -File tests\install_check.ps1 -Python <python with the mcp SDK (the test client)> -Work <scratch folder>
 #
-# Setting up that Python once:  python -m venv <venv>; <venv>\Scripts\pip install -e mcp
+# The MCP server itself is standard library only; the SDK is just the client this test drives it
+# with. Setting that Python up once:  python -m venv <venv>; <venv>\Scripts\pip install "mcp[cli]" -e mcp
+# The client runs twice: once with `python -m codenodes_mcp`, once the way the Claude Code plugin
+# starts it (mcp\run_server.py).
 param(
     [Parameter(Mandatory = $true)][string]$Python,
     [Parameter(Mandatory = $true)][string]$Work,
@@ -33,6 +38,7 @@ foreach ($B in $Blenders) {
     if (Test-Path $prof) { Remove-Item -Recurse -Force $prof }
     New-Item -ItemType Directory $prof | Out-Null
     $env:BLENDER_USER_RESOURCES = $prof
+    $env:CODENODES_HOME = Join-Path $prof "codenodes_home"
 
     $valid = (& $B --factory-startup --command extension validate $zip.FullName | Select-Object -Last 1)
     "$ver  validate: $valid"
@@ -55,12 +61,18 @@ foreach ($B in $Blenders) {
         "$ver  FAIL Blender did not get ready"; $p.Kill(); continue
     }
 
-    $env:CODENODES_TOKEN_FILE = Join-Path $prof "config\codenodes_token.json"
     $out = Join-Path $prof "mcp_out"
     & $Python "$PSScriptRoot\$Client" $out | ForEach-Object { "$ver  $_" }
+    if ($Client -eq "mcp_e2e.py") {
+        $env:CODENODES_MCP_SCRIPT = Join-Path $Repo "mcp\run_server.py"
+        "$ver  --- again, started the way the Claude Code plugin starts it ---"
+        & $Python "$PSScriptRoot\$Client" "$out`_plugin" | Select-String 'server:|ALL \d+ CHECKS|FAIL' | ForEach-Object { "$ver  $($_.Line)" }
+        Remove-Item Env:CODENODES_MCP_SCRIPT
+    }
     New-Item -ItemType File $done | Out-Null
     if (-not $p.WaitForExit(60000)) { $p.Kill() }
+    Get-Content $log | Select-String 'INSTALL_CHECK (ok|FAIL) preference' | ForEach-Object { "$ver  $($_.Line)" }
     $errs = Get-Content "$log.err" -ErrorAction SilentlyContinue | Select-String 'Traceback'
     if ($errs) { "$ver  Blender's stderr has tracebacks:"; Get-Content "$log.err" | Select-Object -Last 20 }
 }
-Remove-Item Env:BLENDER_USER_RESOURCES, Env:CODENODES_CHECK_DONE, Env:CODENODES_TOKEN_FILE -ErrorAction SilentlyContinue
+Remove-Item Env:BLENDER_USER_RESOURCES, Env:CODENODES_CHECK_DONE, Env:CODENODES_HOME -ErrorAction SilentlyContinue

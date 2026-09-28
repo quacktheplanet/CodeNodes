@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "codenodes"
-version = "0.1.1"
+version = "0.1.2"
 name = "CodeNodes"
 tagline = "Turn GPU code into real meshes"
 maintainer = "Lucas DeMeritt"
@@ -12,5 +12,5 @@ blender_version_min = "5.0.0"
 license = ["SPDX:GPL-3.0-or-later"]
 
 [permissions]
-network = "Local server an assistant connects to (127.0.0.1 only)"
+network = "Lets an assistant on this computer connect (127.0.0.1 only)"
 files = "Writes bake caches, renders and web pages"

@@ -1,0 +1,20 @@
+{
+  "name": "codenodes",
+  "displayName": "CodeNodes",
+  "version": "0.1.2",
+  "description": "Drive the CodeNodes Blender add-on from Claude: geometry from code, code nodes in Geometry Nodes, ready-made Geometry Nodes capabilities, renders to look at.",
+  "author": {
+    "name": "Lucas DeMeritt",
+    "email": "lucasdemeritt@gmail.com"
+  },
+  "homepage": "https://github.com/quacktheplanet/CodeNodes",
+  "repository": "https://github.com/quacktheplanet/CodeNodes",
+  "keywords": [
+    "blender",
+    "geometry-nodes",
+    "glsl",
+    "sdf",
+    "procedural",
+    "mcp"
+  ]
+}

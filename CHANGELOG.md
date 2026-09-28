@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.1.2 (unreleased, draft)
+
+### Nodes first
+- **3D Viewport › Add › Mesh › Code Mesh / Code Shape / Code Particles** now make an object whose
+  Geometry Nodes tree holds a code node wired to the output (the code's sliders are inputs on that
+  node). **Code Templates** lists every template; the old code-driven objects without nodes moved to
+  **Scripted (no nodes)**, and files that use them still work.
+- The 3D Viewport sidebar shows the selected object's code nodes: their inputs, **Edit Code**,
+  **Show Nodes** (opens Geometry Nodes on that tree with the node selected), Live / Animate, Rebuild
+  and Make Native.
+
+### Claude, with nothing to start
+- The **Assistant panel and Start button are gone.** The add-on lets assistants on this computer
+  connect by itself when it's enabled (not in background Blender); Edit › Preferences › Add-ons ›
+  CodeNodes › *Let assistants connect* turns it off.
+- Each open Blender registers its port and token in `~/.codenodes/instances/`, so the MCP server finds
+  Blender by itself and several Blenders can be open at once (ports 9877, 9878, …). On Windows a
+  second Blender can no longer bind the same port.
+- **Claude Code plugin** in the repo: `claude plugin marketplace add quacktheplanet/CodeNodes`, then
+  `claude plugin install codenodes@codenodes`. It brings the MCP server and a `codenodes` skill.
+- The MCP server is now **standard library only** (no MCP SDK to install). New tools: `code_node`
+  (make or update a code node inside Geometry Nodes), `use_blender`; `status` lists every open
+  Blender.
+
+### Shapes
+- `rotate x 90`, `translate z 1`, `scale z 2`, `array 3 x 0.5`: named components leave the others at
+  their default. Before, one named value was applied to every axis and two failed.
+- A sweep along a path that ends where it starts (a full turn with no pitch) joins into a ring with
+  no end caps.
+- Booleans are checked one part at a time: an empty or implausible result is an error naming the
+  part, instead of a partial mesh reported as fine.
+
 ## 0.1.1 (unreleased, draft)
 
 ### Code nodes in Geometry Nodes

@@ -1,0 +1,15 @@
+{
+  "name": "codenodes",
+  "description": "CodeNodes for Claude: drive the CodeNodes Blender add-on.",
+  "owner": {
+    "name": "Lucas DeMeritt",
+    "email": "lucasdemeritt@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "codenodes",
+      "source": "./",
+      "description": "Drive the CodeNodes Blender add-on from Claude: geometry from code, code nodes in Geometry Nodes, renders to look at."
+    }
+  ]
+}

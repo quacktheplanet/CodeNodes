@@ -55,11 +55,101 @@ class CODENODES_OT_gn_add(bpy.types.Operator):
         return result
 
 
-def _active(context, op=None):
-    node, group, obj = gn_link.code_node(context)
+def _active(context, op=None, group_name=""):
+    """(node, group, source, tree) for the code node an operator acts on: the named group when
+    `group_name` is set (buttons in the 3D view), else the Node Editor's active node."""
+    if group_name:
+        group = bpy.data.node_groups.get(group_name)
+        obj = gn_link.source_of(group)
+        tree, node = gn_link.find_user(group) if obj is not None else (None, None)
+    else:
+        node, group, obj = gn_link.code_node(context)
+        tree = getattr(getattr(context, "space_data", None), "edit_tree", None)
     if obj is None and op is not None:
         op.report({'ERROR'}, "select a code node (added from Add › CodeNodes)")
-    return node, group, obj
+    return node, group, obj, tree
+
+
+_GROUP = StringProperty(name="Code Node", description="The code node group (empty: the active node)",
+                        options={'HIDDEN', 'SKIP_SAVE'})
+
+
+class CODENODES_OT_add_object(bpy.types.Operator):
+    bl_idname = "codenodes.add_object"
+    bl_label = "Add Code Object"
+    bl_description = ("Add an object whose geometry comes from a code node in its own Geometry Nodes "
+                      "tree. The code's sliders are inputs on that node")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    kind: EnumProperty(name="Kind", items=[(k, v[0], v[1]) for k, v in gn_link.KINDS.items()])
+    template: StringProperty(name="Template", description="Starting code (empty: the default one)")
+
+    def execute(self, context):
+        if context.mode != 'OBJECT':
+            try:
+                bpy.ops.object.mode_set(mode='OBJECT')
+            except RuntimeError:
+                pass
+        obj, tree, node, err = gn_link.add_object(self.kind, self.template or None,
+                                                  location=tuple(context.scene.cursor.location))
+        for o in context.selected_objects:
+            o.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        for area in context.screen.areas if context.screen else ():
+            space = area.spaces.active
+            if (area.type == 'NODE_EDITOR' and getattr(space, "tree_type", "") == "GeometryNodeTree"
+                    and not getattr(space, "pin", False)):
+                area.tag_redraw()          # it follows the active object's modifier by itself
+        if err:
+            self.report({'WARNING'}, f"{node.node_tree.name}: {err.splitlines()[0]}")
+        else:
+            self.report({'INFO'}, f"Added '{obj.name}': its code node is in the Geometry Nodes editor")
+        return {'FINISHED'}
+
+
+class CODENODES_OT_show_in_gn(bpy.types.Operator):
+    bl_idname = "codenodes.show_in_gn"
+    bl_label = "Open in Geometry Nodes"
+    bl_description = ("Show this object's Geometry Nodes, with its code node selected (turns another "
+                      "editor into a Node Editor if needed)")
+
+    group: _GROUP
+
+    def execute(self, context):
+        obj = context.active_object
+        found = gn_link.host_code_nodes(obj)
+        if self.group:
+            found = [f for f in found if f[1].node_tree.name == self.group] or found
+        if not found:
+            self.report({'ERROR'}, "the active object has no code nodes")
+            return {'CANCELLED'}
+        tree, node = found[0]
+        area = show_node_editor(context)
+        if area is None:
+            self.report({'WARNING'}, "open a Node Editor and set it to Geometry Nodes")
+            return {'CANCELLED'}
+        space = area.spaces.active
+        space.tree_type = "GeometryNodeTree"
+        try:
+            space.pin = False
+        except (AttributeError, TypeError):
+            pass
+        for n in tree.nodes:
+            n.select = False
+        node.select = True
+        tree.nodes.active = node
+        region = next((r for r in area.regions if r.type == 'WINDOW'), None)
+        if region is not None:
+            def _frame():
+                try:
+                    with context.temp_override(area=area, region=region):
+                        bpy.ops.node.view_all()
+                except Exception:
+                    pass
+                return None
+            bpy.app.timers.register(_frame, first_interval=0.05)
+        return {'FINISHED'}
 
 
 class CODENODES_OT_gn_edit_code(bpy.types.Operator):
@@ -67,9 +157,11 @@ class CODENODES_OT_gn_edit_code(bpy.types.Operator):
     bl_label = "Edit Code"
     bl_description = "Show this node's code in a Text Editor (turns another editor into one if needed)"
 
+    group: _GROUP
+
     def execute(self, context):
         from .ops import show_text
-        _node, _group, obj = _active(context, self)
+        _node, _group, obj, _tree = _active(context, self, self.group)
         if obj is None or obj.codenodes.text is None or not show_text(context, obj.codenodes.text, self):
             return {'CANCELLED'}
         return {'FINISHED'}
@@ -82,9 +174,10 @@ class CODENODES_OT_gn_template(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     template: StringProperty()
+    group: _GROUP
 
     def execute(self, context):
-        node, group, obj = _active(context, self)
+        node, group, obj, _tree = _active(context, self, self.group)
         if obj is None:
             return {'CANCELLED'}
         kind = obj.codenodes.kind
@@ -109,11 +202,14 @@ class CODENODES_OT_gn_rebuild(bpy.types.Operator):
     bl_description = "Run the code again now"
     bl_options = {'REGISTER', 'UNDO'}
 
+    group: _GROUP
+
     def execute(self, context):
-        node, group, obj = _active(context, self)
+        node, group, obj, tree = _active(context, self, self.group)
         if obj is None:
             return {'CANCELLED'}
-        gn_link.apply_values(obj, gn_link.read_values(('node', context.space_data.edit_tree, node)))
+        if node is not None and tree is not None:
+            gn_link.apply_values(obj, gn_link.read_values(('node', tree, node)))
         err = live.rebuild(obj)
         gn_link.sync_interface(group, obj)
         if err:
@@ -130,9 +226,11 @@ class CODENODES_OT_gn_make_native(bpy.types.Operator):
                       "no add-on needed to open it. Code Mesh only; needs the ExpressNode add-on")
     bl_options = {'REGISTER', 'UNDO'}
 
+    group: _GROUP
+
     def execute(self, context):
         from .bake_nodes import CannotConvert
-        node, group, obj = _active(context, self)
+        node, group, obj, _tree = _active(context, self, self.group)
         if obj is None:
             return {'CANCELLED'}
         try:
@@ -301,7 +399,7 @@ def _add_menu(self, context):
         self.layout.menu(CODENODES_MT_gn_add.bl_idname, icon='SCRIPT')
 
 
-classes = (CODENODES_OT_gn_add, CODENODES_OT_gn_edit_code, CODENODES_OT_gn_template,
+classes = (CODENODES_OT_gn_add, CODENODES_OT_add_object, CODENODES_OT_show_in_gn, CODENODES_OT_gn_edit_code, CODENODES_OT_gn_template,
            CODENODES_OT_gn_rebuild, CODENODES_OT_gn_make_native, CODENODES_OT_open_graph,
            CODENODES_MT_gn_add, CODENODES_MT_gn_templates, CODENODES_PT_gn)
 

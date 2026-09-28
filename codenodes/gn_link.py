@@ -318,6 +318,59 @@ def ensure_tree(context):
     return tree
 
 
+HOST = "codenodes_host"          # on a Geometry Nodes tree made by add_object
+
+
+def add_object(kind, key=None, source=None, label=None, location=(0.0, 0.0, 0.0), collection=None):
+    """A new object whose geometry comes from a code node in its own Geometry Nodes tree.
+
+    What Add › Mesh › Code Mesh / Code Shape / Code Particles makes. Returns
+    (object, tree, node, error or "").
+    """
+    label = label or key or DEFAULT_TEMPLATE[kind]
+    group, err = create(kind, key, label, source)
+    name = _unique(f"Code {label}", bpy.data.objects)
+    obj = bpy.data.objects.new(name, bpy.data.meshes.new(name))
+    if collection is None:
+        collection = getattr(bpy.context, "collection", None) or bpy.context.scene.collection
+    collection.objects.link(obj)
+    obj.location = location
+    tree = bpy.data.node_groups.new(_unique(name, bpy.data.node_groups), "GeometryNodeTree")
+    tree[HOST] = group.name
+    tree.interface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+    tree.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    gin, gout = tree.nodes.new("NodeGroupInput"), tree.nodes.new("NodeGroupOutput")
+    gin.location, gout.location = (-420, 0), (320, 0)
+    node = insert(tree, group, (-90, 60))
+    tree.links.new(node.outputs["Geometry"], gout.inputs["Geometry"])
+    mod = obj.modifiers.new("CodeNodes", 'NODES')
+    mod.node_group = tree
+    return obj, tree, node, err
+
+
+def host_code_nodes(obj):
+    """[(tree, node)] for every code node in `obj`'s Geometry Nodes modifiers."""
+    out = []
+    for mod in getattr(obj, "modifiers", ()):
+        if mod.type != 'NODES' or mod.node_group is None:
+            continue
+        for node in mod.node_group.nodes:
+            if node.type == 'GROUP' and is_code_group(node.node_tree):
+                out.append((mod.node_group, node))
+    return out
+
+
+def find_user(group):
+    """(tree, node) of the first Group node using a code group, or (None, None)."""
+    for tree in bpy.data.node_groups:
+        if tree.bl_idname != "GeometryNodeTree":
+            continue
+        for node in tree.nodes:
+            if node.type == 'GROUP' and node.node_tree == group:
+                return tree, node
+    return None, None
+
+
 def insert(tree, group, location=(0.0, 0.0)):
     node = tree.nodes.new("GeometryNodeGroup")
     node.node_tree = group

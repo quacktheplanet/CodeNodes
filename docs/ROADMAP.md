@@ -142,7 +142,7 @@ drive real solvers and CAD, not stand in for them.
 
    ~~Still to build: our own small MCP server.~~ **Built 2026-09-26** (`codenodes/rpc.py`,
    `server.py`, `mcp/codenodes_mcp/`), and **checked end to end on 2026-09-27**: the extension zip
-   installed into a throwaway profile, the server started as the Start button does, and a real MCP
+   installed into a throwaway profile, its link started by itself, and a real MCP
    client driving the MCP process through 27 steps (`tests/install_check.ps1`), with MCP SDK 2.2
    and 1.30. The reasoning, kept for reference:
 

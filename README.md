@@ -20,25 +20,26 @@ and smoke from a density function. All three come from the snippets below.*
 
 ## Your first five minutes
 
-After installing (see [Install](#install)), everything CodeNodes adds lives in four places:
+After installing (see [Install](#install)):
+
+1. In the 3D Viewport: **Add › Mesh › Code Mesh.** You get an object called *Code Donut*. It's an
+   ordinary object with a Geometry Nodes modifier, and in its node tree is one **code node**,
+   *Code · Donut*, wired to the output.
+2. Open the **Sidebar (N) › CodeNodes** tab. It shows that code node's inputs (`major`, `minor`,
+   `Resolution`): drag one and the donut rebuilds.
+3. **Edit Code** opens the code in a Text Editor. Change it and the donut rebuilds as you type; a new
+   `// @param` line becomes a new input on the node.
+4. **Show Nodes** opens the Geometry Nodes editor on that tree. The code node is a node like any
+   other: wire its Geometry into Transform, Join Geometry, Set Material, Instance on Points…
+
+Everything CodeNodes adds lives in four places:
 
 | Where | What you'll find |
 |---|---|
-| **Geometry Nodes editor › Add (Shift A) › CodeNodes** | Code nodes that sit in your Geometry Nodes tree like any other node: Code Mesh (SDF), Code Shape and Code Particles, each with a few starting templates. |
-| **Geometry Nodes editor › Sidebar (N) › CodeNodes** | For the selected code node: **Edit Code**, Replace with Template, Live / Animate, Rebuild and **Make Native**. |
-| **3D Viewport › Add › Mesh** | The same three as standalone objects: **Code Mesh**, **Code Shape**, **Code Particles**. |
-| **3D Viewport › Sidebar (N) › CodeNodes** | Settings and sliders for the selected code object, **Edit Code**, and **New Node Graph** / **Open Node Graph** for the separate CodeNodes node editor. |
-
-**The quickest way in, inside Geometry Nodes:**
-
-1. Select a mesh, open the **Geometry Nodes** workspace and press **New** (or skip this: adding a code
-   node to an empty editor sets one up for you).
-2. **Add › CodeNodes › Code Mesh (SDF) › Donut.** A node called *Code · Donut* appears with a Geometry
-   output and one input per slider in its code (`major`, `minor`, plus `Resolution`).
-3. Wire its Geometry into anything: Transform, Join Geometry, Set Material, Instance on Points… It
-   behaves like any other geometry.
-4. Change `major` on the node: the donut rebuilds. Press **Edit Code** in the sidebar (N › CodeNodes)
-   and change the code: it rebuilds as you type, and new `// @param` lines appear as new inputs.
+| **3D Viewport › Add › Mesh** | **Code Mesh**, **Code Shape**, **Code Particles**: each makes an object whose Geometry Nodes tree holds a code node. **Code Templates** has every starting template; **Scripted (no nodes)** has the older objects driven by code without Geometry Nodes. |
+| **3D Viewport › Sidebar (N) › CodeNodes** | For the selected object's code nodes: their inputs, **Edit Code**, **Show Nodes**, Live / Animate, Rebuild, Make Native. |
+| **Geometry Nodes editor › Add (Shift A) › CodeNodes** | The same code nodes, to drop into any Geometry Nodes tree you already have. |
+| **Geometry Nodes editor › Sidebar (N) › CodeNodes** | The same controls, for the selected code node. |
 
 ![Code nodes wired into a Geometry Nodes tree, with the CodeNodes sidebar](docs/gn_integration.png)
 
@@ -83,7 +84,7 @@ The starter graph makes a small Saturn.
 | **Node editor** | code nodes with typed sockets that compile into one GPU program | works |
 | **Bake to Disk** | animations written to files that play back with stock nodes; renders with no GPU and no add-on | works |
 | **Bake to Nodes** | the GLSL itself becomes a Geometry Nodes network | experimental (needs the ExpressNode add-on, not public yet) |
-| **Assistant link (MCP)** | lets an assistant such as Claude build, render and look at its work; fixed tool list, no arbitrary code | works |
+| **Claude plugin (MCP + skill)** | Claude builds, renders and looks at its work in your open Blender; nothing to start in Blender; fixed tool list, no arbitrary code | works |
 | **Geometry Nodes agent** | build, explain and edit any node tree as data; a library of tested capabilities (terrain, scatter, walls, rooms, roofs, stairs, water, paths) | works |
 | **Web pages** | a scene as one self-contained page with sliders; Code Shapes rebuild live in the browser | works |
 | **Buildings from a spec** | a written spec → floor plan → building → equipment → checks (factories, warehouses, simple houses) | experimental |
@@ -95,8 +96,8 @@ The starter graph makes a small Saturn.
 - **A GPU and a Blender window** for the live GPU features (Code → Mesh, Volume, Particles). Background
   Blender (`-b`) has no GPU, so bake first for headless renders. Shapes, Geometry Nodes and the web
   export all work headless.
-- **For the assistant link:** Python 3.10+ for the MCP server (MCP SDK 1.x or 2.x), and an MCP client
-  such as Claude Code.
+- **To use it with Claude:** Claude Code, and Python 3.10+ on the PATH (the MCP server uses the
+  standard library only: nothing to install).
 
 ## Install
 
@@ -108,30 +109,37 @@ The starter graph makes a small Saturn.
    blender --command extension build --source-dir codenodes --output-dir dist
    ```
 
-   That writes `dist/codenodes-0.1.1.zip` (Blender needs the `dist` folder to exist first).
+   That writes `dist/codenodes-0.1.2.zip` (Blender needs the `dist` folder to exist first).
 2. **Install it.** Edit › Preferences › Get Extensions › the ⌄ menu at the top right ›
    **Install from Disk…** › pick the zip. It's enabled straight away.
-3. **Optional: connect an assistant.**
-   1. In Blender: 3D Viewport › Sidebar (N) › **CodeNodes** › **Assistant** › **Start**. Blender writes
-      a token to its config folder; the link only listens on this computer (127.0.0.1).
-   2. Install the MCP server once, in its own Python environment:
 
-      ```
-      python -m venv codenodes-mcp
-      codenodes-mcp/Scripts/pip install -e path/to/CodeNodes/mcp      # on macOS/Linux: codenodes-mcp/bin/pip
-      ```
-   3. Tell your MCP client about it. For Claude Code:
+## Use it with Claude
 
-      ```
-      claude mcp add codenodes -- path/to/codenodes-mcp/Scripts/codenodes-mcp
-      ```
+CodeNodes comes with a Claude Code plugin: an MCP server that drives the add-on, and a skill that
+teaches Claude how to use it. Two commands, once:
 
-      With [`uv`](https://docs.astral.sh/uv/) installed, `claude mcp add codenodes -- uvx --from path/to/CodeNodes/mcp codenodes-mcp` works too.
-   4. Try it: ask the assistant to *"use CodeNodes to make a wall with two doorways along an L-shaped
-      curve, then render it"*. It should build it, render it and describe what it sees.
+```
+claude plugin marketplace add quacktheplanet/CodeNodes
+claude plugin install codenodes@codenodes
+```
 
-   More in [mcp/README.md](mcp/README.md). The server only runs while Blender is open and you've pressed
-   Start. To update CodeNodes, install a newer zip over the old one.
+(While this work is on the `gn-integration` branch, add the branch:
+`claude plugin marketplace add "quacktheplanet/CodeNodes#gn-integration"`.)
+
+Then open Blender (with the add-on installed) and ask Claude for something: *"use CodeNodes to make a
+vase with a wavy rim and render it"*, or *"make a donut code node and wire three copies into a
+Join"*. There's nothing to start or copy in Blender: the add-on lets assistants on this computer
+connect by itself, and the MCP server finds the open Blender (or lets Claude pick one when several
+are open).
+
+- **Turning it off:** Edit › Preferences › Add-ons › CodeNodes › **Let assistants connect**.
+- **Only this computer can connect.** The link listens on 127.0.0.1 and checks a random token that
+  Blender writes to `~/.codenodes/` for the MCP server to read. It doesn't start in background
+  (`-b`) Blender.
+- **Fixed tool list.** The add-on answers only the names in its own tool table; there is no tool
+  that runs arbitrary code in Blender.
+- **Without the plugin:** any MCP client can run the server directly:
+  `claude mcp add codenodes -- python path/to/CodeNodes/mcp/run_server.py`.
 
 ## Quick start
 
@@ -309,10 +317,11 @@ agent.bake("Ring", 1, 48)
 `look_at` and `light` exist because a render with no camera aim or lighting comes out black, which
 wastes a whole round trip.
 
-**Over MCP.** `mcp/` is an MCP server that exposes those functions to an assistant, so it can build
-something, render it and look at what it made. It is localhost-only, needs a token, and **has no way
-to run arbitrary code in Blender**: the add-on answers only the names in its own tool table. See
-[mcp/README.md](mcp/README.md).
+**Over MCP.** `mcp/` is an MCP server (standard library only) that exposes those functions to an
+assistant, so it can build something, render it and look at what it made; the Claude Code plugin
+runs it for you (see [Use it with Claude](#use-it-with-claude)). It only accepts connections from
+this computer and **has no way to run arbitrary code in Blender**: the add-on answers only the names
+in its own tool table. See [mcp/README.md](mcp/README.md).
 
 ## Geometry Nodes, built and edited by an assistant
 

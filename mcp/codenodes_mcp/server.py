@@ -1,8 +1,10 @@
 """The MCP server process. Every tool is a thin wrapper over one call into Blender.
 
-    uvx --from . codenodes-mcp          (or: python -m codenodes_mcp)
+    python -m codenodes_mcp            (or the Claude Code plugin, which runs mcp/run_server.py)
 
-Images come back as real MCP images so the assistant can look at what it made.
+Standard library only: nothing to install. It finds the open Blender by itself (see
+connection.py). Images come back as real MCP images so the assistant can look at what
+it made.
 """
 
 from __future__ import annotations
@@ -11,18 +13,18 @@ import base64
 
 from .connection import BlenderNotRunning, Connection
 
-try:  # MCP SDK 2.x renamed FastMCP to MCPServer
-    from mcp.server.mcpserver import Image, MCPServer
-except ImportError:
-    try:  # 1.x
-        from mcp.server.fastmcp import FastMCP as MCPServer, Image
-    except ImportError as exc:  # pragma: no cover - depends on the environment
-        raise SystemExit(
-            "The MCP SDK is missing. Install it with:  pip install \"mcp[cli]\"\n"
-            "or run this server with:  uvx --from <path to CodeNodes/mcp> codenodes-mcp"
-        ) from exc
+from .stdio import Image, MCPServer
+from .connection import instances
 
-mcp = MCPServer("CodeNodes")
+INSTRUCTIONS = """CodeNodes turns code into real Blender geometry, live in the user's open Blender.
+Call `guide` before writing code the first time. `code_node` makes geometry the way a person
+does in the UI (a code node inside Geometry Nodes, with the code's sliders as node inputs);
+`make` makes a plain code object. Look at results with `viewport` or `render` (set `light`
+first). Geometry Nodes: `nodes_help`, `nodes_library`/`nodes_use` for ready-made capabilities,
+`nodes_find`/`nodes_describe`/`nodes_write`/`nodes_edit` to build or change trees. If Blender
+isn't open, ask the user to open it with the CodeNodes add-on enabled; there is nothing to start."""
+
+mcp = MCPServer("codenodes", version="0.1.2", instructions=INSTRUCTIONS)
 _link = Connection()
 
 
@@ -463,8 +465,46 @@ def nodes_check(group: str, on: str = "") -> dict:
 
 @mcp.tool()
 def status() -> dict:
-    """Check the link to Blender: whether it is listening, and what it has served."""
-    return _call("status")
+    """Is Blender connected? Lists every open Blender running CodeNodes (port, version, file)
+    and which one this session talks to. Call this first if a tool says Blender isn't open."""
+    live = [{k: i.get(k) for k in ("port", "blender", "file", "pid")} for i in instances()]
+    try:
+        current = _link.call("status")
+        return {"connected": True, "current": current, "blenders": live}
+    except (BlenderNotRunning, OSError) as exc:
+        _link.close()
+        return {"connected": False, "blenders": live, "hint": str(exc)}
+
+
+@mcp.tool()
+def use_blender(port: int) -> dict:
+    """Switch to another open Blender, by the port `status` lists for it."""
+    info = _link.use(port)
+    if info is None:
+        return {"ok": False, "error": f"no Blender with CodeNodes on port {port}",
+                "blenders": [{k: i.get(k) for k in ("port", "blender", "file")} for i in instances()]}
+    return {"ok": True, "port": info.get("port"), "blender": info.get("blender"), "file": info.get("file")}
+
+
+@mcp.tool()
+def code_node(kind: str = "mesh", code: str | None = None, template: str | None = None,
+              name: str | None = None, object: str | None = None, values: dict | None = None) -> dict:
+    """Geometry made by code as a node inside Geometry Nodes, the way a person makes it
+    (Add › Mesh › Code Mesh / Shape / Particles). The code's sliders become inputs on the node.
+
+    New: leave `object` out (or give a new name) and pass kind ("mesh" = `float sdf(vec3 p)`,
+    "shape" = the shape language, "particles" = spawn/update) with `code` or a `template`
+    ("Donut", "Rounded Box", "Gyroid Ball", "Blob"; "Desk Lamp", "Vase"; "Swirl", "Fountain").
+    Update: pass the `object` it returned, with new `code` and/or `values` ({"major": 1.2}).
+    The result names the object, its Geometry Nodes tree and the node, so nodes_edit and
+    nodes_read can wire it into more nodes. Errors in the code come back with the line.
+    """
+    args = {"kind": kind}
+    for key, value in (("code", code), ("template", template), ("name", name),
+                       ("object", object), ("values", values)):
+        if value is not None:
+            args[key] = value
+    return _call("code_node", **args)
 
 
 def main():

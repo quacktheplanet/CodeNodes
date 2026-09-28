@@ -5,4 +5,4 @@ running Blender over a localhost socket. It cannot run arbitrary code in Blender
 only the fixed set of tools below.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
