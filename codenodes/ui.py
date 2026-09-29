@@ -113,7 +113,7 @@ def _draw_code_node(layout, tree, node):
     row.operator("codenodes.gn_edit_code", icon='TEXT').group = group.name
     if s.kind in gn_link.GPU_KINDS and s.real_mode in ("NONE", "RENDER_ONLY"):
         box.label(text="Live on the GPU (viewport only)", icon='INFO')
-        box.operator("codenodes.gn_add_make_real", text="Add Make Real", icon='MESH_DATA').group = group.name
+        box.operator("codenodes.gn_add_make_real", text="Add To Geometry", icon='MESH_DATA').group = group.name
     if s.last_error:
         err = box.box()
         err.alert = True

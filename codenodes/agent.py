@@ -737,7 +737,7 @@ def code_node(kind="mesh", code=None, template=None, name=None, object=None, val
     Surface: `float sdf(vec3 p)`), "particles" (GPU Particles: spawn/update), "deform" (GPU
     Mesh: `void deform(inout Vertex v)` on the mesh wired into it) or "shape"; `template`
     picks a starting template by name instead of `code`. GPU nodes are drawn live on the GPU;
-    `make_real` (default on) puts a Make Real node after a new one so it's real geometry that
+    `make_real` (default on) puts a To Geometry node after a new one so it's real geometry that
     renders and that later nodes can use. The result names the object, its tree, the node
     group and the hidden source object whose code it runs.
     """
@@ -782,7 +782,7 @@ def code_node(kind="mesh", code=None, template=None, name=None, object=None, val
     for key, value in (values or {}).items():
         sock = node.inputs.get(key)
         if sock is None and real is not None:
-            sock = real.inputs.get(key)          # Resolution / Max Points / When live on Make Real
+            sock = real.inputs.get(key)          # Resolution / Max Points / When live on To Geometry
         if sock is None:
             have = [s.name for s in node.inputs] + ([s.name for s in real.inputs] if real is not None else [])
             problems.append(f"no input '{key}' (it has: {', '.join(have)})")

@@ -3,7 +3,7 @@
 The GPU must never run while Blender's renderer works (that crashes Blender), so this takes turns.
 For each frame, on the main thread: step every GPU node to the frame, make its result real, render
 that one frame and wait for it, then go on. No bake is needed first. GPU nodes that are only drawn
-live (no Make Real after them) are made real just for the render, then go back to being live.
+live (no To Geometry after them) are made real just for the render, then go back to being live.
 
 Blender's own F12 / Ctrl+F12 still work: they render whatever is real or baked, and CodeNodes
 refuses all GPU work while they run.
@@ -23,13 +23,64 @@ RENDER_LINK = "CodeNodes render link"
 
 
 def gpu_sources():
+    from . import links
     col = bpy.data.collections.get(gn_link.SOURCES)
     out = []
     for obj in (list(col.objects) if col is not None else []):
         s = getattr(obj, "codenodes", None)
-        if s is not None and s.enabled and s.kind in gn_link.GPU_KINDS and s.real_mode != "STANDALONE":
+        if s is not None and s.enabled and links.is_gpu(obj) and s.real_mode != "STANDALONE":
             out.append(obj)
     return out
+
+
+RENDER_JOIN = "CodeNodes render join"
+
+
+def _host_trees(src):
+    group = _group_of(src)
+    if group is None:
+        return []
+    return [t for t in bpy.data.node_groups if t.bl_idname == "GeometryNodeTree"
+            and any(n.type == 'GROUP' and n.node_tree == group for n in t.nodes)]
+
+
+def _link_in_host(src, on):
+    """A live-only particle chain feeds nothing in the tree (its streams are bundles), so for the render
+    its made-real points are joined in front of the host tree's output (and taken out again after)."""
+    for tree in _host_trees(src):
+        gout = next((n for n in tree.nodes if n.type == 'GROUP_OUTPUT'), None)
+        geo = next((sk for sk in gout.inputs if sk.bl_idname == "NodeSocketGeometry"), None) if gout else None
+        if geo is None:
+            continue
+        join = tree.nodes.get(RENDER_JOIN)
+        info = tree.nodes.get(RENDER_LINK)
+        if on:
+            if join is None:
+                join = tree.nodes.new("GeometryNodeJoinGeometry")
+                join.name = join.label = RENDER_JOIN
+                join.location = (gout.location.x - 160, gout.location.y - 140)
+                prev = next((l for l in tree.links if l.to_socket == geo), None)
+                if prev is not None:
+                    join["cn_prev"] = [prev.from_node.name, prev.from_socket.identifier]
+                    tree.links.new(prev.from_socket, join.inputs[0])
+                tree.links.new(join.outputs[0], geo)
+            if info is None:
+                info = tree.nodes.new("GeometryNodeObjectInfo")
+                info.name = info.label = RENDER_LINK
+                info.transform_space = 'ORIGINAL'
+                info.location = (join.location.x - 200, join.location.y - 120)
+            info.inputs["Object"].default_value = src
+            tree.links.new(info.outputs["Geometry"], join.inputs[0])
+        else:
+            prev = join.get("cn_prev") if join is not None else None
+            for n in (info, join):
+                if n is not None:
+                    tree.nodes.remove(n)
+            if prev:
+                node = tree.nodes.get(prev[0])
+                out = next((o for o in node.outputs if o.identifier == prev[1]), None) if node else None
+                if out is not None:
+                    tree.links.new(out, geo)
 
 
 def _group_of(src):
@@ -39,6 +90,10 @@ def _group_of(src):
 def _link_for_render(src, on):
     """A live-only GPU node's output is empty; for the render its group hands the made-real result
     straight to its output (and stops again afterwards)."""
+    from . import links
+    if links.ekind(src) == 'PARTICLES':
+        _link_in_host(src, on)
+        return
     group = _group_of(src)
     if group is None:
         return
@@ -73,7 +128,7 @@ def prepare_frame(scene, frame, sources):
                 temporary.append(src)
             if err:
                 print(f"CodeNodes render: {src.name}: {err}")
-        elif s.real_mode == "ON_CHANGE" and s.kind == 'PARTICLES':
+        elif s.real_mode == "ON_CHANGE" and s.kind == 'PARTICLES':    # (chain heads only)
             live.rebuild(src)                    # particles move with time even when "frozen" otherwise
     bpy.context.view_layer.update()
     return temporary

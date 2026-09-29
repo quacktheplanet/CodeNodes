@@ -32,18 +32,23 @@ KIND_KEY = "codenodes_kind"
 PREFIX = "Code · "
 POLL_S = 0.25
 
-MAKE_REAL = "codenodes_make_real"   # on a Make Real node group
-MAKE_REAL_NAME = "Make Real"
+MAKE_REAL = "codenodes_make_real"   # on a To Geometry node group (called Make Real before 0.3)
+MAKE_REAL_NAME = "To Geometry"
 GPU_KINDS = ('MESH', 'PARTICLES', 'DEFORM')
+CODE_KINDS = GPU_KINDS + ('STAGE',)     # kept as text and run on demand (not built at once like a shape)
 TAP = "codenodes_tap"              # on a hidden tap tree: which GPU Mesh source it feeds
 
 KINDS = {
-    'PARTICLES': ("GPU Particles", "Particles moved by code you write, on the GPU. Drawn live in the viewport; "
-                                   "add Make Real to use them in nodes or renders", 'PARTICLES'),
+    'PARTICLES': ("GPU Particles", "A particle source you write, on the GPU. Wire stages after it (what the "
+                                   "particles do, how they look); drawn live, add To Geometry to use them in "
+                                   "nodes or renders", 'PARTICLES'),
+    'STAGE': ("GPU Stage", "One step you write in a chain of code nodes: a behaviour, a look, a warp, a mesh "
+                           "deform or functions for other nodes. Its code declares its own inputs and outputs",
+              'NODETREE'),
     'MESH': ("GPU Surface (SDF)", "A surface from a signed distance function, raymarched live on the GPU; "
-                                  "add Make Real to turn it into a mesh", 'SCRIPT'),
+                                  "add To Geometry to turn it into a mesh", 'SCRIPT'),
     'DEFORM': ("GPU Mesh", "Code run on every vertex of the mesh wired into it (deform, displace, recolour); "
-                           "drawn live, add Make Real for the modified mesh", 'MOD_WAVE'),
+                           "drawn live, add To Geometry for the modified mesh", 'MOD_WAVE'),
     'SHAPE': ("Code Shape", "A model built from a parametric description: exact edges, clean quads "
                             "(real geometry straight away)", 'MESH_CYLINDER'),
 }
@@ -258,6 +263,8 @@ TEMPLATE_SETTINGS = {
     "Flow": {"count": 1_000_000, "color_by": 'CODE', "gain": 0.3, "point_px": 1.0, "prewarm": 3.0},
     "Attractor": {"count": 600_000, "color_by": 'CODE', "gain": 0.3, "point_px": 1.0, "prewarm": 4.0},
     "Swirl": {"count": 200_000, "gain": 0.4},
+    "Firefly Swarm": {"count": 2500, "color_by": 'CODE', "point_px": 3.0, "gain": 1.0},
+    "Spark Ball": {"count": 100_000, "color_by": 'CODE', "gain": 0.5, "point_px": 1.5},
     "Fountain": {"count": 100_000, "blend": 'SOLID', "point_px": 3.0, "color_by": 'AGE',
                  "color_a": (0.6, 0.85, 1.0), "color_b": (0.1, 0.3, 0.9), "gain": 1.0},
     "Castle": {"bounds_min": (-1.6, -1.6, -0.15), "bounds_max": (1.6, 1.6, 2.35), "resolution": 192},
@@ -266,6 +273,7 @@ TEMPLATE_SETTINGS = {
 }
 
 TEMPLATES = {
+    'STAGE': {},                 # filled from stage_templates below
     'DEFORM': {},                # filled from deform.TEMPLATES below
     'MESH': {
         "Castle": CASTLE,
@@ -324,6 +332,8 @@ part body
         "Flow": FLOW,
         "Attractor": ATTRACTOR,
         "Swirl": None,              # particles.TEMPLATE
+        "Firefly Swarm": None,      # stage_templates.FIREFLY_SWARM
+        "Spark Ball": None,         # stage_templates.SPARK_BALL
         "Fountain": """\
 // A fountain: particles shoot up from the origin and fall back under gravity.
 // @param power 4.0 0.5 10.0
@@ -341,12 +351,17 @@ void update(inout Particle p, float dt) {
 """,
     },
 }
-DEFAULT_TEMPLATE = {'MESH': "Donut", 'SHAPE': "Desk Lamp", 'PARTICLES': "Galaxy", 'DEFORM': "Wave"}
+DEFAULT_TEMPLATE = {'MESH': "Donut", 'SHAPE': "Desk Lamp", 'PARTICLES': "Galaxy", 'DEFORM': "Wave",
+                    'STAGE': "Wander"}
 
 
 def _fill_deform_templates():
+    from . import stage_templates
     from .deform import TEMPLATES as DT
     TEMPLATES['DEFORM'].update(DT)
+    TEMPLATES['STAGE'].update(stage_templates.STAGES)
+    TEMPLATES['PARTICLES']["Firefly Swarm"] = stage_templates.FIREFLY_SWARM
+    TEMPLATES['PARTICLES']["Spark Ball"] = stage_templates.SPARK_BALL
 
 
 _fill_deform_templates()
@@ -433,7 +448,27 @@ def sources_collection(scene=None):
         scene.collection.children.link(col)
     col.hide_viewport = True          # still evaluated for Object Info, never drawn or rendered itself
     col.hide_render = True
+    _hide_from_outliner(col, scene)
     return col
+
+
+def _hide_from_outliner(col, scene):
+    """Keep the helpers out of the way: the collection is excluded from every view layer (Object Info
+    still pulls in the objects it reads) and shown last, collapsed."""
+    for vl in scene.view_layers:
+        lc = _find_layer_collection(vl.layer_collection, col.name)
+        if lc is not None and not lc.exclude:
+            lc.exclude = True
+
+
+def _find_layer_collection(lc, name):
+    if lc.collection.name == name:
+        return lc
+    for child in lc.children:
+        got = _find_layer_collection(child, name)
+        if got is not None:
+            return got
+    return None
 
 
 def _unique(name, pool):
@@ -459,15 +494,15 @@ def make_source(kind, source, label, key=None):
     """Build a hidden code source object from `source`. (object, error or "").
 
     GPU kinds (particles, SDF surfaces) start as live-only: nothing is simulated or meshed into
-    Blender until a Make Real node asks for it."""
+    Blender until a To Geometry node asks for it."""
     from . import api
     name = _unique(f"CN · {label}", bpy.data.objects)
-    if kind in GPU_KINDS:
-        # the text and settings, without running it: live drawing and Make Real run it on demand
+    if kind in CODE_KINDS:
+        # the text and settings, without running it: live drawing and To Geometry run it on demand
         obj = bpy.data.objects.new(name, bpy.data.meshes.new(name))
         bpy.context.scene.collection.objects.link(obj)
         s = obj.codenodes
-        ext = {'PARTICLES': 'particles', 'DEFORM': 'vertex'}.get(kind, 'sdf')
+        ext = {'PARTICLES': 'particles', 'DEFORM': 'vertex', 'STAGE': 'stage'}.get(kind, 'sdf')
         text = bpy.data.texts.new(f"{name}.{ext}")
         text.from_string(source)
         s.kind = kind
@@ -533,11 +568,12 @@ def build_group(obj, label):
     nodes = group.nodes
     gin, gout = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
     gin.location, gout.location = (-400, 0), (150, 0)
-    if obj.codenodes.kind in GPU_KINDS:
-        # A GPU node's result lives on the GPU and is drawn live; its Geometry output stays empty
-        # until a Make Real node downstream turns it into real geometry.
-        group.description = ("CodeNodes GPU node: drawn live in the viewport. Add Make Real after it to use "
-                             "it in nodes or renders. Edit the code from the Node Editor sidebar (N)")
+    if obj.codenodes.kind in CODE_KINDS:
+        # A GPU node's result lives on the GPU and is drawn live; its outputs stay empty until a
+        # To Geometry node downstream turns it into real geometry. Its code declares its sockets.
+        group.description = ("CodeNodes GPU node: drawn live in the viewport. Add To Geometry after it to use "
+                             "it in nodes or renders. Switch on ✎ Edit Code to open its code")
+        sync_interface(group, obj)
         return group
     info = nodes.new("GeometryNodeObjectInfo")
     info.name = info.label = "Code Result"
@@ -556,10 +592,10 @@ def create(kind, key=None, label=None, source=None):
     return build_group(obj, label), err
 
 
-# ---- Make Real ---------------------------------------------------------------------------------
+# ---- To Geometry ---------------------------------------------------------------------------------
 
 def build_make_real():
-    """A Make Real node group: its input is a GPU node's result, its output real geometry.
+    """A To Geometry node group: its input is a GPU node's result, its output real geometry.
 
     Inside: Object Info reads the upstream GPU node's source object, which the add-on fills with
     real points or a mesh; a Join passes through anything that is already real (e.g. after Make
@@ -567,8 +603,9 @@ def build_make_real():
     """
     group = bpy.data.node_groups.new(_unique(MAKE_REAL_NAME, bpy.data.node_groups), "GeometryNodeTree")
     group[MAKE_REAL] = True
-    group.description = ("CodeNodes: turns the GPU node before it into real geometry (points or a mesh) that "
-                         "later nodes and renders can use, like Realize Instances. Options in the sidebar (N)")
+    group.description = ("CodeNodes: turns the GPU node (or chain) before it into real geometry: points with "
+                         "every per-particle attribute, or a mesh. Later nodes and renders can use it, like "
+                         "after Realize Instances")
     if hasattr(group, "color_tag"):
         try:
             group.color_tag = 'GEOMETRY'
@@ -594,7 +631,7 @@ REAL_INPUTS = {'MESH': ("Resolution", 8, 512), 'PARTICLES': ("Max Points", 0, 16
 
 
 def sync_real_interface(group, kind, src=None):
-    """Make Real's inputs for the kind of GPU node feeding it (When, Resolution / Max Points, ...)."""
+    """To Geometry's inputs for the kind of GPU node feeding it (When, Resolution / Max Points, ...)."""
     from . import gn_sockets
     gn_sockets.sync_real_interface(group, kind, src)
 
@@ -603,36 +640,73 @@ def real_info_node(group):
     return next((n for n in group.nodes if n.type == 'OBJECT_INFO'), None)
 
 
+def _feeding(tree, sock):
+    return next((l for l in tree.links if l.to_socket == sock and not l.is_muted), None)
+
+
 def upstream_code_node(tree, node, depth=0):
-    """The code group node feeding a Make Real node's Geometry input (through reroutes), or None."""
-    if depth > 32 or not node.inputs:
+    """The code node at the head of whatever feeds a To Geometry node's first input: back through
+    reroutes and through GPU Stage nodes to the chain's source. None if no code node feeds it."""
+    if depth > 64 or not node.inputs:
         return None
-    sock = node.inputs[0]
-    link = next((l for l in tree.links if l.to_socket == sock and not l.is_muted), None)
-    if link is None:
-        return None
-    src = link.from_node
-    if src.type == 'REROUTE':
-        return upstream_code_node(tree, src, depth + 1)
-    if src.type == 'GROUP' and is_code_group(src.node_tree):
+    link = _feeding(tree, node.inputs[0])
+    while link is not None and depth <= 64:
+        depth += 1
+        src = link.from_node
+        if src.type == 'REROUTE':
+            link = _feeding(tree, src.inputs[0])
+            continue
+        if src.type != 'GROUP' or not is_code_group(src.node_tree):
+            return None
+        obj = source_of(src.node_tree)
+        if obj is not None and obj.codenodes.kind == 'STAGE':
+            from . import links
+            if obj.name in links.MESH_HEADS:
+                return src
+            stream = src.inputs.get(link.from_socket.name) or src.inputs.get("Particles") or src.inputs.get("Mesh")
+            if stream is None:
+                return None
+            nxt = _feeding(tree, stream)
+            if nxt is None:
+                return src
+            link = nxt
+            continue
         return src
     return None
 
 
+def _stream_out(node):
+    """A code node's stream output (Particles, Mesh or Geometry)."""
+    for name in ("Particles", "Mesh", "Geometry"):
+        out = node.outputs.get(name)
+        if out is not None:
+            return out
+    return node.outputs[0] if node.outputs else None
+
+
 def insert_make_real(tree, code_node_, location=None):
-    """Put a Make Real node right after a code node, taking over its outgoing links."""
+    """Put a To Geometry node right after a code node, taking over its outgoing links."""
     group = build_make_real()
     node = tree.nodes.new("GeometryNodeGroup")
     node.node_tree = group
     node.location = location or (code_node_.location.x + code_node_.width + 60, code_node_.location.y)
     node.width = 160
-    out = code_node_.outputs["Geometry"]
+    out = _stream_out(code_node_)
+    src = source_of(code_node_.node_tree)
+    head = upstream_code_node_from(tree, code_node_)
+    head_src = source_of(head.node_tree) if head is not None else src
+    from . import links as _links
+    kind = _links.ekind(head_src) if head_src is not None else None
+    sync_real_interface(group, kind if kind in GPU_KINDS else None, head_src)
     targets = [l.to_socket for l in tree.links if l.from_socket == out]
     for l in [l for l in tree.links if l.from_socket == out]:
         tree.links.remove(l)
-    tree.links.new(out, node.inputs["Geometry"])
+    tree.links.new(out, node.inputs[0])
     for sock in targets:
-        tree.links.new(node.outputs["Geometry"], sock)
+        try:
+            tree.links.new(node.outputs["Geometry"], sock)
+        except RuntimeError:
+            pass
     for n in tree.nodes:
         n.select = False
     node.select = True
@@ -641,8 +715,26 @@ def insert_make_real(tree, code_node_, location=None):
     return node
 
 
+def upstream_code_node_from(tree, code_node_):
+    """The head of the chain a code node belongs to (itself if it is a head)."""
+    obj = source_of(code_node_.node_tree)
+    if obj is None or obj.codenodes.kind != 'STAGE':
+        return code_node_
+    from . import links
+    if obj.name in links.MESH_HEADS:
+        return code_node_
+    stream = code_node_.inputs.get("Particles") or code_node_.inputs.get("Mesh")
+    link = _feeding(tree, stream) if stream is not None else None
+    if link is None:
+        return code_node_
+
+    class _Probe:                       # a stand-in whose first input is that stream
+        inputs = [stream]
+    return upstream_code_node(tree, _Probe()) or code_node_
+
+
 def make_real_node(context):
-    """The active node in the Node Editor if it's a Make Real node: (node, group, tree)."""
+    """The active node in the Node Editor if it's a To Geometry node: (node, group, tree)."""
     space = getattr(context, "space_data", None)
     tree = getattr(space, "edit_tree", None)
     node = tree.nodes.active if tree is not None else None
@@ -698,7 +790,7 @@ def add_object(kind, key=None, source=None, label=None, location=(0.0, 0.0, 0.0)
     """A new object whose geometry comes from a code node in its own Geometry Nodes tree.
 
     What Add › Mesh › CodeNodes makes. A GPU node is wired straight to the output and drawn live;
-    `make_real` puts a Make Real node between them so the object gets real geometry.
+    `make_real` puts a To Geometry node between them so the object gets real geometry.
     Returns (object, tree, node, error or "").
     """
     label = label or key or DEFAULT_TEMPLATE[kind]
@@ -873,18 +965,141 @@ def _hosts_of(tree):
 
 def _migrate_gpu_group(group):
     """Older files: a GPU group that still hands its source straight to its output. Now the output
-    stays empty and Make Real carries the result."""
+    stays empty and To Geometry carries the result."""
     for link in list(group.links):
         if link.from_node.type == 'OBJECT_INFO' and link.from_node.name not in ("Tap",)                 and link.to_node.type in ('GROUP_OUTPUT', 'JOIN_GEOMETRY') and link.from_node.name != "CodeNodes render link":
             group.links.remove(link)
 
 
+def _code_nodes(tree):
+    out = []
+    for node in tree.nodes:
+        if node.type == 'GROUP' and is_code_group(node.node_tree):
+            obj = source_of(node.node_tree)
+            if obj is not None:
+                out.append((node, obj))
+    return out
+
+
+def _next_stage(tree, node, out_name, in_name):
+    """The GPU Stage node wired to `node`'s `out_name` output through its `in_name` input, or None."""
+    out = node.outputs.get(out_name)
+    if out is None:
+        return None
+    for l in tree.links:
+        if l.from_socket != out or l.is_muted:
+            continue
+        to = l.to_node
+        while to.type == 'REROUTE':
+            nxt = next((m for m in tree.links if m.from_node == to and not m.is_muted), None)
+            if nxt is None:
+                break
+            l, to = nxt, nxt.to_node
+        if to.type == 'GROUP' and is_code_group(to.node_tree) and l.to_socket.name == in_name:
+            obj = source_of(to.node_tree)
+            if obj is not None and obj.codenodes.kind == 'STAGE':
+                return to
+    return None
+
+
+def find_chains(tree):
+    """{head source name: chain info} and the mesh-head stage names, for one tree."""
+    from . import gn_sockets
+    nodes = _code_nodes(tree)
+    by_node = {n.name: o for n, o in nodes}
+    chains, mesh_heads = {}, set()
+    # function wiring: consumer input <- provider output, anywhere in the tree
+    funcs = {}
+    for node, obj in nodes:
+        for sock in node.inputs:
+            if sock.bl_idname != "NodeSocketClosure" or not sock.is_linked:
+                continue
+            l = _feeding(tree, sock)
+            while l is not None and l.from_node.type == 'REROUTE':
+                l = _feeding(tree, l.from_node.inputs[0])
+            if l is None or l.from_node.name not in by_node:
+                continue
+            funcs[(obj.name, sock.name)] = (by_node[l.from_node.name].name, l.from_socket.name)
+
+    def reachable(names):
+        todo, seen, out = list(names), set(), {}
+        while todo:
+            c = todo.pop()
+            if c in seen:
+                continue
+            seen.add(c)
+            for (cons, inp), prov in funcs.items():
+                if cons == c:
+                    out[(cons, inp)] = prov
+                    todo.append(prov[0])
+        return out
+
+    def walk(head_node, out_name, in_name):
+        stages, seen, cur = [], {head_node.name}, head_node
+        while True:
+            nxt = _next_stage(tree, cur, out_name, in_name)
+            if nxt is None or nxt.name in seen:
+                break
+            seen.add(nxt.name)
+            stages.append(by_node[nxt.name].name)
+            cur, out_name = nxt, in_name
+        return stages
+
+    for node, obj in nodes:
+        kind = obj.codenodes.kind
+        if kind == 'PARTICLES':
+            stages = walk(node, "Particles", "Particles")
+            chains[obj.name] = {"stages": stages, "kind": 'PARTICLES', "funcs": reachable([obj.name] + stages)}
+        elif kind == 'DEFORM':
+            stages = walk(node, "Geometry", "Mesh")
+            chains[obj.name] = {"stages": stages, "kind": 'DEFORM', "funcs": reachable([obj.name] + stages)}
+        elif kind == 'STAGE' and gn_sockets.decls_of(obj).takes_mesh():
+            mesh_in = node.inputs.get("Mesh")
+            l = _feeding(tree, mesh_in) if mesh_in is not None else None
+            while l is not None and l.from_node.type == 'REROUTE':
+                l = _feeding(tree, l.from_node.inputs[0])
+            if l is None:
+                continue
+            up = by_node.get(l.from_node.name)
+            if up is not None and up.codenodes.kind in ('DEFORM', 'STAGE'):
+                continue                         # part of a mesh chain started further up
+            # a warp or deform wired straight to ordinary geometry: it heads its own mesh chain
+            mesh_heads.add(obj.name)
+            stages = walk(node, "Mesh", "Mesh")
+            chains[obj.name] = {"stages": stages, "kind": 'DEFORM', "funcs": reachable([obj.name] + stages)}
+    return chains, mesh_heads
+
+
+def _migrate_make_real_names():
+    """Files from before 0.3 call the node Make Real."""
+    for g in bpy.data.node_groups:
+        if MAKE_REAL in g and g.name.startswith("Make Real"):
+            g.name = _unique(MAKE_REAL_NAME + g.name[len("Make Real"):], bpy.data.node_groups)
+
+
 def sync_make_real():
-    """Point every Make Real node at the GPU node feeding it, and work out for each GPU source
-    whether (and when) it is made real. Returns {source name: [host object names]}."""
-    from . import gn_sockets, gpu_live
+    """Find the chains of code nodes, point every To Geometry node at the chain feeding it, and work
+    out for each GPU source whether (and when) it is made real. Returns {source name: [host names]}."""
+    from . import gn_sockets, gpu_live, links
+    _migrate_make_real_names()
+    trees = [t for t in bpy.data.node_groups if t.bl_idname == "GeometryNodeTree" and TAP not in t]
+    all_chains, all_mesh_heads = {}, set()
+    for tree in trees:
+        c, m = find_chains(tree)
+        all_chains.update(c)
+        all_mesh_heads |= m
+    changed = links.set_chains(all_chains, all_mesh_heads)
+    for name in changed:
+        obj = bpy.data.objects.get(name)
+        if obj is not None:
+            from . import particles
+            particles.forget(name)
+            if obj.codenodes.real_mode not in ("NONE", "RENDER_ONLY", "STANDALONE"):
+                live.request(obj)
+    if changed:
+        gpu_live.redraw()
     modes, host_map, limits, real_nodes = {}, {}, {}, {}
-    for tree in [t for t in bpy.data.node_groups if t.bl_idname == "GeometryNodeTree" and TAP not in t]:
+    for tree in trees:
         hosts_ = None
         seen_real = set()
         for node in tree.nodes:
@@ -893,35 +1108,36 @@ def sync_make_real():
             group = node.node_tree
             if is_code_group(group):
                 src = source_of(group)
-                if src is not None and src.codenodes.kind in GPU_KINDS:
+                if src is not None and links.is_gpu(src) and (src.codenodes.kind != 'STAGE'
+                                                              or src.name in all_mesh_heads):
                     hosts_ = _hosts_of(tree) if hosts_ is None else hosts_
                     lst = host_map.setdefault(src.name, [])
                     lst.extend(h.name for h in hosts_ if h.name not in lst)
-                    if src.codenodes.kind == 'DEFORM':
+                    if links.ekind(src) == 'DEFORM':
                         ensure_tap(src, tree, node, hosts_)
             elif is_make_real(group):
                 if group.name in seen_real or (group.users > 1 and _other_real_user(group, tree, node)):
-                    new = group.copy()                  # each Make Real node keeps its own settings
+                    new = group.copy()                  # each To Geometry node keeps its own settings
                     new.name = _unique(MAKE_REAL_NAME, bpy.data.node_groups)
                     node.node_tree = new
                     group = new
                 seen_real.add(group.name)
                 up = upstream_code_node(tree, node)
                 src = source_of(up.node_tree) if up is not None else None
-                if src is not None and src.codenodes.kind not in GPU_KINDS:
+                if src is not None and not links.is_gpu(src):
                     src = None                          # a Code Shape is real already: pass it through
                 info = real_info_node(group)
                 if info is not None and info.inputs["Object"].default_value != src:
                     info.inputs["Object"].default_value = src
-                sync_real_interface(group, src.codenodes.kind if src is not None else None, src)
+                sync_real_interface(group, links.ekind(src) if src is not None else None, src)
                 if src is None:
-                    label = "Make Real (nothing to make real)" if up is None else "Make Real"
+                    label = "To Geometry (nothing to convert)" if up is None else MAKE_REAL_NAME
                     if node.label != label:
                         node.label = label
                     continue
                 s = src.codenodes
                 real_nodes.setdefault(src.name, []).append(node)
-                want = REAL_INPUTS.get(s.kind, (None,))[0]
+                want = REAL_INPUTS.get(links.ekind(src), (None,))[0]
                 sock = node.inputs.get(want) if want else None
                 val = resolve(tree, sock) if sock is not None else None
                 if val is not None:
@@ -938,7 +1154,9 @@ def sync_make_real():
     col = bpy.data.collections.get(SOURCES)
     for src in (list(col.objects) if col is not None else []):
         s = getattr(src, "codenodes", None)
-        if s is None or not s.enabled or s.kind not in GPU_KINDS:
+        if s is None or not s.enabled or not links.is_gpu(src):
+            if s is not None and s.enabled and s.kind == 'STAGE' and s.real_mode != "NONE":
+                s.real_mode = "NONE"                 # a stage inside a chain is never made real on its own
             continue
         mode = modes.get(src.name, 'NONE')
         changed = False
@@ -947,7 +1165,7 @@ def sync_make_real():
             changed = True
         lim = limits.get(src.name)
         if lim is None and s.kind == 'PARTICLES' and s.real_limit and mode == 'NONE':
-            s.real_limit = 0                           # no Make Real any more: no Max Points either
+            s.real_limit = 0                           # no To Geometry any more: no Max Points either
         if lim is not None:
             if s.kind == 'MESH' and max(8, min(512, lim)) != s.resolution:
                 s["resolution"] = max(8, min(512, lim))
@@ -961,9 +1179,9 @@ def sync_make_real():
         cost = _made_real_ms(s.stats)
         for node in real_nodes.get(src.name, []):
             if s.real_mode == 'RENDER_ONLY':
-                label = "Make Real · for render"
+                label = f"{MAKE_REAL_NAME} · for render"
             else:
-                label = "Make Real" + (f" · {cost} ms" if cost is not None else "")
+                label = MAKE_REAL_NAME + (f" · {cost} ms" if cost is not None else "")
             if node.label != label:
                 node.label = label
     return host_map
@@ -976,7 +1194,7 @@ def _made_real_ms(stats):
 
 
 def _other_real_user(group, tree, node):
-    """True if another node (in any tree) uses this Make Real group too (Shift D copies share it)."""
+    """True if another node (in any tree) uses this To Geometry group too (Shift D copies share it)."""
     for t in bpy.data.node_groups:
         if t.bl_idname != "GeometryNodeTree" or TAP in t:
             continue
@@ -1139,12 +1357,21 @@ def sync():
         s = obj.codenodes
         if s.kind in GPU_KINDS:
             _migrate_gpu_group(group)
+        if s.enabled and s.kind in CODE_KINDS and s.text is not None:
+            import hashlib
+            code = s.text.as_string()
+            if hashlib.sha1(code.encode()).hexdigest() != s.code_hash:
+                try:                                  # the code changed: its sockets follow at once
+                    props.sync_params(s, code)
+                except Exception as exc:
+                    s.last_error = str(exc)
+                live.request(obj)
         if s.enabled:
             sync_interface(group, obj)
             if user[0] == 'node':
                 gn_sockets.set_menu_defaults(user[1], user[2], obj)
         if s.enabled and apply_values(obj, read_values(user), user):
-            if s.kind in GPU_KINDS:
+            if s.kind in CODE_KINDS:
                 gpu_live.redraw()
             if s.live:
                 live.request(obj)

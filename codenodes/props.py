@@ -44,6 +44,8 @@ def _emitter_changed(self, context):
 class CN_Param(bpy.types.PropertyGroup):
     name: StringProperty()
     value: FloatProperty(update=_changed)
+    # 'FLOAT', 'INT' or 'COLOR' (a colour input is three of these: name_r, name_g, name_b)
+    kind: StringProperty(default='FLOAT')
     min: FloatProperty()
     max: FloatProperty()
 
@@ -56,13 +58,15 @@ class CN_ObjectSettings(bpy.types.PropertyGroup):
         ('SHAPE', "Shape", "A model built from a parametric description: profiles, "
                            "revolve, extrude — exact edges and clean quads"),
         ('DEFORM', "GPU Mesh", "Code run on every vertex of a mesh coming in from Geometry Nodes"),
+        ('STAGE', "GPU Stage", "One step in a chain of code nodes: what particles do or how they look, "
+                               "a warp, a mesh deform, or functions for other nodes"),
     ])
     template_key: StringProperty(description="The template this code started from (the node's Template menu)")
     count: IntProperty(name="Particles", default=20000, min=1, max=16_777_216, soft_max=4_194_304,
                        update=_sim_changed,
                        description="How many particles. Live on GPU handles millions; Real Geometry is "
                                    "comfortable up to about 100,000")
-    # Set by the Geometry Nodes sync from the Make Real nodes this code node feeds (never by hand):
+    # Set by the Geometry Nodes sync from the To Geometry nodes this code node feeds (never by hand):
     # NONE (drawn live only), EVERY_FRAME, ON_CHANGE or RENDER_ONLY.
     real_mode: StringProperty(default="STANDALONE")
     real_limit: IntProperty(default=0, min=0)
@@ -125,7 +129,7 @@ class CN_ObjectSettings(bpy.types.PropertyGroup):
 
 
 class CN_RealSettings(bpy.types.PropertyGroup):
-    """Settings of a Make Real node (stored on its node group)."""
+    """Settings of a To Geometry node (stored on its node group)."""
     when: EnumProperty(name="When", default='AUTO', update=_real_changed, items=[
         ('AUTO', "Automatic", "Every frame for particles and animated code; when something changes otherwise"),
         ('EVERY_FRAME', "Every Frame", "Make it real on every frame change (animation plays in real geometry)"),
@@ -139,18 +143,21 @@ class CN_RealSettings(bpy.types.PropertyGroup):
 
 
 def sync_params(settings, source, kind='MESH'):
-    """Match the sliders to what the code declares. Existing values are kept."""
+    """Match the sliders to what the code declares (`@param`, and `@in float / int / color`).
+    Existing values are kept."""
     if kind == 'SHAPE':
         from .shapes import parse
-        wanted = [sdf_code.Param(name, default, lo, hi)
+        wanted = [(sdf_code.Param(name, default, lo, hi), 'FLOAT')
                   for name, default, lo, hi in parse(source).params]
     else:
-        wanted = sdf_code.parse_params(source)
+        from . import decl
+        d = decl.parse(source)
+        wanted = [(prm, d.kinds.get(prm.name, 'FLOAT')) for prm in d.params]
     old = {p.name: p.value for p in settings.params}
     settings.params.clear()
-    for prm in wanted:
+    for prm, k in wanted:
         item = settings.params.add()
-        item.name, item.min, item.max = prm.name, prm.min, prm.max
+        item.name, item.min, item.max, item.kind = prm.name, prm.min, prm.max, k
         item["value"] = old.get(prm.name, prm.default)     # no update callback while syncing
     return {p.name: p.value for p in settings.params}
 

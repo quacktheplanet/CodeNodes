@@ -1,8 +1,8 @@
-"""Geometry Nodes editor side of CodeNodes: Add › CodeNodes, the Make Real node, showing a code
-node's code automatically, and the small sidebar fallback. The work is done in gn_link.
+"""Geometry Nodes editor side of CodeNodes: Add › CodeNodes, the To Geometry node, showing a code
+node's code, and the small sidebar fallback. The work is done in gn_link.
 
 Everything you set lives on the nodes themselves (see gn_sockets). The sidebar only keeps what
-Blender can't put on a node: buttons (Edit Code, Add Make Real) and the full error text.
+Blender can't put on a node: buttons (Edit Code, Add To Geometry) and the full error text.
 """
 
 from __future__ import annotations
@@ -67,10 +67,10 @@ class CODENODES_OT_gn_add(bpy.types.Operator):
 
 class CODENODES_OT_gn_add_make_real(bpy.types.Operator):
     bl_idname = "codenodes.gn_add_make_real"
-    bl_label = "Make Real"
-    bl_description = ("Add a Make Real node: it turns the GPU node before it into real geometry (points or a "
-                      "mesh) that later nodes and renders can use, like Realize Instances. With a GPU node "
-                      "selected, it goes right after it")
+    bl_label = "To Geometry"
+    bl_description = ("Add a To Geometry node: it turns the GPU node or chain before it into real geometry "
+                      "(points with every per-particle attribute, or a mesh) that later nodes and renders can "
+                      "use, like Realize Instances. With a GPU node selected, it goes right after it")
     bl_options = {'REGISTER', 'UNDO'}
 
     use_transform: BoolProperty(default=True, options={'HIDDEN', 'SKIP_SAVE'})
@@ -144,8 +144,8 @@ class CODENODES_OT_add_object(bpy.types.Operator):
 
     kind: EnumProperty(name="Kind", items=[(k, v[0], v[1]) for k, v in gn_link.KINDS.items()])
     template: StringProperty(name="Template", description="Starting code (empty: the default one)")
-    make_real: BoolProperty(name="Make Real", default=False,
-                            description="Put a Make Real node after it, so the object gets real geometry")
+    make_real: BoolProperty(name="To Geometry", default=False,
+                            description="Put a To Geometry node after it, so the object gets real geometry")
 
     def execute(self, context):
         if context.mode != 'OBJECT':
@@ -169,7 +169,7 @@ class CODENODES_OT_add_object(bpy.types.Operator):
             self.report({'WARNING'}, f"{node.node_tree.name}: {err.splitlines()[0]}")
         elif self.kind in gn_link.GPU_KINDS and not self.make_real:
             self.report({'INFO'}, f"Added '{obj.name}': drawn live on the GPU. Its node is in the Geometry "
-                                  "Nodes editor; add Make Real after it to use it in nodes or renders")
+                                  "Nodes editor; add To Geometry after it to use it in nodes or renders")
         else:
             self.report({'INFO'}, f"Added '{obj.name}': its code node is in the Geometry Nodes editor")
         return {'FINISHED'}
@@ -385,15 +385,24 @@ class CODENODES_MT_gn_add(bpy.types.Menu):
     bl_label = "CodeNodes"
 
     def draw(self, context):
+        from . import stage_templates
         layout = self.layout
         layout.operator_context = 'INVOKE_REGION_WIN'
         layout.operator(CODENODES_OT_gn_add_make_real.bl_idname, icon='MESH_DATA')
         layout.separator()
         for kind, (label, _desc, icon) in gn_link.KINDS.items():
+            if kind == 'STAGE':
+                continue
             layout.label(text=label, icon=icon)
             for key in gn_link.TEMPLATES[kind]:
                 op = layout.operator(CODENODES_OT_gn_add.bl_idname, text=f"    {key}")
                 op.kind, op.template = kind, key
+            layout.separator()
+        for title, icon, keys in stage_templates.SECTIONS:
+            layout.label(text=title, icon=icon)
+            for key in keys:
+                op = layout.operator(CODENODES_OT_gn_add.bl_idname, text=f"    {key}")
+                op.kind, op.template = 'STAGE', key
             layout.separator()
 
 
@@ -413,7 +422,7 @@ class CODENODES_PT_gn(bpy.types.Panel):
         node, group, obj = gn_link.code_node(context)
         rnode, rgroup, _rtree = gn_link.make_real_node(context)
         if rnode is not None:
-            layout.label(text="Make Real: settings are on the node.", icon='MESH_DATA')
+            layout.label(text="To Geometry: settings are on the node.", icon='MESH_DATA')
             layout.label(text=rnode.label)
             return
         if obj is None:
@@ -426,7 +435,7 @@ class CODENODES_PT_gn(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator(CODENODES_OT_gn_edit_code.bl_idname, icon='TEXT')
         if s.kind in gn_link.GPU_KINDS:
-            row.operator(CODENODES_OT_gn_add_make_real.bl_idname, text="Add Make Real", icon='MESH_DATA')
+            row.operator(CODENODES_OT_gn_add_make_real.bl_idname, text="Add To Geometry", icon='MESH_DATA')
         if s.last_error:
             box = layout.box()
             box.alert = True

@@ -5,7 +5,7 @@ Two passes per surface and view: the scene pass traces a ray per pixel at a frac
 viewport's size into colour and hit-distance targets; the composite pass scales that up and writes
 depth from the hit point, so Blender's own objects sit correctly in front of or behind the surface.
 The surface lights itself: a sun (the scene's first Sun lamp, or a default), sky light, soft
-shadows, ambient occlusion and distance fog. It is a picture in the viewport: Make Real turns it
+shadows, ambient occlusion and distance fog. It is a picture in the viewport: To Geometry turns it
 into a real mesh.
 """
 

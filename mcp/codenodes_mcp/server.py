@@ -502,11 +502,11 @@ def code_node(kind: str = "mesh", code: str | None = None, template: str | None 
       "deform" (GPU Mesh: `void deform(inout Vertex v)` on the mesh wired into it):
           "Wave", "Noise Displace", "Twist"
       "shape" (the shape language): "Desk Lamp", "Vase"
-    GPU nodes draw live on the GPU; `make_real` (default true) puts a Make Real node after a new
+    GPU nodes draw live on the GPU; `make_real` (default true) puts a To Geometry node after a new
     one so it is real geometry that renders and later nodes can use.
     Update: pass the `object` it returned, with new `code` and/or `values` by input name
     ({"size": 3.0, "Count": 500000, "Emit From": "Plane", "Resolution": 160}; Resolution, Max
-    Points and When live on the Make Real node and are found there).
+    Points and When live on the To Geometry node and are found there).
     The result names the object, its tree and the node, so nodes_edit and nodes_read can wire
     it into more nodes. Errors in the code come back with the line.
     """

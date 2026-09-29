@@ -1,6 +1,6 @@
 """Drawing GPU nodes live in the 3D viewport, straight from GPU memory.
 
-A GPU node (GPU Particles, GPU Surface) that no Make Real node turns into geometry is shown live:
+A GPU node (GPU Particles, GPU Surface) that no To Geometry node turns into geometry is shown live:
 particles are stepped by a compute shader and drawn as points from the same textures (no copy to
 Blender), surfaces are raymarched (raymarch.py). Both are drawn in the space of the object whose
 Geometry Nodes hold the node, and depth-tested against the scene.
@@ -34,12 +34,13 @@ GPU_KINDS = ('MESH', 'PARTICLES', 'DEFORM')
 
 
 def is_gpu_source(obj):
+    from . import links
     s = getattr(obj, "codenodes", None)
-    return s is not None and s.enabled and s.kind in GPU_KINDS and s.real_mode != "STANDALONE"
+    return s is not None and s.enabled and links.is_gpu(obj) and s.real_mode != "STANDALONE"
 
 
 def shows_live(obj):
-    """Drawn in the viewport by us: no Make Real makes it real in the viewport."""
+    """Drawn in the viewport by us: no To Geometry makes it real in the viewport."""
     return is_gpu_source(obj) and obj.codenodes.real_mode in ("NONE", "RENDER_ONLY")
 
 
@@ -140,40 +141,46 @@ def _source_text(src):
 
 
 def step_particles(src, scene):
-    """Advance a live particle system to the scene's frame on the GPU (no readback)."""
-    from . import particles, props
+    """Advance a live particle system (its whole chain) to the scene's frame on the GPU (no readback).
+    Returns (sim, composite, values)."""
+    from . import links, particles
     s = src.codenodes
-    source = _source_text(src)
-    if source is None:
+    if s.text is None:
         return None
+    comp, values = links.composite(src)
     fps = scene.render.fps / (scene.render.fps_base or 1.0)
     emitter = emitters.get(src.name) if s.emitter is not None else None
-    sim, _steps = particles.advance(src.name, source, s.count, scene.frame_current, scene.frame_start, fps,
-                                    _values(src), s.substeps, s.stagger, s.prewarm, emitter)
-    return sim
+    sim, _steps = particles.advance(src.name, comp.source, s.count, scene.frame_current, scene.frame_start, fps,
+                                    values, s.substeps, s.stagger, s.prewarm, emitter)
+    return sim, comp, values
 
 
 _DRAW_MAIN = """
-// ---- CodeNodes live drawing ----
+// ---- CodeNodes live drawing (every local is cn-prefixed: attribute names are macros) ----
 void main() {
-  int i = int(idx);
-  int row = cnInts.x;
-  ivec2 ij = ivec2(i % row, i / row);
-  vec4 a = texelFetch(cnPosT, ij, 0), b = texelFetch(cnVelT, ij, 0);
+  int cnI = int(idx);
+  int cnRowW = cnInts.x;
+  ivec2 cnIJ = ivec2(cnI % cnRowW, cnI / cnRowW);
+  vec4 cnA = texelFetch(cnPosT, cnIJ, 0), cnB = texelFetch(cnVelT, cnIJ, 0);
   Particle p;
-  p.position = a.xyz; p.age = a.w; p.velocity = b.xyz; p.life = b.w; p.seed = float(i) + 0.5;
-  gl_Position = cnMVP * vec4(p.position, 1.0);
+  p.position = cnA.xyz; p.age = cnA.w; p.velocity = cnB.xyz; p.life = cnB.w; p.seed = float(cnI) + 0.5;
+#ifdef CN_HAS_X
+  p.cnX = texelFetch(cnExtT, cnIJ, 0);
+#else
+  p.cnX = CN_XDEFAULT;
+#endif
+  gl_Position = cnMVP * vec4(cnWarp(p.position), 1.0);
   gl_PointSize = cnColA.w;
-  vec4 c = vec4(1.0);
+  vec4 cnC = vec4(1.0);
 #ifdef CN_LOOK
-  if (cnInts.y == 2) c = look(p); else
+  if (cnInts.y == 2) cnC = look(p); else
 #endif
   {
-    float k = cnInts.y == 0 ? clamp(length(p.velocity) / cnMisc.x, 0.0, 1.0)
-                            : clamp(p.age / max(p.life, 1e-4), 0.0, 1.0);
-    c = vec4(mix(cnColA.rgb, cnColB.rgb, k), 1.0);
+    float cnT = cnInts.y == 0 ? clamp(length(p.velocity) / cnMisc.x, 0.0, 1.0)
+                              : clamp(p.age / max(p.life, 1e-4), 0.0, 1.0);
+    cnC = vec4(mix(cnColA.rgb, cnColB.rgb, cnT), 1.0);
   }
-  vColor = vec4(c.rgb * cnColB.w, c.a);
+  vColor = vec4(cnC.rgb * cnColB.w, cnC.a);
   cnSolidF = cnInts.z != 0 ? 1.0 : 0.0;
 }
 """
@@ -201,7 +208,7 @@ def particle_draw_shader(sim):
     head = (("#define CN_LOOK\n" if look else "")
             + "#define uTime (cnMisc.y)\n#define uFrame (cnMisc.z)\n#define cnEmitCount (cnInts.w)\n"
             + PRELUDE + particles.PARTICLE_PRELUDE + param_defines(sim.params))
-    code = head + (sim.source if look else "") + "\n" + _DRAW_MAIN
+    code = head + sim.source + "\n" + _DRAW_MAIN
     iface = gpu.types.GPUStageInterfaceInfo("cn_pt_iface")
     iface.smooth('VEC4', "vColor")
     iface.flat('FLOAT', "cnSolidF")
@@ -214,6 +221,8 @@ def particle_draw_shader(sim):
     info.sampler(1, 'FLOAT_2D', "cnVelT")
     info.sampler(2, 'FLOAT_2D', "cnEmitP")
     info.sampler(3, 'FLOAT_2D', "cnEmitN")
+    if sim.has_x:
+        info.sampler(4, 'FLOAT_2D', "cnExtT")
     # exactly 128 bytes of push constants (the most every backend guarantees)
     for kind, name in (('MAT4', "cnMVP"), ('VEC4', "cnColA"), ('VEC4', "cnColB"), ('VEC4', "cnMisc"),
                        ('IVEC4', "cnInts")):
@@ -231,35 +240,59 @@ def particle_draw_shader(sim):
 _batches: dict[int, object] = {}
 
 
-def _index_batch(n):
+def _index_batch(n, prim='POINTS'):
     import gpu
-    b = _batches.get(n)
+    b = _batches.get((n, prim))
     if b is None:
         fmt = gpu.types.GPUVertFormat()
         fmt.attr_add(id="idx", comp_type='F32', len=1, fetch_mode='FLOAT')
         vbo = gpu.types.GPUVertBuf(fmt, n)
         vbo.attr_fill("idx", np.arange(n, dtype=np.float32))
-        b = gpu.types.GPUBatch(type='POINTS', buf=vbo)
-        if len(_batches) > 6:
+        b = gpu.types.GPUBatch(type=prim, buf=vbo)
+        if len(_batches) > 8:
             _batches.clear()
-        _batches[n] = b
+        _batches[(n, prim)] = b
     return b
+
+
+def _bind_particles(sh, sim):
+    sh.uniform_sampler("cnPosT", sim.pos)
+    sh.uniform_sampler("cnVelT", sim.vel)
+    for name, tex in (("cnEmitP", sim.emit_p), ("cnEmitN", sim.emit_n), ("cnExtT", sim.ext)):
+        if tex is None:
+            continue
+        try:
+            sh.uniform_sampler(name, tex)
+        except ValueError:
+            pass
+
+
+def _ubo(sim, values, cam=None):
+    import gpu
+    slots = np.zeros(256, np.float32)
+    for i, prm in enumerate(sim.params[:252]):
+        slots[i] = float(values.get(prm.name, prm.default))
+    if cam is not None:
+        slots[252:255] = tuple(cam)
+    return gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
 
 
 def draw_particles(src, host, rv3d, scene):
     import gpu
     s = src.codenodes
-    sim = step_particles(src, scene)
-    if sim is None:
+    got = step_particles(src, scene)
+    if got is None:
+        return
+    sim, comp, values = got
+    fps_ = scene.render.fps / (scene.render.fps_base or 1.0)
+    t = (scene.frame_current - scene.frame_start) / fps_
+    shape = comp.shape if comp.has_look else None
+    if shape in ("glow", "firefly"):
+        draw_sprites(sim, comp, values, host, rv3d, scene, t, shape)
         return
     sh = particle_draw_shader(sim)
     gpu_guard.note_draw()
-    slots = np.zeros(256, np.float32)
-    vals = _values(src)
-    for i, prm in enumerate(sim.params):
-        slots[i] = float(vals.get(prm.name, prm.default))
-    ubo = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
-    fps_ = scene.render.fps / (scene.render.fps_base or 1.0)
+    ubo = _ubo(sim, values)
     solid = s.blend == 'SOLID'
     gpu.state.program_point_size_set(True)
     gpu.state.depth_test_set('LESS_EQUAL')
@@ -267,22 +300,17 @@ def draw_particles(src, host, rv3d, scene):
     gpu.state.blend_set('NONE' if solid else 'ADDITIVE')
     sh.bind()
     sh.uniform_block("cnParams", ubo)
-    sh.uniform_sampler("cnPosT", sim.pos)
-    sh.uniform_sampler("cnVelT", sim.vel)
-    for name, tex in (("cnEmitP", sim.emit_p), ("cnEmitN", sim.emit_n)):
-        try:
-            sh.uniform_sampler(name, tex)
-        except ValueError:
-            pass
+    _bind_particles(sh, sim)
     mode = {'SPEED': 0, 'AGE': 1, 'CODE': 2}[s.color_by]
+    if comp.has_look and s.color_by != 'AGE':
+        mode = 2                                  # a Look stage in the chain decides the colour
     if mode == 2 and not sim.draw_key[1]:
         mode = 0                                  # "Code" colours, but the code has no look(): use speed
     for setter, name, value in (
             (sh.uniform_float, "cnMVP", rv3d.perspective_matrix @ host.matrix_world),
             (sh.uniform_float, "cnColA", (*s.color_a, float(s.point_px))),
             (sh.uniform_float, "cnColB", (*s.color_b, float(s.gain))),
-            (sh.uniform_float, "cnMisc", (float(s.speed_range), (scene.frame_current - scene.frame_start) / fps_,
-                                          float(scene.frame_current), 0.0)),
+            (sh.uniform_float, "cnMisc", (float(s.speed_range), t, float(scene.frame_current), 0.0)),
             (sh.uniform_int, "cnInts", (sim.row, mode, 1 if solid else 0, sim.emit_count))):
         try:
             setter(name, value)
@@ -291,6 +319,160 @@ def draw_particles(src, host, rv3d, scene):
     _index_batch(sim.count).draw(sh)
     gpu.state.blend_set('NONE')
     gpu.state.program_point_size_set(False)
+    gpu.state.depth_mask_set(False)
+    gpu.state.depth_test_set('NONE')
+
+
+# ---- sprites: a glowing billboard per particle, and for fireflies two flapping wings ---------------------
+_SPRITE_MAIN = """
+// ---- CodeNodes sprites (every local is cn-prefixed: attribute names are macros) ----
+void main() {
+  int cnV = int(idx);
+  int cnPer = cnInts.z;                      // vertices per particle: 6 (glow) or 12 (two wings)
+  int cnI = cnV / cnPer, cnK = cnV % cnPer;
+  int cnRowW = cnInts.x;
+  ivec2 cnIJ = ivec2(cnI % cnRowW, cnI / cnRowW);
+  vec4 cnA = texelFetch(cnPosT, cnIJ, 0), cnB = texelFetch(cnVelT, cnIJ, 0);
+  Particle p;
+  p.position = cnA.xyz; p.age = cnA.w; p.velocity = cnB.xyz; p.life = cnB.w; p.seed = float(cnI) + 0.5;
+#ifdef CN_HAS_X
+  p.cnX = texelFetch(cnExtT, cnIJ, 0);
+#else
+  p.cnX = CN_XDEFAULT;
+#endif
+  vec4 cnCol = look(p);
+  vec3 cnC = cnWarp(p.position);
+  // the six corners of a quad, as two triangles
+  int cnQ = cnK % 6;
+  vec2 cnCorner = vec2((cnQ == 1 || cnQ == 2 || cnQ == 4) ? 1.0 : -1.0, (cnQ == 2 || cnQ == 4 || cnQ == 5) ? 1.0 : -1.0);
+  vUV = cnCorner;
+  float cnSize = cnMisc.x;
+  if (cnInts.y == 0) {                       // glow: a billboard facing the camera
+    vec4 cnClip = cnMVP * vec4(cnC, 1.0);
+    // its depth is taken a halo's width towards the camera, so the glow isn't sliced off where it
+    // meets the ground (the camera position in this object's space sits in the last parameter slot)
+    vec3 cnToCam = cnParams.v[63].xyz - cnC;
+    vec4 cnNear = cnMVP * vec4(cnC + normalize(cnToCam + 1e-6) * min(cnSize * 2.5, 0.9 * length(cnToCam)), 1.0);
+    cnClip.xy += cnCorner * cnSize * cnProj.xy * cnProj.z;
+    cnClip.z = cnNear.z / cnNear.w * cnClip.w;
+    gl_Position = cnClip;
+    vColor = cnCol;
+    vKind = 0.0;
+  } else {                                   // wings: two quads flapping about the direction of travel
+    vec3 cnAhead = cnWarp(p.position + p.velocity * 0.02) - cnC;
+    vec3 cnF = length(cnAhead) > 1e-6 ? normalize(cnAhead) : vec3(1.0, 0.0, 0.0);
+    vec3 cnUp = abs(cnF.z) > 0.95 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
+    vec3 cnR = normalize(cross(cnF, cnUp));
+    cnUp = cross(cnR, cnF);
+    float cnPh = rand1(p.seed * 5.31);
+    float cnFlap = sin((uTime * cnMisc.y + cnPh) * 6.2831853) * 0.9 + 0.25;
+    float cnSide = cnK < 6 ? 1.0 : -1.0;
+    vec3 cnW = cnR * cnSide * cos(cnFlap) + cnUp * sin(cnFlap);
+    float cnSpan = cnSize * cnMisc.z, cnChord = cnSize * cnMisc.z * 0.45;
+    vec3 cnP = cnC + cnW * (0.5 + 0.5 * cnCorner.x) * cnSpan + cnF * cnCorner.y * cnChord - cnF * cnSize * 0.3;
+    gl_Position = cnMVP * vec4(cnP, 1.0);
+    vColor = vec4(0.82, 0.88, 0.95, 0.35);
+    vKind = 1.0;
+  }
+}
+"""
+
+_SPRITE_FRAG = """
+void main() {
+  float r2 = dot(vUV, vUV);
+  if (vKind < 0.5) {
+    if (r2 > 1.0) discard;
+    // a hot core and a wide soft halo: reads as glow even without bloom
+    float core = exp(-r2 * 70.0), halo = exp(-r2 * 9.0) * 0.16;
+    fragColor = vec4(vColor.rgb * (core * 2.0 + halo), 1.0);
+  } else {
+    vec2 e = vec2(vUV.x * 0.5 + 0.5, vUV.y);          // along the wing, across it
+    float d = (e.x - 0.5) * (e.x - 0.5) * 4.0 + e.y * e.y;
+    if (d > 1.0) discard;
+    float vein = smoothstep(0.02, 0.0, abs(e.y - 0.1 * sin(e.x * 3.0))) * 0.4;
+    fragColor = vec4(vColor.rgb * (0.7 + vein), vColor.a * (1.0 - d * 0.6));
+  }
+}
+"""
+
+_sprite_shaders: dict = {}
+
+
+def sprite_shader(sim):
+    import gpu
+    from . import particles, sampler
+    from .sdf_code import PRELUDE, SdfCodeError, param_defines
+    got = _sprite_shaders.get(sim.key)
+    if got is not None:
+        return got
+    head = ("#define uTime (cnMisc.w)\n#define uFrame (0.0)\n#define cnEmitCount (cnInts.w)\n"
+            + PRELUDE + particles.PARTICLE_PRELUDE + param_defines(sim.params))
+    code = head + sim.source + "\n" + _SPRITE_MAIN
+    iface = gpu.types.GPUStageInterfaceInfo("cn_sp_iface")
+    iface.smooth('VEC4', "vColor")
+    iface.smooth('VEC2', "vUV")
+    iface.flat('FLOAT', "vKind")
+    info = gpu.types.GPUShaderCreateInfo()
+    info.typedef_source("struct CNParams { vec4 v[64]; };")
+    info.uniform_buf(0, "CNParams", "cnParams")
+    info.vertex_in(0, 'FLOAT', "idx")
+    info.vertex_out(iface)
+    info.sampler(0, 'FLOAT_2D', "cnPosT")
+    info.sampler(1, 'FLOAT_2D', "cnVelT")
+    info.sampler(2, 'FLOAT_2D', "cnEmitP")
+    info.sampler(3, 'FLOAT_2D', "cnEmitN")
+    if sim.has_x:
+        info.sampler(4, 'FLOAT_2D', "cnExtT")
+    # 128 bytes: MVP, (size, flap Hz, wing, time), projection scale, ints
+    for kind, name in (('MAT4', "cnMVP"), ('VEC4', "cnMisc"), ('VEC4', "cnProj"), ('IVEC4', "cnInts")):
+        info.push_constant(kind, name)
+    info.fragment_out(0, 'VEC4', "fragColor")
+    info.vertex_source(code)
+    info.fragment_source(_SPRITE_FRAG)
+    shader, err, log = sampler._compile_capturing(info)
+    if shader is None:
+        from .sdf_code import user_errors
+        raise SdfCodeError("the look() code didn't compile:\n" + user_errors(log, head.count("\n"), sim.source))
+    if len(_sprite_shaders) > 16:
+        _sprite_shaders.clear()
+    _sprite_shaders[sim.key] = shader
+    return shader
+
+
+def draw_sprites(sim, comp, values, host, rv3d, scene, t, shape):
+    import gpu
+    sh = sprite_shader(sim)
+    gpu_guard.note_draw()
+    cam = host.matrix_world.inverted_safe() @ rv3d.view_matrix.inverted().translation
+    ubo = _ubo(sim, values, cam)
+    lu = comp.look_unit or ""
+    size = float(values.get(lu + "size", 0.02))
+    flap = float(values.get(lu + "flap", 16.0))
+    wing = float(values.get(lu + "wing", 1.5))
+    mvp = rv3d.perspective_matrix @ host.matrix_world
+    win = rv3d.window_matrix
+    # a world-size quad in clip space: the projection's x/y scale (object scale ignored)
+    proj = (float(win[0][0]), float(win[1][1]), max(host.matrix_world.to_scale()), 0.0)
+    passes = [(0, 6, 'ADDITIVE', False)]
+    if shape == "firefly":
+        passes.insert(0, (1, 12, 'ALPHA', False))      # wings first, then the glow on top
+    gpu.state.depth_test_set('LESS_EQUAL')
+    sh.bind()
+    sh.uniform_block("cnParams", ubo)
+    _bind_particles(sh, sim)
+    for kind, per, blend, depth_write in passes:
+        gpu.state.blend_set(blend)
+        gpu.state.depth_mask_set(depth_write)
+        for setter, name, value in ((sh.uniform_float, "cnMVP", mvp),
+                                    (sh.uniform_float, "cnMisc", (size * (1.0 if kind else 3.0), flap, wing, t)),
+                                    (sh.uniform_float, "cnProj", proj),
+                                    (sh.uniform_int, "cnInts", (sim.row, kind, per, sim.emit_count))):
+            try:
+                setter(name, value)
+            except ValueError:
+                pass
+        _index_batch(sim.count * per, 'TRIS').draw(sh)
+    gpu.state.blend_set('NONE')
     gpu.state.depth_mask_set(False)
     gpu.state.depth_test_set('NONE')
 
@@ -325,7 +507,8 @@ def _draw():
             if host is None or host.name not in view_layer.objects or not host.visible_get(view_layer=view_layer):
                 continue
             try:
-                kind = src.codenodes.kind
+                from . import links
+                kind = links.ekind(src)
                 if kind == 'PARTICLES':
                     draw_particles(src, host, rv3d, scene)
                 elif kind == 'DEFORM':
@@ -396,16 +579,16 @@ def deform_input(src, fresh=False):
 
 def run_deform(src, scene):
     """Run a GPU Mesh node's code on its incoming mesh. Returns the MeshState, or None."""
-    from . import deform
+    from . import deform, links
     s = src.codenodes
-    source = _source_text(src)
     inp = deform_inputs.get(src.name)
-    if source is None or inp is None or len(inp[0]) == 0:
+    if s.text is None or inp is None or len(inp[0]) == 0:
         return None
+    comp, values = links.composite(src)
     co, nrm, tris, key = inp
     state = deform.state_for(src.name, co, nrm, tris, key)
     fps_ = scene.render.fps / (scene.render.fps_base or 1.0)
-    state.run(source, _values(src), (scene.frame_current - scene.frame_start) / fps_, scene.frame_current)
+    state.run(comp.source, values, (scene.frame_current - scene.frame_start) / fps_, scene.frame_current)
     return state
 
 

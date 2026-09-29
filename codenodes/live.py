@@ -39,25 +39,29 @@ def compute_object(obj):
 
 
 def simulate_object(obj):
-    """Bring a particle object's simulation to the current frame and show it."""
-    from . import gpu_live, particles
+    """Bring a particle object's simulation (its whole chain) to the current frame and show it as
+    points carrying velocity, age and every per-particle attribute the chain declares."""
+    from . import gpu_live, links, particles
     s = obj.codenodes
     if s.text is None:
         raise SdfCodeError("no code: pick a text block")
     source = s.text.as_string()
     s.code_hash = hashlib.sha1(source.encode()).hexdigest()
-    values = props.sync_params(s, source)
+    props.sync_params(s, source)
+    comp, values = links.composite(obj)
     scene = bpy.context.scene
     fps = scene.render.fps / (scene.render.fps_base or 1.0)
     emitter = gpu_live.emitter_for(obj) if s.emitter is not None else None
     limit = min(s.real_limit or s.count, particles.MAX_REAL)
-    state, st = particles.simulate(obj.name, source, s.count, scene.frame_current, scene.frame_start,
-                                   fps, values, s.substeps, s.stagger, s.prewarm, emitter, limit)
+    attrs = tuple(name for name, _d in comp.attrs)
+    state, st = particles.simulate(obj.name, comp.source, s.count, scene.frame_current, scene.frame_start,
+                                   fps, values, s.substeps, s.stagger, s.prewarm, emitter, limit, attrs)
     keep = []
     if s.get("real_keep_vel", True):
         keep += ["velocity", "speed"]
     if s.get("real_keep_age", True):
         keep += ["age", "life"]
+    keep += list(attrs)
     particles.ensure_object(obj.name, s.point_radius)
     particles.fill_points(obj.data, state, extra=tuple(keep))
     return state, st
@@ -77,6 +81,8 @@ def build_deform(obj):
     tap = gn_link.tap_of(obj)
     if tap is None:
         raise SdfCodeError("nothing is wired into the Mesh input")
+    from . import links
+    links.composite(obj)                    # raises with the node and line if the chain has a mistake
     inp = gpu_live.deform_input(obj)
     if inp is None or len(inp[0]) == 0:
         raise SdfCodeError("the mesh wired into the Mesh input is empty")
@@ -121,8 +127,9 @@ def build_deform(obj):
 
 def is_live_only(obj):
     """A GPU node that nothing makes real right now: drawn by gpu_live, nothing to build."""
+    from . import links
     s = obj.codenodes
-    return s.kind in ('MESH', 'PARTICLES', 'DEFORM') and s.real_mode in ("NONE", "RENDER_ONLY")
+    return links.is_gpu(obj) and s.real_mode in ("NONE", "RENDER_ONLY")
 
 
 def clear_live(obj):
@@ -151,7 +158,26 @@ def build_shape(obj):
 def rebuild(obj):
     """Rebuild one object now. Returns "" or an error message (also stored on the object)."""
     s = obj.codenodes
+    from . import links
+    kind = links.ekind(obj)
     try:
+        if s.kind == 'STAGE' and kind != 'DEFORM':
+            # a stage is compiled into the chains it belongs to: sync its sliders, then let them update
+            if s.text is not None:
+                source = s.text.as_string()
+                s.code_hash = hashlib.sha1(source.encode()).hexdigest()
+                props.sync_params(s, source)
+            heads = links.heads_of(obj)
+            s.last_error = ""
+            s.stats = (f"in {len(heads)} chain{'s' if len(heads) != 1 else ''}" if heads else
+                       "not connected: wire it after a GPU Particles node, or to a mesh")
+            for h in heads:
+                ho = bpy.data.objects.get(h)
+                if ho is not None and not is_live_only(ho):
+                    request(ho)
+            from . import gpu_live
+            gpu_live.redraw()
+            return ""
         if is_live_only(obj) and not _force_real[0]:
             if s.text is not None:
                 source = s.text.as_string()
@@ -159,13 +185,18 @@ def rebuild(obj):
                 props.sync_params(s, source)
             clear_live(obj)
             s.last_error = ""
-            what = {'PARTICLES': f"{s.count:,} particles", 'MESH': "raymarched", 'DEFORM': "vertex code"}[s.kind]
-            s.stats = f"live on the GPU · {what} · add Make Real to use it in nodes or renders"
+            what = {'PARTICLES': f"{s.count:,} particles", 'MESH': "raymarched", 'DEFORM': "vertex code"}[kind]
+            s.stats = f"live on the GPU · {what} · add To Geometry to use it in nodes or renders"
+            try:
+                links.composite(obj)                # report a mistake anywhere in the chain on the node
+            except SdfCodeError as exc:
+                s.last_error = str(exc)
+                return s.last_error
             from . import gpu_live
             gpu_live.redraw()
             return ""
         t_make = time.perf_counter()
-        if s.kind == 'DEFORM':
+        if kind == 'DEFORM':
             st = build_deform(obj)
             s.last_error = ""
             s.stats = (f"{st['verts']:,} vertices · {st['faces']:,} faces · "

@@ -40,7 +40,7 @@ def row_for(count):
 
 PARTICLE_PRELUDE = """\
 // ---- CodeNodes particle helpers ----
-struct Particle { vec3 position; vec3 velocity; float age; float life; float seed; };
+struct Particle { vec3 position; vec3 velocity; float age; float life; float seed; vec4 cnX; };
 // An integer hash (PCG) of the float's bits: sin()-based hashes lose precision at the seeds of
 // millions of particles, and neighbouring particles then line up in streaks.
 uint cnPcg(uint v) { uint s = v * 747796405u + 2891336453u; uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u; return (w >> 22u) ^ w; }
@@ -82,36 +82,62 @@ vec3 curlNoise(vec3 p) {
 PARTICLE_MAIN = """
 // ---- CodeNodes stepper ----
 void main() {
-  ivec2 ij = ivec2(gl_GlobalInvocationID.xy);
-  int idx = ij.y * cnRow + ij.x;
-  if (idx >= cnCount) return;
-  vec4 a = imageLoad(cnPos, ij);
-  vec4 b = imageLoad(cnVel, ij);
+  ivec2 cnIJ = ivec2(gl_GlobalInvocationID.xy);
+  int cnIdx = cnIJ.y * cnRow + cnIJ.x;
+  if (cnIdx >= cnCount) return;
+  vec4 cnA = imageLoad(cnPos, cnIJ);
+  vec4 cnB = imageLoad(cnVel, cnIJ);
   Particle p;
-  p.position = a.xyz;
-  p.age = a.w;
-  p.velocity = b.xyz;
-  p.life = b.w;
-  p.seed = float(idx) + 0.5;
+  p.position = cnA.xyz;
+  p.age = cnA.w;
+  p.velocity = cnB.xyz;
+  p.life = cnB.w;
+  p.seed = float(cnIdx) + 0.5;
+#ifdef CN_HAS_X
+  p.cnX = imageLoad(cnExt, cnIJ);
+#else
+  p.cnX = CN_XDEFAULT;
+#endif
   if (cnReset != 0) {
     p.position = vec3(0.0);
     p.velocity = vec3(0.0);
     p.age = 0.0;
     p.life = 5.0;
-    spawn(p);
+    p.cnX = CN_XDEFAULT;
+    cnSpawn(p);
     p.age = rand1(p.seed * 2.17) * p.life * cnStagger;   // so they don't all die together
-    update(p, 0.0);          // place it (kinematic motions set the position here) without moving it on
+    cnUpdate(p, 0.0);        // place it (kinematic motions set the position here) without moving it on
   } else {
     p.age += cnDt;
     if (p.age >= p.life) {
       p.age = 0.0;
       p.velocity = vec3(0.0);
-      spawn(p);
+      p.cnX = CN_XDEFAULT;
+      cnSpawn(p);
     }
-    update(p, cnDt);
+    cnUpdate(p, cnDt);
   }
-  imageStore(cnPos, ij, vec4(p.position, p.age));
-  imageStore(cnVel, ij, vec4(p.velocity, max(p.life, 1e-4)));
+  imageStore(cnPos, cnIJ, vec4(p.position, p.age));
+  imageStore(cnVel, cnIJ, vec4(p.velocity, max(p.life, 1e-4)));
+#ifdef CN_HAS_X
+  imageStore(cnExt, cnIJ, p.cnX);
+#endif
+}
+"""
+
+# Made real: where the particles are *shown* (after the chain's warps), without touching the state.
+WARP_MAIN = """
+// ---- CodeNodes warp for reading out ----
+void main() {
+  ivec2 cnIJ = ivec2(gl_GlobalInvocationID.xy);
+  int cnIdx = cnIJ.y * cnRow + cnIJ.x;
+  if (cnIdx >= cnCount) return;
+  vec4 cnA = imageLoad(cnPos, cnIJ);
+  vec4 cnB = imageLoad(cnVel, cnIJ);
+  vec3 cnQ = cnWarp(cnA.xyz);
+  vec3 cnAhead = cnWarp(cnA.xyz + cnB.xyz * 0.01);
+  imageStore(cnOutP, cnIJ, vec4(cnQ, cnA.w));
+  imageStore(cnOutV, cnIJ, vec4((cnAhead - cnQ) * 100.0, cnB.w));
 }
 """
 
@@ -145,21 +171,25 @@ void update(inout Particle p, float dt) {
 
 
 def check_source(source):
-    import re
-    for sig, name in ((r"\bvoid\s+spawn\s*\(\s*inout\s+Particle\s+\w+\s*\)", "void spawn(inout Particle p)"),
-                      (r"\bvoid\s+update\s*\(\s*inout\s+Particle\s+\w+\s*,\s*float\s+\w+\s*\)",
-                       "void update(inout Particle p, float dt)")):
-        if not re.search(sig, source):
-            raise SdfCodeError(f"the code must define:  {name} {{ ... }}")
+    """`source` is a composed chain (chain.compose_particles): it always has cnSpawn / cnUpdate."""
     for bad in ("imageStore", "imageLoad", "gl_GlobalInvocationID"):
         if bad in source:
             raise SdfCodeError(f"'{bad}' isn't allowed here; just set the particle's fields")
+    if "void cnSpawn(" not in source:
+        raise SdfCodeError("the code must define:  void spawn(inout Particle p) { ... }")
 
 
-def full_source(source, params):
+def full_source(source, params, main=None):
     check_source(source)
     head = PRELUDE + PARTICLE_PRELUDE + param_defines(params)
-    return head + source + "\n" + PARTICLE_MAIN, head.count("\n")
+    return head + source + "\n" + (main or PARTICLE_MAIN), head.count("\n")
+
+
+def compose_single(code, values=None, name="code"):
+    """A lone particle node's code as a chain of one (what the old single-node path runs)."""
+    from . import chain
+    comp = chain.compose_particles(chain.Unit(name, code, values))
+    return comp
 
 
 def has_look(source):
@@ -191,7 +221,10 @@ def emitter_textures(points, normals):
 
 
 class Sim:
-    """One particle system's GPU state."""
+    """One particle system's GPU state.
+
+    `source` is a composed chain (chain.compose_particles). With per-particle attributes it also keeps
+    a third texture (cnExt: four floats per particle)."""
 
     def __init__(self, source, count):
         import gpu
@@ -203,8 +236,26 @@ class Sim:
         self.key = hashlib.sha1(f"{count}\0{source}".encode()).hexdigest()
         self.count = int(count)
         self.params = parse_params(source)
-        code, offset = full_source(source, self.params)
+        self.has_x = "#define CN_HAS_X" in source
+        warp_at = source.find("vec3 cnWarp(")
+        self.has_warp = warp_at >= 0 and "  q = " in source[warp_at:warp_at + 4000]
+        self.shader = self._compile(PARTICLE_MAIN)
+        self.row = row_for(self.count)
+        self.rows = max(1, math.ceil(self.count / self.row))
+        self.pos = gpu.types.GPUTexture((self.row, self.rows), format='RGBA32F')
+        self.vel = gpu.types.GPUTexture((self.row, self.rows), format='RGBA32F')
+        self.ext = gpu.types.GPUTexture((self.row, self.rows), format='RGBA32F') if self.has_x else None
+        self.emit_p, self.emit_n, self.emit_count = _empty_emitter()
+        self.emit_key = None          # what the emitter textures were made from
+        self.frame = None            # the frame this state represents
+        self.draw_shader = None      # made on first draw (gpu_live)
+        self.draw_key = None
+        self.warp_shader = None      # made when read out with a warp in the chain
 
+    def _compile(self, main, extra_images=()):
+        import gpu
+        from . import sampler
+        code, offset = full_source(self.source, self.params, main)
         info = gpu.types.GPUShaderCreateInfo()
         info.typedef_source("struct CNParams { vec4 v[64]; };")
         info.uniform_buf(0, "CNParams", "cnParams")
@@ -212,6 +263,13 @@ class Sim:
         info.image(1, 'RGBA32F', 'FLOAT_2D', "cnVel", qualifiers={'READ', 'WRITE'})
         info.sampler(2, 'FLOAT_2D', "cnEmitP")
         info.sampler(3, 'FLOAT_2D', "cnEmitN")
+        slot = 4
+        if self.has_x and main is PARTICLE_MAIN:
+            info.image(slot, 'RGBA32F', 'FLOAT_2D', "cnExt", qualifiers={'READ', 'WRITE'})
+            slot += 1
+        for name in extra_images:
+            info.image(slot, 'RGBA32F', 'FLOAT_2D', name, qualifiers={'WRITE'})
+            slot += 1
         for kind, name in (('FLOAT', "cnDt"), ('FLOAT', "uTime"), ('FLOAT', "uFrame"),
                            ('FLOAT', "cnStagger"), ('INT', "cnCount"), ('INT', "cnRow"), ('INT', "cnReset"),
                            ('INT', "cnEmitCount")):
@@ -220,30 +278,15 @@ class Sim:
         info.compute_source(code)
         shader, err, log = sampler._compile_capturing(info)
         if shader is None:
-            raise SdfCodeError("the code didn't compile:\n" + user_errors(log, offset, source))
-        self.shader = shader
-        self.row = row_for(self.count)
-        self.rows = max(1, math.ceil(self.count / self.row))
-        self.pos = gpu.types.GPUTexture((self.row, self.rows), format='RGBA32F')
-        self.vel = gpu.types.GPUTexture((self.row, self.rows), format='RGBA32F')
-        self.emit_p, self.emit_n, self.emit_count = _empty_emitter()
-        self.emit_key = None          # what the emitter textures were made from
-        self.frame = None            # the frame this state represents
-        self.draw_shader = None      # made on first draw (gpu_live)
-        self.draw_key = None
+            raise SdfCodeError("the code didn't compile:\n" + chain_errors(log, offset, self.source))
+        return shader
 
     def set_emitter(self, points, normals, key):
         self.emit_p, self.emit_n, self.emit_count = emitter_textures(points, normals)
         self.emit_key = key
 
-    def _dispatch(self, dt, time_s, frame, reset, values, stagger=1.0):
+    def _bind_common(self, sh, values, dt=0.0, time_s=0.0, frame=0, reset=False, stagger=1.0):
         import gpu
-        from . import gpu_guard
-        if not gpu_guard.allowed():
-            return
-        sh = self.shader
-        sh.image("cnPos", self.pos)
-        sh.image("cnVel", self.vel)
         slots = np.zeros(256, np.float32)
         for i, prm in enumerate(self.params):
             slots[i] = float((values or {}).get(prm.name, prm.default))
@@ -267,6 +310,17 @@ class Sim:
                 setter(name, value)
             except ValueError:
                 pass                  # the compiler drops uniforms the code never reads
+
+    def _dispatch(self, dt, time_s, frame, reset, values, stagger=1.0):
+        from . import gpu_guard
+        if not gpu_guard.allowed():
+            return
+        sh = self.shader
+        sh.image("cnPos", self.pos)
+        sh.image("cnVel", self.vel)
+        if self.ext is not None:
+            sh.image("cnExt", self.ext)
+        self._bind_common(sh, values, dt, time_s, frame, reset, stagger)
         gpu_guard.dispatch(sh, math.ceil(self.row / GROUP), math.ceil(self.rows / GROUP), 1)
 
     def reset(self, time_s=0.0, frame=0, values=None, stagger=1.0):
@@ -275,26 +329,83 @@ class Sim:
     def step(self, dt, time_s=0.0, frame=0, values=None):
         self._dispatch(dt, time_s, frame, False, values)
 
-    def read(self, limit=0):
-        """{'position', 'velocity', 'speed', 'age', 'life'} as numpy arrays of length count
-        (or the first `limit` particles).
+    def _read_tex(self, tex, n):
+        buf = tex.read()
+        buf.dimensions = self.row * self.rows * 4
+        return np.frombuffer(buf, dtype=np.float32).reshape(-1, 4)[:n]
+
+    def read(self, limit=0, values=None, attrs=(), time_s=0.0, frame=0):
+        """{'position', 'velocity', 'speed', 'age', 'life', <attributes>} as numpy arrays of length
+        count (or the first `limit` particles). Positions are where the particles are shown: after the
+        chain's warps (a Bend), which never change the simulation itself.
 
         ``speed`` is there because Blender reserves the name ``velocity`` for motion
-        blur, so a shader cannot read it back — shade with ``speed`` instead.
+        blur, so a shader cannot read it back: shade with ``speed`` instead.
         """
+        import gpu
+        from . import gpu_guard
         n = self.count if not limit else min(self.count, int(limit))
+        pos_tex, vel_tex = self.pos, self.vel
+        if self.has_warp and gpu_guard.allowed():
+            if self.warp_shader is None:
+                self.warp_shader = self._compile(WARP_MAIN, extra_images=("cnOutP", "cnOutV"))
+            out_p = gpu.types.GPUTexture((self.row, self.rows), format='RGBA32F')
+            out_v = gpu.types.GPUTexture((self.row, self.rows), format='RGBA32F')
+            sh = self.warp_shader
+            sh.image("cnPos", self.pos)
+            sh.image("cnVel", self.vel)
+            sh.image("cnOutP", out_p)
+            sh.image("cnOutV", out_v)
+            self._bind_common(sh, values, 0.0, time_s, frame)
+            gpu_guard.dispatch(sh, math.ceil(self.row / GROUP), math.ceil(self.rows / GROUP), 1)
+            pos_tex, vel_tex = out_p, out_v
         out = {}
-        for tex, names in ((self.pos, ("position", "age")), (self.vel, ("velocity", "life"))):
-            buf = tex.read()
-            buf.dimensions = self.row * self.rows * 4
-            arr = np.frombuffer(buf, dtype=np.float32).reshape(-1, 4)[:n]
+        for tex, names in ((pos_tex, ("position", "age")), (vel_tex, ("velocity", "life"))):
+            arr = self._read_tex(tex, n)
             out[names[0]] = np.ascontiguousarray(arr[:, :3])
             out[names[1]] = np.ascontiguousarray(arr[:, 3])
         out["speed"] = np.linalg.norm(out["velocity"], axis=1).astype(np.float32)
+        if self.ext is not None and attrs:
+            arr = self._read_tex(self.ext, n)
+            for i, name in enumerate(list(attrs)[:4]):
+                out[name] = np.ascontiguousarray(arr[:, i])
         return out
 
 
+def chain_errors(log, offset, source):
+    """Compiler errors worded for the user. `source` is a composed chain, whose segments name the
+    nodes; user_errors quotes the offending line, which carries the node's prefix (n2_...)."""
+    from .sdf_code import user_errors
+    return user_errors(log, offset, source)
+
+
 _sims: dict[str, Sim] = {}
+
+
+_single_cache: dict[str, tuple] = {}
+
+
+def as_chain(source, values=None):
+    """(composed source, values) for `source`: raw particle code (spawn / update, sliders by their own
+    names) becomes a chain of one; a composed chain passes through unchanged."""
+    if "void cnSpawn(" in source:
+        return source, values
+    key = hashlib.sha1(source.encode()).hexdigest()
+    got = _single_cache.get(key)
+    if got is None:
+        comp = compose_single(source)
+        got = (comp.source, {k[3:]: k for k in comp.values if k.startswith("n0_")})
+        if len(_single_cache) > 64:
+            _single_cache.clear()
+        _single_cache[key] = got
+    src, names = got
+    vals = {}
+    for raw, pref in names.items():
+        if values and raw in values:
+            vals[pref] = values[raw]
+        elif values and raw.endswith("__i") and raw[:-3] in values:
+            vals[pref] = values[raw[:-3]]
+    return src, vals
 
 
 def get_sim(name, source, count):
@@ -322,6 +433,7 @@ def advance(name, source, count, frame, frame_start, fps, values=None, substeps=
     (pre-warming `prewarm` seconds first). `emitter` is (points, normals, key) or None.
     Returns (sim, steps).
     """
+    source, values = as_chain(source, values)
     sim = get_sim(name, source, count)
     if emitter is not None and emitter[2] != sim.emit_key:
         sim.set_emitter(*emitter)
@@ -355,12 +467,13 @@ def advance(name, source, count, frame, frame_start, fps, values=None, substeps=
 
 
 def simulate(name, source, count, frame, frame_start, fps, values=None, substeps=1, stagger=1.0,
-             prewarm=0.0, emitter=None, limit=0):
+             prewarm=0.0, emitter=None, limit=0, attrs=()):
     """Bring the simulation to `frame` and return its state. Returns (state dict, stats)."""
     t0 = time.perf_counter()
+    source, values = as_chain(source, values)
     sim, steps = advance(name, source, count, frame, frame_start, fps, values, substeps, stagger,
                          prewarm, emitter)
-    state = sim.read(limit)
+    state = sim.read(limit, values, attrs, (frame - frame_start) / fps, frame)
     return state, {"count": len(state["position"]), "steps": steps, "sim_s": time.perf_counter() - t0,
                    "frame": sim.frame}
 

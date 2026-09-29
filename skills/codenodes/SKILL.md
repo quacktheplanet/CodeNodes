@@ -29,7 +29,7 @@ start: when Blender is open with the add-on enabled, the tools find it by themse
 | a web page with sliders | `web_page`, `web_shape` |
 
 `code_node` makes what a person gets from Shift A › CodeNodes: an object whose Geometry
-Nodes tree holds one code node (plus a Make Real node after a GPU node, unless
+Nodes tree holds one code node (plus a To Geometry node after a GPU node, unless
 `make_real=false`), with the code's sliders and the node's settings as inputs on that node. The result names the object, its tree
 (`tree`) and the node group (`node`), so `nodes_read(tree)` and `nodes_edit(tree, ...)`
 can wire it into more nodes (a Transform, a Join, an Instance on Points). Update it with
@@ -50,14 +50,14 @@ can wire it into more nodes (a Transform, a Join, an Instance on Points). Update
 - **particles** (GLSL, GPU Particles): `void spawn(inout Particle p)` and `void update(inout
   Particle p, float dt)`; Particle has position, velocity, age, life, seed. Optional `vec4
   look(Particle p)` colours them live. `emitPoint(seed)` / `emitNormal(seed)` spawn on the
-  node's Emit From object. Drawn live on the GPU (millions are fine); Make Real turns them into
+  node's Emit From object. Drawn live on the GPU (millions are fine); To Geometry turns them into
   points with `velocity`, `speed`, `age`, `life`. Shade with `speed`, not `velocity`.
 - **deform** (GLSL, GPU Mesh): `void deform(inout Vertex v)` runs on every vertex of the mesh
   wired into the node's Mesh input; Vertex has position, normal, color (vec4), value, index.
-  Make Real gives the same topology with new positions and `color` / `value` attributes.
+  To Geometry gives the same topology with new positions and `color` / `value` attributes.
 
 GPU nodes (mesh, particles, deform) are drawn live in the viewport and are not real
-geometry until a Make Real node follows them; `code_node` adds one by default. `render()`
+geometry until a To Geometry node follows them; `code_node` adds one by default. `render()`
 includes live-only GPU nodes too (they're made real just for that frame).
 
 Mistakes come back as `{"ok": false, "error": "line 3: ..."}` with the line in the code

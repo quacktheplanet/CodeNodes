@@ -10,7 +10,7 @@ label in its header, and frames inside the group, which can display a Text block
   * the header label shows the status: live / real, counts, cost, or the error and its line
   * Tab into the group and a frame shows the code, another the full status or error
 
-Make Real nodes get the same treatment: When is a Menu, the limits and attribute toggles are sockets.
+To Geometry nodes get the same treatment: When is a Menu, the limits and attribute toggles are sockets.
 """
 
 from __future__ import annotations
@@ -91,24 +91,181 @@ def socket_to_setting(prop, value):
     return value
 
 
+_decl_cache: dict[str, object] = {}
+
+
+def decls_of(obj):
+    """The code's declarations (decl.Decls), or empty ones while the code has a mistake in it."""
+    import hashlib
+    from . import decl
+    text = obj.codenodes.text
+    code = text.as_string() if text is not None else ""
+    key = hashlib.sha1(code.encode()).hexdigest()
+    got = _decl_cache.get(key)
+    if got is None:
+        try:
+            got = decl.parse(code)
+        except Exception:
+            got = decl.Decls()
+            got.roles = decl.roles(code)
+        if len(_decl_cache) > 256:
+            _decl_cache.clear()
+        _decl_cache[key] = got
+    return got
+
+
+STREAM_IN = {"Particles": "NodeSocketBundle", "Mesh": "NodeSocketGeometry"}
+
+
+def stream_inputs(obj):
+    s = obj.codenodes
+    if s.kind == 'DEFORM':
+        return [("Mesh", "NodeSocketGeometry")]
+    if s.kind != 'STAGE':
+        return []
+    d = decls_of(obj)
+    out = []
+    if d.takes_particles():
+        out.append(("Particles", "NodeSocketBundle"))
+    if d.takes_mesh():
+        out.append(("Mesh", "NodeSocketGeometry"))
+    return out
+
+
+def param_sockets(obj):
+    """[(name, socket type, default, min, max)] for the code's sliders: floats, whole numbers, colours."""
+    out = []
+    params = list(obj.codenodes.params)
+    for p in params:
+        if p.kind == 'COLOR':
+            if not p.name.endswith("_r"):
+                continue
+            base = p.name[:-2]
+            g = next((q for q in params if q.name == base + "_g"), None)
+            b = next((q for q in params if q.name == base + "_b"), None)
+            rgb = (float(p.value), float(g.value) if g else 1.0, float(b.value) if b else 1.0, 1.0)
+            out.append((base, "NodeSocketColor", rgb, None, None))
+        elif p.kind == 'INT':
+            out.append((p.name, "NodeSocketInt", int(round(p.value)), int(p.min), int(p.max)))
+        else:
+            out.append((p.name, "NodeSocketFloat", float(p.value), float(p.min), float(p.max)))
+    return out
+
+
 def spec(obj):
     """[(panel, name, socket type, default, min, max, items)] the node should show for this source."""
     s = obj.codenodes
     out = [(None, EDIT, "NodeSocketBool", False, None, None, None)]
-    if s.kind == 'DEFORM':
-        out.append((None, "Mesh", "NodeSocketGeometry", None, None, None, None))
+    for name, stype in stream_inputs(obj):
+        out.append((None, name, stype, None, None, None, None))
     names = templates_for(s.kind)
     if names:
         out.append((None, "Template", "NodeSocketMenu", s.template_key or CUSTOM, None, None, names + [CUSTOM]))
     for panel, name, stype, prop, lo, hi in SETTINGS.get(s.kind, []):
         if panel is None:
             out.append((panel, name, stype, setting_value(s, prop), lo, hi, MENU_ITEMS.get(name)))
-    for p in s.params:
-        out.append((None, p.name, "NodeSocketFloat", float(p.value), float(p.min), float(p.max), None))
+    for name, stype, default, lo, hi in param_sockets(obj):
+        out.append((None, name, stype, default, lo, hi, None))
+    if s.kind in ('PARTICLES', 'STAGE', 'DEFORM', 'MESH'):
+        for f in decls_of(obj).func_ins:
+            out.append((None, f.name, "NodeSocketClosure", None, None, None, None))
     for panel, name, stype, prop, lo, hi in SETTINGS.get(s.kind, []):
         if panel is not None:
             out.append((panel, name, stype, setting_value(s, prop), lo, hi, MENU_ITEMS.get(name)))
     return out
+
+
+def output_spec(obj):
+    """[(name, socket type)] the node gives: its stream, function outputs, and per-particle attributes."""
+    s = obj.codenodes
+    d = decls_of(obj)
+    out = []
+    if s.kind == 'PARTICLES':
+        out.append(("Particles", "NodeSocketBundle"))
+    elif s.kind == 'STAGE':
+        if d.gives_particles():
+            out.append(("Particles", "NodeSocketBundle"))
+        if d.takes_mesh():
+            out.append(("Mesh", "NodeSocketGeometry"))
+    else:
+        out.append(("Geometry", "NodeSocketGeometry"))
+    for f in d.func_outs:
+        out.append((f.name, "NodeSocketClosure"))
+    if s.kind in ('PARTICLES', 'STAGE'):
+        for a in d.attrs:
+            out.append((a.name, "NodeSocketFloat"))
+    return out
+
+
+def _outputs(iface):
+    return [i for i in iface.items_tree if i.item_type == 'SOCKET' and i.in_out == 'OUTPUT']
+
+
+def sync_outputs(group, obj):
+    """Make the group's outputs match what the code gives. True if anything changed.
+
+    Attribute outputs are fields: a Named Attribute node inside reads the value from the geometry it
+    is used on, which after To Geometry carries every per-particle attribute."""
+    wanted = output_spec(obj)
+    have = [(i.name, i.socket_type) for i in _outputs(group.interface)]
+    if have == wanted:
+        _wire_attr_outputs(group, obj)
+        return False
+    # remember what each output fed, by name, in every tree using the group
+    saved = []
+    for tree in bpy.data.node_groups:
+        if tree.bl_idname != "GeometryNodeTree":
+            continue
+        for node in tree.nodes:
+            if node.type == 'GROUP' and node.node_tree == group:
+                saved.append((tree, node, [(l.from_socket.name, l.to_socket) for l in tree.links
+                                           if l.from_node == node]))
+    iface = group.interface
+    for item in _outputs(iface):
+        if (item.name, item.socket_type) not in wanted:
+            iface.remove(item)
+    for name, stype in wanted:
+        if not any(i.name == name and i.socket_type == stype for i in _outputs(iface)):
+            iface.new_socket(name, in_out="OUTPUT", socket_type=stype)
+    for pos, (name, stype) in enumerate(wanted):
+        item = next(i for i in _outputs(iface) if i.name == name and i.socket_type == stype)
+        if item.position != pos:
+            iface.move(item, pos)
+    for tree, node, links in saved:
+        for name, to in links:
+            out = node.outputs.get(name)
+            if out is None and name in ("Geometry", "Particles"):          # the stream was renamed
+                out = next((o for o in node.outputs if o.name in ("Particles", "Mesh", "Geometry")), None)
+            if out is not None:
+                try:
+                    tree.links.new(out, to)
+                except RuntimeError:
+                    pass
+    _wire_attr_outputs(group, obj)
+    _hook_menus(group)
+    return True
+
+
+def _wire_attr_outputs(group, obj):
+    gout = next((n for n in group.nodes if n.type == 'GROUP_OUTPUT'), None)
+    if gout is None:
+        return
+    for sock in gout.inputs:
+        if sock.bl_idname != "NodeSocketFloat" or not sock.name:
+            continue
+        name = f"Attr · {sock.name}"
+        na = group.nodes.get(name)
+        if na is None:
+            na = group.nodes.new("GeometryNodeInputNamedAttribute")
+            na.name = na.label = name
+            na.data_type = 'FLOAT'
+            na.location = (gout.location.x - 260, gout.location.y - 80 - 60 * len(
+                [n for n in group.nodes if n.name.startswith("Attr · ")]))
+            na.hide = True
+        if na.inputs["Name"].default_value != sock.name:
+            na.inputs["Name"].default_value = sock.name
+        if not any(l.to_socket == sock for l in group.links):
+            group.links.new(na.outputs["Attribute"], sock)
 
 
 def _inputs(iface):
@@ -149,11 +306,13 @@ def ensure_menu_switch(group, socket_name, items):
 
 
 def sync_interface(group, obj):
-    """Make the group's inputs match the code and the kind's settings. True if anything changed."""
+    """Make the group's inputs and outputs match the code and the kind's settings. True if anything
+    changed."""
     wanted = spec(obj)
+    outs_changed = sync_outputs(group, obj)
     if signature(group) == [(w[0], w[1], w[2]) for w in wanted]:
         _sync_menus(group, wanted)
-        return False
+        return outs_changed
     saved = _save_users(group)
     iface = group.interface
     for item in _inputs(iface):
@@ -213,7 +372,7 @@ def _restore_users(group, saved, defaults=None):
             if got is None or got[0] != sock.bl_idname:
                 d = defaults.get(sock.name)
                 if d is not None and hasattr(sock, "default_value") and sock.bl_idname not in (
-                        "NodeSocketGeometry", "NodeSocketObject"):
+                        "NodeSocketGeometry", "NodeSocketObject", "NodeSocketBundle", "NodeSocketClosure"):
                     try:
                         sock.default_value = d
                     except (TypeError, ValueError, AttributeError):
@@ -240,7 +399,8 @@ def _new_socket(iface, name, stype, default, lo, hi, parent):
     item = iface.new_socket(name, in_out="INPUT", socket_type=stype, **kw)
     if lo is not None:
         item.min_value, item.max_value = lo, hi
-    if default is not None and stype not in ("NodeSocketMenu", "NodeSocketGeometry"):
+    if default is not None and stype not in ("NodeSocketMenu", "NodeSocketGeometry", "NodeSocketBundle",
+                                             "NodeSocketClosure"):
         try:
             item.default_value = default
         except (TypeError, ValueError, AttributeError):
@@ -261,33 +421,43 @@ def _sync_menus(group, wanted):
 
 
 def _hook_menus(group):
-    """Blender greys out a dropdown whose Menu Switch feeds nothing. Each switch outputs empty
-    geometry, so join them into the group's output: nothing changes, and the dropdowns stay lit."""
+    """Blender greys out a dropdown whose Menu Switch feeds nothing. Each switch outputs something
+    empty of the group's first output type (geometry, a bundle, a closure) and is joined into that
+    output: nothing changes, and the dropdowns stay lit."""
     switches = [n for n in group.nodes if n.type == 'MENU_SWITCH']
     gout = next((n for n in group.nodes if n.type == 'GROUP_OUTPUT'), None)
     if not switches or gout is None:
         return
-    out_sock = next((s for s in gout.inputs if s.bl_idname == "NodeSocketGeometry"), None)
+    out_sock = next((s for s in gout.inputs if s.bl_idname in ("NodeSocketGeometry", "NodeSocketBundle",
+                                                                 "NodeSocketClosure")), None)
     if out_sock is None:
         return
+    kind = {"NodeSocketGeometry": 'GEOMETRY', "NodeSocketBundle": 'BUNDLE',
+            "NodeSocketClosure": 'CLOSURE'}[out_sock.bl_idname]
+    for ms in switches:
+        if ms.data_type != kind:
+            ms.data_type = kind
+    if kind == 'CLOSURE':                 # no join for closures: the (only) switch feeds the output
+        if not any(l.to_socket == out_sock for l in group.links):
+            group.links.new(switches[0].outputs[0], out_sock)
+        return
+    join_type = "GeometryNodeJoinGeometry" if kind == 'GEOMETRY' else "NodeJoinBundle"
     join = group.nodes.get("Menus")
+    if join is not None and join.bl_idname != join_type:
+        group.nodes.remove(join)
+        join = None
     if join is None:
-        join = group.nodes.new("GeometryNodeJoinGeometry")
+        join = group.nodes.new(join_type)
         join.name = join.label = "Menus"
         join.hide = True
         join.location = (gout.location.x - 120, gout.location.y - 160)
-        prev = next((l for l in group.links if l.to_socket == out_sock), None)
-        if prev is not None:
-            src = prev.from_socket
-            group.links.remove(prev)
-            group.links.new(src, join.inputs[0])
-        group.links.new(join.outputs[0], out_sock)
     if not any(l.from_node == join and l.to_socket == out_sock for l in group.links):
         prev = next((l for l in group.links if l.to_socket == out_sock), None)
         if prev is not None:
             src = prev.from_socket
             group.links.remove(prev)
-            group.links.new(src, join.inputs[0])
+            if src.node != join:
+                group.links.new(src, join.inputs[0])
         group.links.new(join.outputs[0], out_sock)
     for ms in switches:
         if not any(l.from_node == ms and l.to_node == join for l in group.links):
@@ -354,7 +524,12 @@ def apply(obj, values, user=None):
             except (TypeError, ValueError):
                 pass
     for p in s.params:
-        v = values.get(p.name)
+        if p.kind == 'COLOR':
+            base, part = p.name[:-2], "rgb".index(p.name[-1])
+            col = values.get(base)
+            v = tuple(col)[part] if col is not None and hasattr(col, "__len__") else None
+        else:
+            v = values.get(p.name)
         if v is not None and abs(float(v) - p.value) > 1e-9:
             p["value"] = float(v)
             changed = True
@@ -398,10 +573,13 @@ def switch_template(obj, key, user=None):
                     sock.default_value = setting_value(s, prop)
                 except (TypeError, ValueError):
                     pass
-        for p in s.params:
-            sock = node.inputs.get(p.name)
+        for name, stype, default, lo, hi in param_sockets(obj):
+            sock = node.inputs.get(name)
             if sock is not None and not sock.is_linked:
-                sock.default_value = p.value
+                try:
+                    sock.default_value = default
+                except (TypeError, ValueError):
+                    pass
         if group.name.startswith(gn_link.PREFIX):
             group.name = gn_link._unique(gn_link.PREFIX + key, bpy.data.node_groups)
 
@@ -424,6 +602,16 @@ def status_line(obj):
         return f"{'live' if live else 'real'} · {_fmt_count(s.count)}"
     if s.kind == 'DEFORM':
         return "live" if live else "real"
+    if s.kind == 'STAGE':
+        from . import links
+        if obj.name in links.MESH_HEADS:
+            return "live" if live else "real"
+        heads = links.heads_of(obj)
+        if heads:
+            return "in chain"
+        d = decls_of(obj)
+        return "function" if d.func_outs and not d.roles & {"born", "behave", "look", "warp", "deform"} \
+            else "not connected"
     return "live" if live else "real"
 
 
@@ -484,7 +672,7 @@ def update_status(group, obj, nodes):
         pass
 
 
-# ---- Make Real's sockets -------------------------------------------------------------------------
+# ---- To Geometry's sockets -------------------------------------------------------------------------
 
 REAL_SPEC = {
     'MESH': [("Resolution", "NodeSocketInt", 128, 8, 512)],
@@ -496,7 +684,8 @@ REAL_SPEC = {
 
 
 def real_spec(kind, src=None):
-    out = [(None, "Geometry", "NodeSocketGeometry", None, None, None, None),
+    first = ("Particles", "NodeSocketBundle") if kind == 'PARTICLES' else ("Geometry", "NodeSocketGeometry")
+    out = [(None, first[0], first[1], None, None, None, None),
            (None, "When", "NodeSocketMenu", "Automatic", None, None, MENU_ITEMS["When"])]
     for name, stype, default, lo, hi in REAL_SPEC.get(kind or "", []):
         if name == "Resolution" and src is not None:
@@ -508,10 +697,20 @@ def real_spec(kind, src=None):
 def sync_real_interface(group, kind, src=None):
     wanted = real_spec(kind, src)
     if signature(group) != [(w[0], w[1], w[2]) for w in wanted]:
+        # what feeds the stream input in each tree, so it can be wired back after its type changes
+        feeds = []
+        for tree in bpy.data.node_groups:
+            if tree.bl_idname != "GeometryNodeTree":
+                continue
+            for node in tree.nodes:
+                if node.type == 'GROUP' and node.node_tree == group and node.inputs:
+                    l = next((l for l in tree.links if l.to_node == node and l.to_socket == node.inputs[0]), None)
+                    if l is not None:
+                        feeds.append((tree, node, l.from_socket))
         saved = _save_users(group)
         iface = group.interface
         for item in _inputs(iface):
-            if item.name not in [w[1] for w in wanted]:
+            if (item.name, item.socket_type) not in [(w[1], w[2]) for w in wanted]:
                 iface.remove(item)
         for pos, (panel, name, stype, default, lo, hi, items) in enumerate(wanted):
             item = next((i for i in _inputs(iface) if i.name == name), None)
@@ -523,14 +722,21 @@ def sync_real_interface(group, kind, src=None):
             item = next(i for i in _inputs(iface) if i.name == w[1])
             if item.position != pos + 1:
                 iface.move(item, pos + 1)
-        # the Geometry input must stay wired to the Join inside
+        # a geometry input passes through the Join inside (harmless on geometry that's real already)
         gin = next((n for n in group.nodes if n.type == 'GROUP_INPUT'), None)
         join = next((n for n in group.nodes if n.type == 'JOIN_GEOMETRY'), None)
-        if gin is not None and join is not None and not any(l.from_node == gin and l.to_node == join
-                                                              for l in group.links):
-            group.links.new(gin.outputs["Geometry"], join.inputs[0])
+        geo = gin.outputs.get("Geometry") if gin is not None else None
+        if geo is not None and join is not None and not any(l.from_node == gin and l.to_node == join
+                                                             for l in group.links):
+            group.links.new(geo, join.inputs[0])
         _sync_menus(group, wanted)
         _restore_users(group, saved, {w[1]: w[3] for w in wanted})
+        for tree, node, from_socket in feeds:
+            if node.inputs and not node.inputs[0].is_linked:
+                try:
+                    tree.links.new(from_socket, node.inputs[0])
+                except RuntimeError:
+                    pass
         return
     _sync_menus(group, wanted)
 

@@ -10,7 +10,7 @@ bl_info = {
     "version": (0, 2, 0),
     "blender": (5, 0, 0),
     "location": "Geometry Nodes > Add > CodeNodes; View3D > Add > Mesh; Render > Render with CodeNodes",
-    "description": "GPU code inside Geometry Nodes: live particles, raymarched surfaces, mesh code, Make Real",
+    "description": "GPU code inside Geometry Nodes: live particles, raymarched surfaces, mesh code, To Geometry",
     "category": "Mesh",
 }
 
