@@ -134,7 +134,7 @@ Galaxy: a million stars on twisted ellipses (a density wave, as in Myriad). Each
 | Fast / Old | colour | (1, 0.55, 0.2, 1) |  | Look |
 | Glow | toggle | True |  | Look |
 | Point Size | float | 1 | 0.5 to 32 | Look |
-| Brightness | float | 0.32 | 0 to 8 | Look |
+| Brightness | float | 0.28 | 0 to 8 | Look |
 | Speed Range | float | 2 | 0.0001 to 50 | Look |
 | Substeps | int | 1 | 1 to 20 | Simulation |
 | Pre-warm | float | 0 | 0 to 120 | Simulation |
@@ -182,9 +182,9 @@ vec4 look(Particle p) {
   float r = length(p.position.xy) / size;
   float rnd = rand1(s * 6.1 + 21.0);
   vec3 old = vec3(1.0, 0.78, 0.5), young = vec3(0.55, 0.7, 1.0), rosy = vec3(1.0, 0.55, 0.75);
-  vec3 c = bulge > 0.5 ? old * 0.3 : mix(mix(old, young, smoothstep(0.15, 0.9, r)), rosy, step(0.985, rnd) * 0.9);
+  vec3 c = bulge > 0.5 ? old * 0.12 : mix(mix(old, young, smoothstep(0.15, 0.9, r)), rosy, step(0.985, rnd) * 0.9);
   // the middle is where most stars are: dim each one there, so their sum glows instead of clipping
-  c *= (0.08 + 0.92 * smoothstep(0.03, 0.75, r)) * (0.6 + 0.8 * rnd);
+  c *= (0.04 + 0.96 * smoothstep(0.02, 0.85, r)) * (0.6 + 0.8 * rnd);
   return vec4(c, 1.0);
 }
 ```
@@ -1425,13 +1425,14 @@ Scene Lights: the scene's lamps (sun, point, spot, area) and world colour as a f
 // @in hidden l7_c1 0.0
 
 const float PI_L = 3.14159265;
-// GGX specular + Lambert diffuse, the same model as Principled BSDF's main lobes
-vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
+// GGX specular + Lambert diffuse, the same model as Principled BSDF's main lobes. `widen`: the lamp's
+// angular size, which spreads its highlight like a rougher surface (as EEVEE's soft lamps do)
+vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal, float widen) {
   float nl = max(dot(n, l), 0.0);
   if (nl <= 0.0) return vec3(0.0);
   vec3 h = normalize(l + v);
   float nv = max(dot(n, v), 1e-4), nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);
-  float a = max(rough * rough, 0.002), a2 = a * a;
+  float a = clamp(max(rough * rough, 0.002) + widen * 0.5, 0.002, 1.0), a2 = a * a;
   float dn = nh * nh * (a2 - 1.0) + 1.0;
   float d = a2 / (PI_L * dn * dn);
   float k = (rough + 1.0) * (rough + 1.0) / 8.0;
@@ -1444,10 +1445,11 @@ vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
 }
 // one lamp: the direction towards it (l) and the irradiance it delivers (rad)
 void lamp(vec3 p, float type, vec3 pos, vec3 dir, vec3 col, float size, float c0, float c1,
-          out vec3 l, out vec3 rad) {
-  if (type < 0.5) { l = -dir; rad = col; return; }                 // sun: colour x strength (W/m2)
+          out vec3 l, out vec3 rad, out float widen) {
+  if (type < 0.5) { l = -dir; rad = col; widen = 0.0047; return; }  // sun: colour x strength (W/m2)
   vec3 d = pos - p;
   float r2 = max(dot(d, d), size * size * 0.25 + 1e-4);
+  widen = size * 0.5 * inversesqrt(r2);
   l = d * inversesqrt(dot(d, d) + 1e-12);
   rad = col / (4.0 * PI_L * r2);                                   // point: colour x power (W)
   if (type > 1.5 && type < 2.5) rad *= smoothstep(c0, c1, dot(-l, dir));        // spot cone
@@ -1456,14 +1458,15 @@ void lamp(vec3 p, float type, vec3 pos, vec3 dir, vec3 col, float size, float c0
 vec3 light(vec3 p, vec3 n, vec3 v, vec3 albedo, float roughness, float metallic) {
   vec3 c = albedo * vec3(w_r, w_g, w_b) * world * (1.0 - 0.5 * metallic);
   vec3 l, rad;
-  if (l0_type > -0.5) { lamp(p, l0_type, vec3(l0_px, l0_py, l0_pz), vec3(l0_dx, l0_dy, l0_dz), vec3(l0_r, l0_g, l0_b), l0_size, l0_c0, l0_c1, l, rad); c += brdf(n, v, l, albedo, roughness, metallic) * rad * intensity; }
-  if (l1_type > -0.5) { lamp(p, l1_type, vec3(l1_px, l1_py, l1_pz), vec3(l1_dx, l1_dy, l1_dz), vec3(l1_r, l1_g, l1_b), l1_size, l1_c0, l1_c1, l, rad); c += brdf(n, v, l, albedo, roughness, metallic) * rad * intensity; }
-  if (l2_type > -0.5) { lamp(p, l2_type, vec3(l2_px, l2_py, l2_pz), vec3(l2_dx, l2_dy, l2_dz), vec3(l2_r, l2_g, l2_b), l2_size, l2_c0, l2_c1, l, rad); c += brdf(n, v, l, albedo, roughness, metallic) * rad * intensity; }
-  if (l3_type > -0.5) { lamp(p, l3_type, vec3(l3_px, l3_py, l3_pz), vec3(l3_dx, l3_dy, l3_dz), vec3(l3_r, l3_g, l3_b), l3_size, l3_c0, l3_c1, l, rad); c += brdf(n, v, l, albedo, roughness, metallic) * rad * intensity; }
-  if (l4_type > -0.5) { lamp(p, l4_type, vec3(l4_px, l4_py, l4_pz), vec3(l4_dx, l4_dy, l4_dz), vec3(l4_r, l4_g, l4_b), l4_size, l4_c0, l4_c1, l, rad); c += brdf(n, v, l, albedo, roughness, metallic) * rad * intensity; }
-  if (l5_type > -0.5) { lamp(p, l5_type, vec3(l5_px, l5_py, l5_pz), vec3(l5_dx, l5_dy, l5_dz), vec3(l5_r, l5_g, l5_b), l5_size, l5_c0, l5_c1, l, rad); c += brdf(n, v, l, albedo, roughness, metallic) * rad * intensity; }
-  if (l6_type > -0.5) { lamp(p, l6_type, vec3(l6_px, l6_py, l6_pz), vec3(l6_dx, l6_dy, l6_dz), vec3(l6_r, l6_g, l6_b), l6_size, l6_c0, l6_c1, l, rad); c += brdf(n, v, l, albedo, roughness, metallic) * rad * intensity; }
-  if (l7_type > -0.5) { lamp(p, l7_type, vec3(l7_px, l7_py, l7_pz), vec3(l7_dx, l7_dy, l7_dz), vec3(l7_r, l7_g, l7_b), l7_size, l7_c0, l7_c1, l, rad); c += brdf(n, v, l, albedo, roughness, metallic) * rad * intensity; }
+  float wd;
+  if (l0_type > -0.5) { lamp(p, l0_type, vec3(l0_px, l0_py, l0_pz), vec3(l0_dx, l0_dy, l0_dz), vec3(l0_r, l0_g, l0_b), l0_size, l0_c0, l0_c1, l, rad, wd); c += brdf(n, v, l, albedo, roughness, metallic, wd) * rad * intensity; }
+  if (l1_type > -0.5) { lamp(p, l1_type, vec3(l1_px, l1_py, l1_pz), vec3(l1_dx, l1_dy, l1_dz), vec3(l1_r, l1_g, l1_b), l1_size, l1_c0, l1_c1, l, rad, wd); c += brdf(n, v, l, albedo, roughness, metallic, wd) * rad * intensity; }
+  if (l2_type > -0.5) { lamp(p, l2_type, vec3(l2_px, l2_py, l2_pz), vec3(l2_dx, l2_dy, l2_dz), vec3(l2_r, l2_g, l2_b), l2_size, l2_c0, l2_c1, l, rad, wd); c += brdf(n, v, l, albedo, roughness, metallic, wd) * rad * intensity; }
+  if (l3_type > -0.5) { lamp(p, l3_type, vec3(l3_px, l3_py, l3_pz), vec3(l3_dx, l3_dy, l3_dz), vec3(l3_r, l3_g, l3_b), l3_size, l3_c0, l3_c1, l, rad, wd); c += brdf(n, v, l, albedo, roughness, metallic, wd) * rad * intensity; }
+  if (l4_type > -0.5) { lamp(p, l4_type, vec3(l4_px, l4_py, l4_pz), vec3(l4_dx, l4_dy, l4_dz), vec3(l4_r, l4_g, l4_b), l4_size, l4_c0, l4_c1, l, rad, wd); c += brdf(n, v, l, albedo, roughness, metallic, wd) * rad * intensity; }
+  if (l5_type > -0.5) { lamp(p, l5_type, vec3(l5_px, l5_py, l5_pz), vec3(l5_dx, l5_dy, l5_dz), vec3(l5_r, l5_g, l5_b), l5_size, l5_c0, l5_c1, l, rad, wd); c += brdf(n, v, l, albedo, roughness, metallic, wd) * rad * intensity; }
+  if (l6_type > -0.5) { lamp(p, l6_type, vec3(l6_px, l6_py, l6_pz), vec3(l6_dx, l6_dy, l6_dz), vec3(l6_r, l6_g, l6_b), l6_size, l6_c0, l6_c1, l, rad, wd); c += brdf(n, v, l, albedo, roughness, metallic, wd) * rad * intensity; }
+  if (l7_type > -0.5) { lamp(p, l7_type, vec3(l7_px, l7_py, l7_pz), vec3(l7_dx, l7_dy, l7_dz), vec3(l7_r, l7_g, l7_b), l7_size, l7_c0, l7_c1, l, rad, wd); c += brdf(n, v, l, albedo, roughness, metallic, wd) * rad * intensity; }
   return c;
 }
 ```

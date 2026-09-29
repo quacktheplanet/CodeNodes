@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.4.0 (unreleased, draft): code-node graphs, caching and lighting
+
+### Graphs, not just chains
+- A stream wired into several stages splits into branches, each going its own way (glowing heads and
+  trails from the same particles). Branches that differ only in looks and warps share one GPU
+  simulation; a branch with its own behaviour after the split runs its own copy.
+- **Join Particles** merges two streams: the stages after it run on both, and a To Geometry after it
+  outputs both.
+- One function output feeds any number of nodes in any chains (a Wind Field pushing particles and
+  swaying a mesh).
+- To Geometry partway along a chain outputs the stream at that point.
+- Every path from a source to where its stream ends is compiled into one GPU program.
+
+### Baking
+- **GPU Cache** node: Mode (Live / Cached), Start / End, ⟳ Bake Now and ✕ Clear toggles, and a header
+  that says what's cached. Frames are 16-bit floats, zlib-compressed, next to the .blend
+  (`codenodes_cache/`); 20,000 particles × 48 frames = 13 MB. Cached frames play back when scrubbing and
+  feed To Geometry and Render with CodeNodes.
+- **Blender's own Bake node** now works after To Geometry: code nodes convert each frame before
+  Blender evaluates it (frame_change_pre), so playback shows the current frame and the Bake node
+  captures every frame.
+
+### Lighting
+- **Scene Lights**: the scene's lamps (up to 8) and world as a `light()` function, kept in step with
+  the scene without recompiling; lamp size widens highlights as in EEVEE.
+- **Material Look**: a Blender material's Principled BSDF values on particles, lit by Scene Lights.
+- GPU Surfaces take **Lights** and **Material** inputs; lit that way they look close to the same
+  surface made real and rendered by EEVEE.
+- New declarations: `// @in material name` (a Material socket) and `// @in hidden name` (a value the
+  add-on fills in, no socket).
+
+### Looks and starters
+- **Streak Look** (`@shape streak`): each particle drawn as a glowing streak along its motion.
+- **Sway by Field**: a mesh stage bent by a function (grass in the wind).
+- Firefly wings read as small translucent wings (a teardrop outline, bright rims, veins, a clear
+  beat with a pause) and sit over the glow; the default wing size is larger.
+- Galaxy: a dimmer bulge and inner disk, so the core glows instead of clipping.
+
+### Documentation
+- **docs/NODE_REFERENCE.md**: the full declaration syntax, and every node's complete code and sockets
+  (type, default, range), generated from the add-on by `tools/gen_node_reference.py`;
+  `tests/test_node_reference.py` fails when they disagree.
+
+### Fixes
+- Function-provider names inside a program no longer contain `__` (GLSL reserves it; NVIDIA refused
+  some programs).
+- Mesh stages get the random and noise helpers (`curlNoise`, `gnoise`, `rand1`...) that particles
+  have, so a Wind Field can feed a mesh chain.
+
 ## 0.3.0 (unreleased, draft): code nodes you write, wired into chains
 
 ### A node's sockets come from its code

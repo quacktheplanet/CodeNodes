@@ -309,6 +309,50 @@ def test_mid_chain_geometry():
     bpy.data.objects.remove(obj)
 
 
+def cyl_vertex_count(cyl):
+    """The vertices the Cylinder node alone makes (N-gon caps add none)."""
+    return cyl.inputs["Vertices"].default_value * (cyl.inputs["Side Segments"].default_value + 1)
+
+
+def test_mesh_branches():
+    """A mesh chain splits too: one Bend, then Ripple on one branch and Taper on the other."""
+    obj, tree = host("MeshBranch", (-6.0, -6.0, 0.0))
+    cyl = tree.nodes.new("GeometryNodeMeshCylinder")
+    cyl.inputs["Vertices"].default_value = 24
+    cyl.inputs["Side Segments"].default_value = 12
+    bend = add(tree, 'STAGE', "Bend", 0)
+    ripple = add(tree, 'STAGE', "Ripple", 300, 150)
+    taper = add(tree, 'STAGE', "Taper", 300, -150)
+    ra = gn_link.insert(tree, gn_link.build_make_real(), (600, 150))
+    rb = gn_link.insert(tree, gn_link.build_make_real(), (600, -150))
+    join = tree.nodes.new("GeometryNodeJoinGeometry")
+    gout = next(n for n in tree.nodes if n.type == 'GROUP_OUTPUT')
+    tree.links.new(cyl.outputs["Mesh"], bend.inputs["Mesh"])
+    tree.links.new(bend.outputs["Mesh"], ripple.inputs["Mesh"])
+    tree.links.new(bend.outputs["Mesh"], taper.inputs["Mesh"])
+    tree.links.new(ripple.outputs["Mesh"], ra.inputs[0])
+    tree.links.new(taper.outputs["Mesh"], rb.inputs[0])
+    tree.links.new(ra.outputs[0], join.inputs[0])
+    tree.links.new(rb.outputs[0], join.inputs[0])
+    tree.links.new(join.outputs[0], gout.inputs[0])
+    settle(5)
+    head = src(bend).name
+    pipes = links.pipelines_of(head)
+    check(len(pipes) == 2, f"a mesh stream wired into two stages makes two pipelines ({len(pipes)})")
+    ends = sorted(bpy.data.objects[links.CHAINS[p]["stages"][-1]].codenodes.template_key for p in pipes)
+    check(ends == ["Ripple", "Taper"], f"one per branch ({ends})")
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    gs = obj.evaluated_get(dg).evaluated_geometry()
+    nv = len(gs.mesh.vertices) if gs.mesh is not None else 0
+    per = cyl_vertex_count(cyl)
+    brs = [bpy.data.objects[p] for p in pipes]
+    info = [(b.name, b.codenodes.real_mode, len(b.data.vertices), b.codenodes.last_error[:80]) for b in brs]
+    check(nv == 2 * per, f"both branches are made real by their To Mesh ({nv} of {2 * per} vertices; {info})")
+    check(not errors_of(src(bend), src(ripple), src(taper), *brs), "without errors")
+    bpy.data.objects.remove(obj)
+
+
 def test_cache():
     obj, tree = host("Cached", (-6.0, 0.0, 0.0))
     ps = add(tree, 'PARTICLES', "Swirl", 0)
@@ -545,6 +589,7 @@ def main():
         test_merge()
         test_function_fanout()
         test_mid_chain_geometry()
+        test_mesh_branches()
         test_cache()
         test_bake_node()
         test_lights()

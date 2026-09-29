@@ -43,7 +43,8 @@ def ekind(obj):
     s = getattr(obj, "codenodes", None)
     if s is None:
         return None
-    if s.kind == 'STAGE' and obj.name in MESH_HEADS:
+    name = BASE.get(obj.name, obj.name)          # a branch acts as its head does
+    if s.kind == 'STAGE' and name in MESH_HEADS:
         return 'DEFORM'
     return s.kind
 

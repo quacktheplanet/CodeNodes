@@ -51,13 +51,22 @@ After installing (see [Install](#install)), open the demo (build it with `exampl
    `phase`). Wire them into Instance on Points, Set Material or anything else. Set its **When** to
    *Only for Render* to keep the live look in the viewport.
 6. **Render › Render Image with CodeNodes** renders with the GPU nodes included.
+7. Code nodes form a **graph**: wire Blink's **Particles** output into both Firefly Look and
+   **Streak Look**, and you get glowing heads *and* trails from one simulation. **Join Particles**
+   merges two streams; one **Wind Field** can push the fireflies and sway a grass mesh at once.
+8. **Scene Lights** lights code nodes with your lamps and world; **Material Look** brings in a
+   Blender material. **GPU Cache** bakes a simulation (⟳ Bake Now) and plays it back.
+
+Every node, with its code and every socket, is in [docs/NODE_REFERENCE.md](docs/NODE_REFERENCE.md);
+how graphs, baking and lighting work is in [docs/GPU_NODES.md](docs/GPU_NODES.md).
 
 **The kinds of code node** (all in Shift A › CodeNodes, and in 3D View › Add › Mesh):
 
 | Node | You write | Starters |
 |---|---|---|
 | **GPU Particles** | a source: `spawn(p)`, optionally `update(p, dt)` and `look(p)` | Galaxy, Flow, Attractor (from Myriad), Swirl, Fountain, Firefly Swarm, Spark Ball |
-| **GPU Stage** | one step in a chain: `behave(p, dt)`, `born(p)`, `look(p)`, `warp(q)`, `deform(v)`, or functions for other nodes | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Bend, Taper, Ripple, Wind Field |
+| **GPU Stage** | one step in a chain: `behave(p, dt)`, `born(p)`, `look(p)`, `warp(q)`, `deform(v)`, or functions for other nodes | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights |
+| **Join Particles** / **GPU Cache** | nothing: flow nodes that merge two particle streams, or bake and play back a simulation | — |
 | **GPU Surface (SDF)** | `float sdf(vec3 p)`, the distance to the surface; optional `vec3 color(vec3 p)` | Castle (from Aerie), Planet (Tellus-style), Saturn, Donut, Rounded Box, Gyroid Ball, Blob |
 | **GPU Mesh** | `void deform(inout Vertex v)`, run on every vertex of the mesh wired into it | Wave, Noise Displace, Mesa, Twist |
 | **Code Shape** | a small shape language (profiles, revolve, extrude, sweep); real geometry straight away | Desk Lamp, Vase |
@@ -123,7 +132,9 @@ subtract, blend), Transform and Offset nodes. The starter graph makes a small Sa
 | **Code → Shape** | a small shape language → exact, constructed meshes with sharp edges and real UVs | works |
 | **Code → Volume** | GLSL density → OpenVDB volume that renders natively | works (script/API only, no panel yet) |
 | **Code nodes you write** | a node's code declares its inputs (sliders, whole numbers, colours, functions) and outputs (streams, functions, per-particle attributes); sockets follow the code as you type | works |
-| **Chains** | a particle source and the stages wired after it (or a mesh and its stages) compile into one GPU program; function sockets wire one node's function into another; errors name the node and line | works |
+| **Graphs of code nodes** | streams split into branches (branches that only differ in looks share one simulation), merge with Join Particles, and one function feeds any number of nodes; every path compiles into one GPU program; errors name the node and line | works |
+| **GPU Cache** | bake a live particle simulation to disk (16-bit floats, compressed, next to the .blend) and play it back; Blender's own Bake node works after To Geometry too | works |
+| **Scene Lights / Material Look** | your lamps, world and Blender materials on code nodes: lit looks for particles, and lit GPU Surfaces | works |
 | **GPU Particles** | a particle source you write, drawn live (millions); Emit From another object's surface; To Geometry → points with velocity, age, life and the chain's attributes | works |
 | **GPU Stage** | behaviours, looks (glow, fireflies with flapping wings), warps (Bend, Taper on particles and meshes), mesh stages, functions | works |
 | **GPU Surface** | a distance function raymarched live in the viewport, lit, depth-tested with your objects; To Geometry → a watertight mesh | works |
@@ -557,6 +568,8 @@ api.bake_to_nodes("Ring")   # to nodes: {"ok": True, "sliders": [...]} or {"ok":
 - Roofs cover a plan's bounding box; L- and T-shaped plans don't get proper roofs yet.
 - Buildings from a spec and the `geonodes/` library are experimental (see above).
 - Bake to Nodes needs the ExpressNode add-on, which isn't public yet.
+- GPU nodes and Blender objects don't shadow each other, and the live additive glow isn't tone-mapped
+  in the Solid viewport (dense glow can clip to white).
 
 ## Tests
 

@@ -3,8 +3,10 @@
 Code that runs on the graphics card, sitting in your Geometry Nodes tree like any other node.
 
 Each code node is a node you write. The code says which inputs and outputs the node has. Wire code
-nodes together, and CodeNodes compiles each chain into one GPU program, so splitting an effect into
-small nodes costs no speed.
+nodes together (split streams, merge them, feed one function to many nodes) and CodeNodes compiles
+every path into one GPU program, so splitting an effect into small nodes costs no speed.
+
+Every node, with its complete code and every socket, is in [NODE_REFERENCE.md](NODE_REFERENCE.md).
 
 **The principle: code runs on the GPU by default, and one node makes it geometry.** Every code node
 runs and displays on the GPU, live in the viewport: particles, raymarched surfaces, mesh code. No
@@ -20,6 +22,8 @@ You put it where you want geometry.
 | Node | What it does | Starters |
 |---|---|---|
 | **To Geometry** | Turns the GPU node or chain before it into real geometry | — |
+| **Join Particles** | Merges two particle streams: the stages after it apply to both | — |
+| **GPU Cache** | Bakes the GPU simulation passing through it and plays it back | — |
 | **GPU Particles** | A particle source you write: `spawn(p)`, and optionally `update(p, dt)` | Galaxy, Flow, Attractor, Swirl, Fountain, Firefly Swarm, Spark Ball |
 | **GPU Surface (SDF)** | A shape from a distance function (`float sdf(vec3 p)`), raymarched | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Blob |
 | **GPU Mesh** | Code run on every vertex of the mesh wired into it (`void deform(inout Vertex v)`) | Wave, Noise Displace, Mesa, Twist |
@@ -29,10 +33,12 @@ You put it where you want geometry.
 The GPU Stage starters, by section:
 - **Particle stages** (what particles do): Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field,
   Collide with Shape
-- **Particle looks** (how they're drawn live): Glow Look, Firefly Look
+- **Particle looks** (how they're drawn live): Glow Look, Firefly Look, Streak Look (trails),
+  Material Look (a Blender material, lit by the scene)
 - **Warps** (particles and meshes alike): Bend, Taper
-- **Mesh stages**: Ripple
+- **Mesh stages**: Ripple, Sway by Field
 - **Functions** for other nodes: Wind Field
+- **Lighting**: Scene Lights
 
 3D View › Add › Mesh makes the same nodes on a new object.
 
@@ -87,25 +93,43 @@ nodes can both have a slider called `strength` or a helper called `hash()`. Attr
 exception: they're shared across the chain by name, on purpose. Compile errors name the node and the
 line in the code you wrote (`node 'Wander', line 4: undefined variable "gravty"`).
 
-## Chains
+## Chains and graphs
 
 ```
-[Firefly Swarm] -> [Wander] -> [Rise] -> [Push by Field] -> [Blink] -> [Firefly Look] -> (drawn live)
-                                             ^ field                                   -> To Geometry
-                                        [Wind Field] wind
+                                              ┌─> [Firefly Look]   heads   ┐  one GPU simulation,
+[Firefly Swarm] -> [Wander] -> [Push by Field] -> [Blink]                   │  two looks
+                                   ^ field    └─> [Streak Look]    trails  ┘
+                              [Wind Field] ──> field of [Sway by Field] <- grass mesh -> To Mesh
+[Spark Ball] ─┐
+              ├─> [Join Particles] -> [Vortex] -> [Glow Look]
+[Swirl] ──────┘
 ```
 
-- **Particles** travel on Particles sockets (a Bundle socket, shown in its own colour). A chain is a
-  source followed by any number of stages. Per step, the source's `update` runs, then every stage's
-  `behave` in order; if the source has no `update`, the chain then moves each particle by its
-  velocity. `born` runs after `spawn`. The last `look` decides how particles are drawn. Every `warp`
-  runs in order where particles are shown and made real, never where they're simulated. So a Bend
-  stretches a swirl without changing how it moves: straighten it and the swirl is exactly as before.
+- **Particles** travel on Particles sockets (a Bundle socket, shown in its own colour). Per step, the
+  source's `update` runs, then every stage's `behave` in the order they're wired; if the source has no
+  `update`, the chain then moves each particle by its velocity. `born` runs after `spawn`. The last
+  `look` decides how particles are drawn. Every `warp` runs in order where particles are shown and
+  made real, never where they're simulated: straighten a Bend and the swirl is exactly as before.
 - **Meshes** travel on ordinary Geometry sockets. A GPU Mesh node (or a stage with `deform` or `warp`
   wired straight to ordinary geometry) heads a mesh chain; each later stage's `deform` and `warp` run
   in order.
-- **Functions** travel on Closure sockets. The provider's code is included once, with its own prefix,
-  and the input name becomes an alias for it. A GPU Surface offers its `sdf`.
+- **Functions** travel on Closure sockets. One function output can feed any number of nodes, in any
+  chains of the same tree; each program includes it once, with its own prefix.
+
+**How a graph is evaluated.** CodeNodes turns the graph into *pipelines*: every path from a source to
+where a stream ends (a node nothing continues from, drawn live, or a node wired into To Geometry, made
+real there). Each pipeline is one GPU program.
+
+- **Branches.** An output wired into several stages splits the stream: each branch goes its own way.
+  Branches that differ only in looks and warps **share one simulation** (the same source and born /
+  behave stages, functions and attributes): the particles are stepped once and drawn once per
+  branch. A branch with its own behaviour after the split runs its own copy of the simulation, which
+  starts identical and then diverges. The first path keeps the source node's own object; each extra
+  branch gets a hidden object in the CodeNodes Sources collection (named `source › last stage`).
+- **Merging.** Join Particles takes two streams. Everything wired after it runs on both (each source
+  keeps its own simulation), they're drawn together, and a To Geometry after it outputs both.
+- **To Geometry partway along.** It outputs the stream as it is at that point; the rest of the chain
+  still draws live.
 - **Colours on the sockets:** Particles (bundle), Mesh or Geometry (geometry), functions (closure),
   attributes (float field). Blender won't wire a Particles output into a geometry input, so particles
   reach the rest of your tree only through To Geometry.
@@ -177,6 +201,46 @@ time, lights its abdomen from `brightness`, and adds bloom in the compositor.
 Background Blender (command line, render farms) has no GPU access for add-ons, so bake first. The
 farm then renders the bake.
 
+## Baking
+
+- **Blender's Bake node after To Geometry** works like on any geometry: bake a range (Animation
+  mode), scrub it, render it with F12, with the code nodes switched off or the add-on gone. CodeNodes
+  converts each frame before Blender evaluates it (a frame_change_pre handler), which is what the
+  Bake node captures. In a script, refresh the object (`obj.update_tag()`) after baking; Blender's UI
+  does that itself.
+- **GPU Cache** bakes a live simulation itself, before any To Geometry:
+  - **Mode**: Live (simulate on the GPU every frame) or Cached (play the baked frames).
+  - **Start / End**: the frames to bake. Outside them, the nearest baked frame shows.
+  - **⟳ Bake Now** and **✕ Clear** are toggles that act as buttons.
+  - The header says what's there: `Cached 1–48 · 13.0 MB`.
+  - What's cached is the simulation of every pipeline passing through the node (its source and
+    born/behave stages); looks and warps after it stay live, so you can restyle a cached simulation.
+  - Cached frames play back when scrubbing, feed To Geometry and Render with CodeNodes, and are stored
+    next to the .blend in `codenodes_cache/<source>/` (until the file is saved, in Blender's temp folder).
+  - The format is per frame: position, velocity, age, life and each attribute as 16-bit floats,
+    zlib-compressed. Measured: 20,000 particles × 48 frames = 13.0 MB (14.25 bytes per particle per
+    frame), baked in under a second; positions within 1 mm of the live simulation.
+
+## Lighting
+
+- **Scene Lights** (Add › CodeNodes › Lighting) turns the scene's lamps (sun, point, spot, area, up to
+  8, brightest first) and world colour into a function, `light(p, n, v, albedo, roughness, metallic)`:
+  Lambert diffuse and GGX specular, the main lobes of Principled BSDF, with each lamp's size widening
+  its highlight as EEVEE's soft lamps do. The light data are hidden inputs CodeNodes keeps in step with
+  the scene (move a lamp and the light moves; nothing recompiles), in the space of the object whose
+  tree holds the node. Its inputs: intensity and world.
+- **Material Look** takes a Blender material (a Material socket) and brings in its Principled BSDF
+  values: base colour, roughness, metallic, emission (colour × strength), alpha. Wire Scene Lights'
+  `light` into it and particles are shaded by the scene's lamps; wire its `material` output into a GPU
+  Surface.
+- **GPU Surfaces** have **Lights** and **Material** inputs. With Scene Lights and a Material Look wired
+  in, the raymarched surface is lit by the scene's lamps with that material (soft self-shadows for the
+  two brightest lamps) instead of its built-in sun and sky. Side by side with the same surface made
+  real and lit by EEVEE, the two look close (see `docs/lit_compare.jpg`).
+- **Any node can declare** `// @in material mat` (a Material socket; its values arrive as `mat_base`,
+  `mat_roughness`, `mat_metallic`, `mat_emit`, `mat_alpha`) and `// @in hidden name` (a value the
+  add-on fills in, with no socket).
+
 ## Feeding it from Geometry Nodes
 
 - **Values:** a typed value, a Value or Integer node, a reroute, or the modifier's own input.
@@ -189,8 +253,9 @@ farm then renders the bake.
 
 ## Starter library: proposals to choose from
 
-Only the starters the demos need are built. Here are proposals for the rest, particles and meshes
-separately, for you to pick from:
+Only the starters the demos need are built (since 0.4 also Streak Look, Material Look, Sway by Field
+and Scene Lights). Here are proposals for the rest, particles and meshes separately, for you to pick
+from:
 
 **Particles**
 - Sources: Emit from Curve, Burst (all at once, on a trigger frame), Grid, Inside Volume
@@ -198,8 +263,8 @@ separately, for you to pick from:
 - Behaviours: Attract to Point, Orbit, Flock (align, cohere, separate, via a spatial hash), Turbulence
   (fBm), Collide with Ground, Stick to Surface, Age-based Colour, Size over Life, Kill Outside Bounds,
   Follow Curve, Springs to Rest Position (for jiggly "made of particles" objects)
-- Looks: Trails (fading history), Streaks (stretched along velocity), Sparks, Smoke Puff (soft, growing,
-  fading), Dust Motes (depth-of-field-like softness), Colour Ramp by Speed
+- Looks: Trails (fading history, beyond Streak Look's motion streak), Sparks, Smoke Puff (soft,
+  growing, fading), Dust Motes (depth-of-field-like softness), Colour Ramp by Speed
 - Effects on the whole system: Bloom Strength, Density Tint, Fade by Distance
 
 **Meshes**
@@ -218,13 +283,22 @@ and Closure sockets, and frames that show text. The same tests run on both.
 
 - **Live results are an overlay until converted:** not selectable, not in Blender's own F12, not
   visible to later nodes.
-- **Branching:** a chain is linear. A Particles output wired into two stages follows the first one.
+- **Branches made real run their own simulation:** live branches share their head's simulation, but
+  a branch that To Geometry converts steps its own copy (the same particles, computed again).
+- **Join Particles** is for particles; meshes merge with an ordinary Join Geometry after To Mesh.
+- **GPU Cache** caches particle simulations; surfaces and mesh chains bake with Blender's Bake node
+  after To Geometry.
+- **Additive glow isn't tone-mapped** in the Solid viewport: where very many glowing particles pile
+  up (a galaxy's core, a fold in a bent galaxy) it can clip to white. Lower Brightness, or use fewer,
+  larger particles.
 - **Attributes:** up to four per-particle attributes per chain.
 - **Glow isn't lighting:** the live glow and halo are drawn, not lit. They don't light your objects,
   and a render gets the look you build from the converted points.
-- **Live surfaces light themselves:** a sun from the scene's first Sun lamp, sky, soft shadows,
-  ambient occlusion and fog. Blender's lights and materials don't touch them, and they cast no shadows
-  on your objects.
+- **Lighting between GPU nodes and Blender objects:** no shadows either way. A GPU Surface without
+  Scene Lights lights itself (a sun from the scene's first Sun lamp, sky, soft shadows, ambient
+  occlusion, fog). Scene Lights reads lamps in the space of the first object using the tree; lamp
+  textures, IES, light linking and material nodes beyond the Principled BSDF's own values are ignored.
+  Particles lit by a Material Look are shaded as small spheres facing the camera.
 - **Taps and modifiers:** a mesh chain follows your tree through its tap, so a modifier stacked
   before the Geometry Nodes modifier isn't seen.
 - **Tested hardware:** NVIDIA with OpenGL only. AMD, Intel, macOS and the Vulkan backend are untested.
