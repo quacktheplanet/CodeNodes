@@ -244,8 +244,8 @@ def phase_to_geometry(st):
     head = bpy.data.objects[head_name]
     check(tg.inputs[0].name == "Particles" and tg.inputs[0].bl_idname == "NodeSocketBundle",
           "To Geometry takes the chain's Particles stream")
-    check(tg.node_tree.name.startswith("To Geometry") and tg.label.startswith("To Geometry"),
-          f"the node is called To Geometry ({tg.label})")
+    check(tg.node_tree.name.startswith("To Geometry") and tg.label.startswith("To Points"),
+          f"the To Geometry node's header says what it outputs ({tg.label})")
     me = points(bpy.data.objects[obj_name])
     names = {a.name for a in me.attributes}
     check(len(me.vertices) == head.codenodes.count and {"brightness", "phase", "velocity"} <= names,
@@ -386,6 +386,24 @@ def phase_bend_mesh(st):
     return True
 
 
+def phase_assistant(st):
+    """What Claude calls: code_node for the source, then code_stage for each step."""
+    from codenodes import agent
+    r = agent.code_node("particles", template="Spark Ball", name="Sparks", make_real=False)
+    check(r["ok"], f"code_node makes a particle source ({r.get('error', '')})")
+    a = agent.code_stage("Sparks", template="Gravity", values={"strength": 3.0})
+    b = agent.code_stage("Sparks", template="Glow Look")
+    head = bpy.data.objects[r["source"]]
+    stages = [s.split("· ")[-1] for s in links.CHAINS.get(head.name, {}).get("stages", [])]
+    check(a["ok"] and b["ok"] and a["wired"] and stages == ["Gravity", "Glow Look"],
+          f"code_stage adds and wires stages at the end of the chain ({stages})")
+    bad = agent.code_stage("Sparks", code="void behave(inout Particle p, float dt) {\n  p.velocity += gravty;\n}\n",
+                           name="Typo")
+    check(not bad["ok"] and "Typo" in bad.get("error", "") and "line 2" in bad.get("error", ""),
+          f"a mistake in a stage is reported by node and line ({bad.get('error', '')[:90]})")
+    return True
+
+
 def phase_migration(st):
     g = bpy.data.node_groups.new("Make Real", "GeometryNodeTree")
     g[gn_link.MAKE_REAL] = True
@@ -429,7 +447,8 @@ def phase_after_reopen(st):
 
 
 PLAN = [phase_blank, phase_declarations, phase_fireflies, phase_to_geometry, phase_function_link,
-        phase_bend_particles, phase_bend_mesh, phase_migration, phase_render, phase_reopen, phase_after_reopen]
+        phase_bend_particles, phase_bend_mesh, phase_assistant, phase_migration, phase_render, phase_reopen,
+        phase_after_reopen]
 STATE = {}
 
 

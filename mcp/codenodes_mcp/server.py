@@ -495,12 +495,13 @@ def code_node(kind: str = "mesh", code: str | None = None, template: str | None 
 
     New: leave `object` out (or give a new name, which the object gets exactly) and pass kind
     with `code` or a `template`:
-      "particles" (GPU Particles: `spawn`/`update`, optional `vec4 look(Particle p)`):
-          "Galaxy", "Flow", "Attractor", "Swirl", "Fountain"
+      "particles" (GPU Particles, a source: `spawn`, optional `update` and `vec4 look(Particle p)`):
+          "Galaxy", "Flow", "Attractor", "Swirl", "Fountain", "Firefly Swarm", "Spark Ball"
+          (then add stages after it with code_stage)
       "mesh" (GPU Surface: `float sdf(vec3 p)`, optional `vec3 color(vec3 p)`):
           "Castle", "Planet", "Saturn", "Donut", "Rounded Box", "Gyroid Ball", "Blob"
       "deform" (GPU Mesh: `void deform(inout Vertex v)` on the mesh wired into it):
-          "Wave", "Noise Displace", "Twist"
+          "Wave", "Noise Displace", "Mesa", "Twist"
       "shape" (the shape language): "Desk Lamp", "Vase"
     GPU nodes draw live on the GPU; `make_real` (default true) puts a To Geometry node after a new
     one so it is real geometry that renders and later nodes can use.
@@ -516,6 +517,33 @@ def code_node(kind: str = "mesh", code: str | None = None, template: str | None 
         if value is not None:
             args[key] = value
     return _call("code_node", **args)
+
+
+@mcp.tool()
+def code_stage(object: str, template: str | None = None, code: str | None = None, name: str | None = None,
+               after: str | None = None, values: dict | None = None) -> dict:
+    """Add a GPU Stage node to an object's chain of code nodes (made with code_node) and wire it in.
+    The whole chain compiles into one GPU program.
+
+    A stage's code defines one or more of: `void behave(inout Particle p, float dt)` (change the
+    velocity every step; the chain moves the particle), `void born(inout Particle p)`,
+    `vec4 look(Particle p)` (how it draws live; add `// @shape glow` or `// @shape firefly`),
+    `vec3 warp(vec3 q)` (bends particles and meshes where they're shown), `void deform(inout Vertex v)`.
+    Its code declares its sockets:
+      // @in float name default [min max]     // @in int name default [min max]
+      // @in color name r g b                 // @in func vec3 name(vec3 p) [= value when unwired]
+      // @out func name                       // @out attr name [default]  (then use p.name)
+    Templates: "Wander", "Rise", "Gravity", "Vortex", "Drag", "Blink", "Push by Field",
+    "Collide with Shape", "Glow Look", "Firefly Look", "Bend", "Taper", "Ripple", "Wind Field".
+    It goes after `after` (a node group name from an earlier result) or at the end of the chain,
+    before its To Geometry node. Wire function outputs into function inputs with nodes_edit (link).
+    """
+    args = {"object": object}
+    for key, value in (("template", template), ("code", code), ("name", name), ("after", after),
+                       ("values", values)):
+        if value is not None:
+            args[key] = value
+    return _call("code_stage", **args)
 
 
 def main():

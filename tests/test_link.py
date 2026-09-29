@@ -111,7 +111,7 @@ def check_add_objects():
 
     made = {}
     for kind in ("MESH", "SHAPE", "PARTICLES"):
-        # a GPU Surface is drawn live; with Make Real after it the object gets the real donut
+        # a GPU Surface is drawn live; with To Geometry after it the object gets the real donut
         r = bpy.ops.codenodes.add_object(kind=kind, make_real=(kind == "MESH"))
         obj = ctx.view_layer.objects.active
         found = gn_link.host_code_nodes(obj)
@@ -123,7 +123,12 @@ def check_add_objects():
         if kind == "MESH":
             check(real is not None and any(l.from_node == node and l.to_node == real for l in tree.links)
                   and any(l.from_node == real and l.to_node == out for l in tree.links),
-                  f"  wired through Make Real to the output ({tree.name} ← {node.node_tree.name})")
+                  f"  wired through To Geometry to the output ({tree.name} ← {node.node_tree.name})")
+        elif kind == "PARTICLES":
+            check(node.outputs[0].bl_idname == "NodeSocketBundle"
+                  and not any(l.from_node == node and l.to_node == out for l in tree.links),
+                  f"  particles are drawn live; their Particles socket reaches the output only through "
+                  f"To Geometry ({node.node_tree.name})")
         else:
             check(any(l.from_node == node and l.to_node == out for l in tree.links),
                   f"  wired to the output ({tree.name} ← {node.node_tree.name})")
@@ -132,7 +137,7 @@ def check_add_objects():
     gn_link.sync()
     real = next(n for n in tree.nodes if n.type == 'GROUP' and gn_link.is_make_real(n.node_tree))
     check("major" in node.inputs and "Template" in node.inputs and "Resolution" in real.inputs,
-          f"the donut's sliders and template are on its node, Resolution on Make Real ({[s.name for s in node.inputs][:4]} / {[s.name for s in real.inputs]})")
+          f"the donut's sliders and template are on its node, Resolution on To Geometry ({[s.name for s in node.inputs][:4]} / {[s.name for s in real.inputs]})")
     from codenodes import live as _live
     _live.rebuild(gn_link.source_of(node.node_tree))
     bpy.context.view_layer.update()

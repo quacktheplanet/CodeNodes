@@ -34,6 +34,10 @@ import re
 from . import decl
 from .sdf_code import SdfCodeError
 
+# composed source (sha1) -> [(first line, last line, node name, that node's own code lines)], so compiler
+# errors can name the node and the line in the code you wrote
+SEGMENTS: dict[str, list] = {}
+
 # top-level declarations (functions, constants) that get the per-node prefix; `void` included
 _DECL = re.compile(r"^(?:const\s+)?(?:void|float|int|uint|bool|[iu]?vec[234]|mat[234])\s+([A-Za-z_]\w*)\s*[\(=;]",
                    re.M)
@@ -87,6 +91,38 @@ class Composite:
         return self.values.get(name, default)
 
 
+def translate_errors(text, source):
+    """Rewrite "line N: ..." (N a line of the composed `source`) as the node and the line in its own
+    code. A chain of one keeps the plain "line N" wording."""
+    import hashlib
+    segs = SEGMENTS.get(hashlib.sha1(source.encode()).hexdigest())
+    if not segs:
+        return text
+    owners = {s[2] for s in segs}
+    out, mapped = [], False
+    for block in text.split("\n"):
+        m = re.match(r"^line (\d+): (.*)$", block)
+        if not m:
+            if block.startswith("    ") and mapped:
+                continue                   # the composed line: the node's own line is shown instead
+            mapped = False
+            out.append(block)
+            continue
+        n, msg = int(m.group(1)), m.group(2)
+        hit = next(((a, name, code) for a, b, name, code in segs if a <= n <= b), None)
+        if hit is None:
+            mapped = False
+            out.append(block)
+            continue
+        a, name, code = hit
+        k = n - a + 1
+        where = f"line {k}" if len(owners) == 1 else f"node '{name.replace('CN · ', '')}', line {k}"
+        own = code[k - 1].strip() if code and 1 <= k <= len(code) else ""
+        out.append(f"{where}: {msg}" + (f"\n    {own}" if own else ""))
+        mapped = True
+    return "\n".join(out)
+
+
 def _ident(name):
     return re.sub(r"\W", "_", name)
 
@@ -100,10 +136,10 @@ class _Builder:
         self.out = Composite()
         self.done_providers = {}      # id(unit) -> prefix
 
-    def add(self, text, owner=None):
+    def add(self, text, owner=None, code=None):
         n = text.count("\n")
         if owner is not None:
-            self.out.segments.append((self.line, self.line + n - 1, owner, 1))
+            self.out.segments.append((self.line, self.line + n - 1, owner, code))
         self.chunks.append(text)
         self.line += n
 
@@ -165,7 +201,7 @@ class _Builder:
                 if len(self.out.attrs) >= decl.MAX_ATTRS:
                     raise SdfCodeError(f"a chain can carry at most {decl.MAX_ATTRS} per-particle attributes")
                 self.out.attrs.append((a.name, a.default))
-        self.add(body + "\n", owner=u.name)
+        self.add(body + "\n", owner=u.name, code=u.code.splitlines())
         return d
 
     def provider(self, p):
@@ -188,6 +224,10 @@ class _Builder:
         n_pre = pre.count("\n")
         self.out.segments = [(a + n_pre, b + n_pre, who, f) for a, b, who, f in self.out.segments]
         self.out.source = pre + "".join(self.chunks)
+        import hashlib
+        if len(SEGMENTS) > 128:
+            SEGMENTS.clear()
+        SEGMENTS[hashlib.sha1(self.out.source.encode()).hexdigest()] = self.out.segments
         return self.out
 
 

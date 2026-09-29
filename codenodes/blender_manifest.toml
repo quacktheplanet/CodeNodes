@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "codenodes"
-version = "0.2.0"
+version = "0.3.0"
 name = "CodeNodes"
-tagline = "GPU code as Geometry Nodes: live particles, surfaces, mesh code"
+tagline = "Code nodes you write, chained on the GPU in Geometry Nodes"
 maintainer = "Lucas DeMeritt"
 type = "add-on"
 tags = ["Mesh", "Modeling", "Development"]

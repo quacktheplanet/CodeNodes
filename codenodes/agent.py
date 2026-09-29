@@ -743,6 +743,8 @@ def code_node(kind="mesh", code=None, template=None, name=None, object=None, val
     """
     from . import gn_link, live
     kinds = {"mesh": 'MESH', "shape": 'SHAPE', "particles": 'PARTICLES', "deform": 'DEFORM'}
+    if kind == "stage":
+        return {"ok": False, "error": "a stage goes into an existing chain: use code_stage(object, template=...)"}
     if kind not in kinds:
         return {"ok": False, "error": f"kind must be one of {', '.join(kinds)}"}
     obj = bpy.data.objects.get(object) if object else None
@@ -804,11 +806,95 @@ def code_node(kind="mesh", code=None, template=None, name=None, object=None, val
     if real is not None:
         result["make_real"] = {sock.name: _plain(getattr(sock, "default_value", None)) for sock in real.inputs}
     elif s.kind in gn_link.GPU_KINDS:
-        result["note"] = ("drawn live on the GPU only; call again with make_real on a new object, or add a Make "
-                          "Real node after it, to get real geometry")
+        result["note"] = ("drawn live on the GPU only; call again with make_real on a new object, or add a To "
+                          "Geometry node after it, to get real geometry")
     if err or problems:
         result["error"] = "; ".join([e for e in (err,) if e] + problems)
     return result
+
+
+def code_stage(object, template=None, code=None, name=None, after=None, values=None):
+    """Add a GPU Stage node to an object's chain of code nodes and wire it in.
+
+    A stage is one step you write: `behave(p, dt)` / `born(p)` / `look(p)` for particles, `warp(q)` for
+    particles or meshes, `deform(v)` for meshes, or only functions for other nodes (`// @out func`).
+    Its code declares its own sockets (`// @in float|int|color|func ...`, `// @out func|attr ...`).
+    It goes after `after` (a node group name, e.g. "Code · Wander") or at the end of the object's
+    chain, before its To Geometry node if there is one. Returns its node group name and sockets.
+    """
+    from . import gn_link, gn_sockets, live
+    obj = bpy.data.objects.get(object)
+    found = gn_link.host_code_nodes(obj) if obj is not None else []
+    if not found:
+        return {"ok": False, "error": f"'{object}' has no code nodes; make one with code_node first"}
+    tree = found[0][0]
+    by_group = {n.node_tree.name: n for _t, n in found}
+    if after:
+        prev = by_group.get(after)
+        if prev is None:
+            return {"ok": False, "error": f"no code node '{after}' (there are: {', '.join(by_group)})"}
+    else:
+        head = next((n for _t, n in found if gn_link.source_of(n.node_tree).codenodes.kind
+                     in ('PARTICLES', 'DEFORM')), found[0][1])
+        prev, seen = head, {head.name}
+        while True:
+            nxt = gn_link._next_stage(tree, prev, "Particles", "Particles") \
+                or gn_link._next_stage(tree, prev, "Mesh", "Mesh") or gn_link._next_stage(tree, prev, "Geometry", "Mesh")
+            if nxt is None or nxt.name in seen:
+                break
+            seen.add(nxt.name)
+            prev = nxt
+    try:
+        group, err = gn_link.create('STAGE', template, name, code)
+    except KeyError as exc:
+        return {"ok": False, "error": str(exc.args[0])}
+    node = gn_link.insert(tree, group, (prev.location.x + prev.width + 60, prev.location.y))
+    node.width = 200
+    src = gn_link.source_of(group)
+    d = gn_sockets.decls_of(src)
+    stream = None
+    if d.takes_particles() and prev.outputs.get("Particles") is not None:
+        stream = ("Particles", "Particles")
+    elif d.takes_mesh():
+        out = prev.outputs.get("Mesh") or prev.outputs.get("Geometry")
+        if out is not None and out.bl_idname == "NodeSocketGeometry":
+            stream = (out.name, "Mesh")
+    if stream is not None:
+        out = prev.outputs[stream[0]]
+        targets = [l.to_socket for l in tree.links if l.from_socket == out]
+        for l in [l for l in tree.links if l.from_socket == out]:
+            tree.links.remove(l)
+        tree.links.new(out, node.inputs[stream[1]])
+        new_out = node.outputs.get(stream[1])
+        for sock in targets:
+            if new_out is not None:
+                try:
+                    tree.links.new(new_out, sock)
+                except RuntimeError:
+                    pass
+    gn_link.sync()
+    problems = []
+    for key, value in (values or {}).items():
+        sock = node.inputs.get(key)
+        if sock is None:
+            problems.append(f"no input '{key}' (it has: {', '.join(s.name for s in node.inputs)})")
+            continue
+        try:
+            sock.default_value = value
+        except (TypeError, ValueError) as exc:
+            problems.append(f"{key}: {exc}")
+    gn_link.sync()
+    live.rebuild(src)
+    head_err = ""
+    from . import links
+    for h in links.heads_of(src):
+        ho = bpy.data.objects.get(h)
+        if ho is not None:
+            head_err = links.check_compile(ho) or head_err
+    msg = "; ".join(e for e in [err, head_err] + problems if e)
+    return {"ok": not msg, "object": obj.name, "tree": tree.name, "node": group.name, "after": prev.name,
+            "wired": bool(stream), "inputs": [s.name for s in node.inputs], "outputs": [s.name for s in node.outputs],
+            "status": node.label, **({"error": msg} if msg else {})}
 
 
 def nodes_set_inputs(object, values, modifier=None):

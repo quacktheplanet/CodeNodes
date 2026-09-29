@@ -171,12 +171,12 @@ void update(inout Particle p, float dt) {
 
 
 def check_source(source):
-    """`source` is a composed chain (chain.compose_particles): it always has cnSpawn / cnUpdate."""
+    """Raw particle code (a source node's own code) or a composed chain (which always has cnSpawn)."""
     for bad in ("imageStore", "imageLoad", "gl_GlobalInvocationID"):
         if bad in source:
             raise SdfCodeError(f"'{bad}' isn't allowed here; just set the particle's fields")
     if "void cnSpawn(" not in source:
-        raise SdfCodeError("the code must define:  void spawn(inout Particle p) { ... }")
+        compose_single(source)          # raises a clear message: no spawn(), a bad declaration, ...
 
 
 def full_source(source, params, main=None):
@@ -375,8 +375,9 @@ class Sim:
 def chain_errors(log, offset, source):
     """Compiler errors worded for the user. `source` is a composed chain, whose segments name the
     nodes; user_errors quotes the offending line, which carries the node's prefix (n2_...)."""
+    from . import chain
     from .sdf_code import user_errors
-    return user_errors(log, offset, source)
+    return chain.translate_errors(user_errors(log, offset, source), source)
 
 
 _sims: dict[str, Sim] = {}

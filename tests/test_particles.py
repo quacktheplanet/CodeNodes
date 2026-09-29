@@ -143,9 +143,9 @@ def run():
     check(abs(positions(fall)[:, 2].mean() - z0) < 1e-5, "returning to the start frame resets cleanly")
 
     # --- errors -----------------------------------------------------------------------
-    bad = api.code_to_particles("void spawn(inout Particle p) { p.life = 1.0; }", name="Bad")
-    check(not bad["ok"] and "void update(inout Particle p, float dt)" in bad["error"],
-          "a missing update() is explained")
+    bad = api.code_to_particles("void update(inout Particle p, float dt) { p.life = 1.0; }", name="Bad")
+    check(not bad["ok"] and "void spawn(inout Particle p)" in bad["error"],
+          "a missing spawn() is explained (update() is optional: without it particles move by velocity)")
     typo = api.code_to_particles(FALL.replace("gravity * dt", "gravty * dt"), name="Bad2")
     check(not typo["ok"] and "line 8" in typo["error"] and "gravty" in typo["error"],
           f"a typo names the line it is on ({typo['error'].splitlines()[-2].strip()})")

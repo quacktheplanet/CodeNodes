@@ -39,16 +39,17 @@ CODE_KINDS = GPU_KINDS + ('STAGE',)     # kept as text and run on demand (not bu
 TAP = "codenodes_tap"              # on a hidden tap tree: which GPU Mesh source it feeds
 
 KINDS = {
-    'PARTICLES': ("GPU Particles", "A particle source you write, on the GPU. Wire stages after it (what the "
-                                   "particles do, how they look); drawn live, add To Geometry to use them in "
-                                   "nodes or renders", 'PARTICLES'),
+    'PARTICLES': ("GPU Particles", "A particle source you write. Runs and draws on the GPU (live) by default; "
+                                   "wire stages after it (what the particles do, how they look). Only a To "
+                                   "Geometry node turns it into real points", 'PARTICLES'),
     'STAGE': ("GPU Stage", "One step you write in a chain of code nodes: a behaviour, a look, a warp, a mesh "
-                           "deform or functions for other nodes. Its code declares its own inputs and outputs",
-              'NODETREE'),
-    'MESH': ("GPU Surface (SDF)", "A surface from a signed distance function, raymarched live on the GPU; "
-                                  "add To Geometry to turn it into a mesh", 'SCRIPT'),
-    'DEFORM': ("GPU Mesh", "Code run on every vertex of the mesh wired into it (deform, displace, recolour); "
-                           "drawn live, add To Geometry for the modified mesh", 'MOD_WAVE'),
+                           "deform or functions for other nodes. Its code declares its own inputs and outputs; "
+                           "it runs on the GPU as part of the chain", 'NODETREE'),
+    'MESH': ("GPU Surface (SDF)", "A surface from a signed distance function. Raymarched on the GPU (live) by "
+                                  "default; only a To Geometry node turns it into a mesh", 'SCRIPT'),
+    'DEFORM': ("GPU Mesh", "Code run on every vertex of the mesh wired into it (deform, displace, recolour). "
+                           "Runs and draws on the GPU (live) by default; only a To Geometry node gives the "
+                           "modified mesh", 'MOD_WAVE'),
     'SHAPE': ("Code Shape", "A model built from a parametric description: exact edges, clean quads "
                             "(real geometry straight away)", 'MESH_CYLINDER'),
 }
@@ -808,7 +809,11 @@ def add_object(kind, key=None, source=None, label=None, location=(0.0, 0.0, 0.0)
     gin, gout = tree.nodes.new("NodeGroupInput"), tree.nodes.new("NodeGroupOutput")
     gin.location, gout.location = (-420, 0), (320, 0)
     node = insert(tree, group, (-200, 60))
-    tree.links.new(node.outputs["Geometry"], gout.inputs["Geometry"])
+    out = _stream_out(node)
+    if out is not None and out.bl_idname == "NodeSocketGeometry":
+        tree.links.new(out, gout.inputs["Geometry"])
+    # particles travel on a Particles (bundle) socket: they are drawn live, and reach the geometry
+    # output only through To Geometry
     if kind == 'DEFORM':
         # something for the vertex code to work on: a smooth sphere, wired into the Mesh input
         import bmesh
@@ -821,7 +826,9 @@ def add_object(kind, key=None, source=None, label=None, location=(0.0, 0.0, 0.0)
     mod = obj.modifiers.new("CodeNodes", 'NODES')
     mod.node_group = tree
     if make_real and kind in GPU_KINDS:
-        insert_make_real(tree, node)
+        real = insert_make_real(tree, node)
+        if not real.outputs["Geometry"].is_linked:
+            tree.links.new(real.outputs["Geometry"], gout.inputs["Geometry"])
         for n in tree.nodes:
             n.select = False
         node.select = True
@@ -1177,14 +1184,21 @@ def sync_make_real():
             live.request(src)
             gpu_live.redraw()
         cost = _made_real_ms(s.stats)
+        what = real_label(src)
         for node in real_nodes.get(src.name, []):
             if s.real_mode == 'RENDER_ONLY':
-                label = f"{MAKE_REAL_NAME} · for render"
+                label = f"{what} · for render"
             else:
-                label = MAKE_REAL_NAME + (f" · {cost} ms" if cost is not None else "")
+                label = what + (f" · {cost} ms" if cost is not None else "")
             if node.label != label:
                 node.label = label
     return host_map
+
+
+def real_label(src):
+    """What a To Geometry node's header says: what it outputs."""
+    from . import links
+    return "To Points" if links.ekind(src) == 'PARTICLES' else "To Mesh"
 
 
 def _made_real_ms(stats):

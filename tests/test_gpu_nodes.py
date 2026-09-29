@@ -1,4 +1,4 @@
-"""GPU nodes in real Blender: live drawing, settings on the node, Make Real, Emit From, GPU Mesh,
+"""GPU nodes in real Blender: live drawing, settings on the node, To Geometry, Emit From, GPU Mesh,
 the Edit Code pop-up, and rendering with CodeNodes. Needs a window (the GPU isn't available with -b):
 
     blender --factory-startup --python tests/test_gpu_nodes.py
@@ -157,11 +157,10 @@ def phase_menu_and_particles(st):
     texts = [t for _i, t in labels]
     check(texts[0] == "" and labels[0][0] == "codenodes.gn_add_make_real" and "GPU Particles" in texts
           and "GPU Surface (SDF)" in texts and "GPU Mesh" in texts,
-          "the menu offers Make Real and the GPU Particles / Surface / Mesh templates")
+          "the menu offers To Geometry and the GPU Particles / Surface / Mesh templates")
     with ctx(area, region):
         res = bpy.ops.codenodes.gn_add('EXEC_DEFAULT', kind='PARTICLES', template="Galaxy", use_transform=False)
-    node = tree.nodes.active
-    tree.links.new(node.outputs["Geometry"], next(n for n in tree.nodes if n.type == 'GROUP_OUTPUT').inputs[0])
+    node = tree.nodes.active                # particles travel on a Particles socket: drawn live, no link needed
     settle()
     names = [s.name for s in node.inputs]
     check(res == {'FINISHED'} and names[:4] == [gn_sockets.EDIT, "Template", "Count", "Emit From"]
@@ -294,8 +293,8 @@ def phase_make_real_particles(st):
     mr = gn_link.insert_make_real(tree, node)
     settle()
     names = [s.name for s in mr.inputs]
-    check(names == ["Geometry", "When", "Max Points", "Keep Velocity", "Keep Age"],
-          f"Make Real after particles: When, Max Points, Keep Velocity, Keep Age on the node ({names})")
+    check(names == ["Particles", "When", "Max Points", "Keep Velocity", "Keep Age"],
+          f"To Geometry after particles: Particles in, When, Max Points, Keep Velocity, Keep Age ({names})")
     check(src.codenodes.real_mode == 'EVERY_FRAME', "Automatic means every frame for particles")
     bpy.context.scene.frame_set(10)
     settle(1)
@@ -303,7 +302,8 @@ def phase_make_real_particles(st):
     attrs = {a.name for a in me.attributes}
     check(len(me.vertices) == 20_000 and {"velocity", "speed", "age", "life"} <= attrs,
           f"it makes 20,000 real points with velocity, speed, age and life ({len(me.vertices):,})")
-    check(mr.label.startswith("Make Real") and "ms" in mr.label, f"its header shows the cost ('{mr.label}')")
+    check(mr.label.startswith("To Points") and "ms" in mr.label,
+          f"its header says what it outputs and what that costs ('{mr.label}')")
     mr.inputs["Max Points"].default_value = 5000
     mr.inputs["Keep Age"].default_value = False
     settle()
@@ -312,7 +312,7 @@ def phase_make_real_particles(st):
     attrs = {a.name for a in src.data.attributes}
     check(len(src.data.vertices) == 5000 and "age" not in attrs and "velocity" in attrs,
           "Max Points and Keep Age on the node limit what's made real")
-    # further nodes after Make Real: instance a small cube on every point
+    # further nodes after To Geometry: instance a small cube on every point
     gout = next(n for n in tree.nodes if n.type == 'GROUP_OUTPUT')
     inst = tree.nodes.new("GeometryNodeInstanceOnPoints")
     cube = tree.nodes.new("GeometryNodeMeshCube")
@@ -400,7 +400,7 @@ def phase_surface(st):
     NUMBERS["castle_make_real_ms"] = round((time.perf_counter() - t0) * 1000)
     me = evaluated_mesh(obj)
     check(len(me.polygons) > 20_000 and mr.inputs["Resolution"].default_value == 192,
-          f"Make Real meshes it at the template's resolution ({len(me.polygons):,} faces at "
+          f"To Geometry meshes it at the template's resolution ({len(me.polygons):,} faces at "
           f"{mr.inputs['Resolution'].default_value}, {NUMBERS['castle_make_real_ms']} ms)")
     st["castle_host"] = obj.name
     return True
@@ -470,8 +470,7 @@ def phase_render(st):
     for n in [n for n in tree.nodes if n.bl_idname in ("GeometryNodeInstanceOnPoints", "GeometryNodeMeshCube",
                                                       "GeometryNodeRealizeInstances")]:
         tree.nodes.remove(n)
-    tree.links.new(node.outputs["Geometry"], gout.inputs[0])
-    settle()
+    settle()                                # a live-only particle node feeds nothing in the tree
     src = gn_link.source_of(node.node_tree)
     check(src.codenodes.real_mode == "NONE", "the galaxy is live-only again")
     seen = {}

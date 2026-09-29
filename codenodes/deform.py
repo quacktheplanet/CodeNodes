@@ -69,6 +69,26 @@ void deform(inout Vertex v) {
   v.color = vec4(mix(vec3(0.35, 0.3, 0.25), vec3(0.85, 0.8, 0.72), clamp(h * 2.0 + 0.5, 0.0, 1.0)), 1.0);
 }
 """,
+    "Mesa": """\
+// Mesa: a rocky plateau rising out of a flat grid: soft-edged, roughened by noise, coloured by height,
+// with a flat summit (put something on it).
+// @param height 1.1 0.0 4.0
+// @param radius 2.4 0.5 6.0
+// @param rough 0.22 0.0 1.0
+void deform(inout Vertex v) {
+  vec3 p = v.position;
+  float r = length(p.xy) + (fbm3(p * 1.1 + 3.0) - 0.5) * 0.9;
+  float mesa = 1.0 - smoothstep(radius * 0.8, radius * 1.1, r);
+  float cliff = mesa * height + (fbm3(p * 3.2) - 0.5) * rough * (0.4 + mesa);
+  float ground = (fbm3(p * 0.6 + 7.0) - 0.5) * 0.25;
+  float top = smoothstep(radius * 0.35, radius * 0.1, length(p.xy));
+  v.position.z += mix(cliff, height, top * mesa) + ground;
+  v.value = v.position.z;
+  float t = clamp(v.position.z / max(height, 1e-3), 0.0, 1.0);
+  vec3 rock = mix(vec3(0.30, 0.27, 0.23), vec3(0.66, 0.60, 0.50), t);
+  v.color = vec4(mix(vec3(0.20, 0.30, 0.14), rock, smoothstep(0.05, 0.3, t)), 1.0);
+}
+""",
     "Twist": """\
 // Twist: turn the mesh around its Z axis, more the higher it goes.
 // @param turns 0.5 -4.0 4.0
@@ -121,7 +141,9 @@ def shader_for(source):
     info.compute_source(code)
     shader, err, log = sampler._compile_capturing(info)
     if shader is None:
-        raise SdfCodeError("the code didn't compile:\n" + user_errors(log, head.count("\n"), source))
+        from . import chain
+        raise SdfCodeError("the code didn't compile:\n"
+                           + chain.translate_errors(user_errors(log, head.count("\n"), source), source))
     if len(_shaders) > 24:
         _shaders.clear()
     _shaders[key] = (shader, params)

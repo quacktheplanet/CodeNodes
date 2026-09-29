@@ -7,10 +7,10 @@ samples it on the GPU and turns it into a real, editable, renderable mesh.
 bl_info = {
     "name": "CodeNodes",
     "author": "Lucas DeMeritt",
-    "version": (0, 2, 0),
+    "version": (0, 3, 0),
     "blender": (5, 0, 0),
     "location": "Geometry Nodes > Add > CodeNodes; View3D > Add > Mesh; Render > Render with CodeNodes",
-    "description": "GPU code inside Geometry Nodes: live particles, raymarched surfaces, mesh code, To Geometry",
+    "description": "Code nodes you write, inside Geometry Nodes: chains of GPU stages, live particles, surfaces, mesh code",
     "category": "Mesh",
 }
 

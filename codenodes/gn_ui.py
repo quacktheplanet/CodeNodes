@@ -68,9 +68,10 @@ class CODENODES_OT_gn_add(bpy.types.Operator):
 class CODENODES_OT_gn_add_make_real(bpy.types.Operator):
     bl_idname = "codenodes.gn_add_make_real"
     bl_label = "To Geometry"
-    bl_description = ("Add a To Geometry node: it turns the GPU node or chain before it into real geometry "
-                      "(points with every per-particle attribute, or a mesh) that later nodes and renders can "
-                      "use, like Realize Instances. With a GPU node selected, it goes right after it")
+    bl_description = ("Add a To Geometry node. Code nodes run and draw on the GPU by default; this is the one "
+                      "node that turns the GPU node or chain before it into real geometry (To Points after "
+                      "particles, To Mesh after a surface or mesh chain) that later nodes and renders can use, "
+                      "like Realize Instances. With a GPU node selected, it goes right after it")
     bl_options = {'REGISTER', 'UNDO'}
 
     use_transform: BoolProperty(default=True, options={'HIDDEN', 'SKIP_SAVE'})

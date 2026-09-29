@@ -220,6 +220,8 @@ class CODENODES_MT_add_templates(bpy.types.Menu):
         from . import gn_link
         layout = self.layout
         for kind, (label, _desc, icon) in gn_link.KINDS.items():
+            if kind == 'STAGE':
+                continue                      # stages go into chains (Shift A in Geometry Nodes)
             layout.label(text=label, icon=icon)
             for key in gn_link.TEMPLATES[kind]:
                 op = layout.operator("codenodes.add_object", text=f"    {key}")

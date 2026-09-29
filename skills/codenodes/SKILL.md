@@ -56,7 +56,18 @@ can wire it into more nodes (a Transform, a Join, an Instance on Points). Update
   wired into the node's Mesh input; Vertex has position, normal, color (vec4), value, index.
   To Geometry gives the same topology with new positions and `color` / `value` attributes.
 
-GPU nodes (mesh, particles, deform) are drawn live in the viewport and are not real
+- **stage** (GLSL, GPU Stage): one step in a chain, added with `code_stage(object, template=...
+  or code=...)` after a particles or deform node. It defines `behave(p, dt)` (change velocity;
+  the chain moves the particle), `born(p)`, `look(p)` (with `// @shape glow|firefly`), `warp(q)`
+  (bends particles and meshes alike, without changing the simulation) and/or `deform(v)`.
+  Its sockets come from its code: `// @in float|int name default min max`, `// @in color name r g b`,
+  `// @in func vec3 name(vec3 p)`, `// @out func name`, `// @out attr name default` (then `p.name`
+  in any later node, and an attribute after To Geometry). A whole chain compiles into one GPU
+  program; errors come back as `node 'Wander', line 4: ...`. Example: `code_node("particles",
+  template="Firefly Swarm", values={"Emit From": "Ground"})`, then `code_stage` Wander, Rise, Blink,
+  Firefly Look.
+
+GPU nodes (mesh, particles, deform, stages) are drawn live in the viewport and are not real
 geometry until a To Geometry node follows them; `code_node` adds one by default. `render()`
 includes live-only GPU nodes too (they're made real just for that frame).
 

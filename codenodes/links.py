@@ -110,6 +110,23 @@ def composite(head):
     return comp, comp.values_from(lookup)
 
 
+def check_compile(head):
+    """Compose and compile a head's chain on the GPU now. "" or the error (node and line)."""
+    from . import deform, gpu_guard, particles
+    from .sdf_code import SdfCodeError
+    try:
+        comp, _values = composite(head)
+        if not gpu_guard.allowed():
+            return ""
+        if ekind(head) == 'PARTICLES':
+            particles.get_sim(head.name, comp.source, head.codenodes.count)
+        elif ekind(head) == 'DEFORM':
+            deform.shader_for(comp.source)
+        return ""
+    except SdfCodeError as exc:
+        return str(exc)
+
+
 def forget(name=None):
     if name is None:
         _cache.clear()
