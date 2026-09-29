@@ -19,3 +19,5 @@ examples/out/
 
 # Node (for tests/web_shape_check.mjs)
 node_modules/
+
+examples/gpu_demo_out/

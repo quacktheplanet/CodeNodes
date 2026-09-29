@@ -2,7 +2,7 @@
 
     blender --factory-startup --window-geometry 0 0 1600 960 --python examples/gpu_demo.py -- <out folder>
 
-Needs a window (the GPU isn't available with -b). Writes codenodes_demo_v4.blend, renders and
+Needs a window (the GPU isn't available with -b). Writes codenodes_demo_v4_1.blend, renders and
 screenshots, then quits. Four scenes:
 
 Fireflies (night falls on the Aerie castle):
@@ -47,7 +47,7 @@ from codenodes import gn_link, gpu_live, live  # noqa: E402
 args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = os.path.abspath(args[0] if args else os.path.join(ROOT, "examples", "gpu_demo_out"))
 os.makedirs(OUT, exist_ok=True)
-BLEND = os.path.join(OUT, "codenodes_demo_v4.blend")
+BLEND = os.path.join(OUT, "codenodes_demo_v4_1.blend")
 print("CodeNodes demo: building (this window closes by itself)", flush=True)
 FIREFLY_SIZE = 0.03
 
@@ -202,7 +202,7 @@ def firefly_parts():
     return fly, w
 
 
-def flap_rotation(tree, x, y, phase_from, sign):
+def flap_rotation(tree, x, y, phase_from, sign, speed_socket=None):
     """Rotation per point: face along the velocity, then flap the wing about the body's axis."""
     n = tree.nodes
     vel = n.new("GeometryNodeInputNamedAttribute")
@@ -245,12 +245,82 @@ def flap_rotation(tree, x, y, phase_from, sign):
     L.new(s1.outputs[0], sn.inputs[0])
     L.new(sn.outputs[0], amp.inputs[0])
     L.new(ang.outputs[0], axis_angle.inputs["Angle"])
+    if speed_socket is not None:
+        L.new(speed_socket, m1.inputs[1])
     L.new(align.outputs["Rotation"], rot.inputs["Rotation"])
     L.new(axis_angle.outputs["Rotation"], rot.inputs["Rotate By"])
     for i, node in enumerate((vel, ph, t, m1, s1, sn, amp, axis_angle, align, rot)):
         node.location = (x + (i % 4) * 170, y - (i // 4) * 170)
         node.hide = True
     return rot, align
+
+
+def firefly_model_group(fly, wing):
+    """One tidy node group: a little firefly on every point (body faces along the velocity, two wings
+    flapping from each point's phase, the abdomen glowing with its brightness)."""
+    from codenodes import gn_sockets
+    g = bpy.data.node_groups.new("Firefly Model", "GeometryNodeTree")
+    g.description = ("A little firefly on every point: the body faces along its velocity, the wings flap from "
+                     "each point's phase, and the abdomen glows with its brightness")
+    iface = g.interface
+    iface.new_socket("Points", in_out="INPUT", socket_type="NodeSocketGeometry")
+    for name, default, lo, hi in (("Size", FIREFLY_SIZE, 0.0, 1.0), ("Flap Speed", 18.0, 0.0, 60.0),
+                                  ("Glow Strength", 1.0, 0.0, 20.0)):
+        item = iface.new_socket(name, in_out="INPUT", socket_type="NodeSocketFloat")
+        item.default_value, item.min_value, item.max_value = default, lo, hi
+    iface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    gn_sockets.apply_tips(g, {
+        "Points": "Points to put fireflies on: the To Points output of a firefly chain (it carries velocity, "
+                  "phase and brightness)",
+        "Size": "Size of each firefly, in metres",
+        "Flap Speed": "Wing beats per second",
+        "Glow Strength": "Multiplies each firefly's glow (the brightness from the Blink / Firefly Look nodes)"},
+        {"Geometry": "The fireflies, ready to render"})
+    n, L = g.nodes, g.links
+    gin, gout = n.new("NodeGroupInput"), n.new("NodeGroupOutput")
+    # glow: brightness *= Glow Strength (the Firefly Glow material reads "brightness")
+    b_in = n.new("GeometryNodeInputNamedAttribute")
+    b_in.data_type = 'FLOAT'
+    b_in.inputs["Name"].default_value = "brightness"
+    mul = n.new("ShaderNodeMath")
+    mul.operation = 'MULTIPLY'
+    store = n.new("GeometryNodeStoreNamedAttribute")
+    store.data_type = 'FLOAT'
+    store.domain = 'POINT'
+    store.inputs["Name"].default_value = "brightness"
+    L.new(gin.outputs["Points"], store.inputs["Geometry"])
+    L.new(b_in.outputs["Attribute"], mul.inputs[0])
+    L.new(gin.outputs["Glow Strength"], mul.inputs[1])
+    L.new(mul.outputs[0], store.inputs["Value"])
+    info_body = n.new("GeometryNodeObjectInfo")
+    info_body.inputs["Object"].default_value = fly
+    info_wing = n.new("GeometryNodeObjectInfo")
+    info_wing.inputs["Object"].default_value = wing
+    for inf in (info_body, info_wing):
+        inf.transform_space = 'ORIGINAL'
+    body_vel = n.new("GeometryNodeInputNamedAttribute")
+    body_vel.data_type = 'FLOAT_VECTOR'
+    body_vel.inputs["Name"].default_value = "velocity"
+    body_align = n.new("FunctionNodeAlignRotationToVector")
+    body_align.axis = 'X'
+    L.new(body_vel.outputs["Attribute"], body_align.inputs["Vector"])
+    lw_rot, _ = flap_rotation(g, -200, -500, "phase", 1, gin.outputs["Flap Speed"])
+    rw_rot, _ = flap_rotation(g, -200, -900, "phase", -1, gin.outputs["Flap Speed"])
+    join = n.new("GeometryNodeJoinGeometry")
+    for i, (info, rot) in enumerate(((info_body, body_align), (info_wing, lw_rot), (info_wing, rw_rot))):
+        inst = n.new("GeometryNodeInstanceOnPoints")
+        L.new(store.outputs["Geometry"], inst.inputs["Points"])
+        L.new(info.outputs["Geometry"], inst.inputs["Instance"])
+        L.new(gin.outputs["Size"], inst.inputs["Scale"])
+        L.new(rot.outputs["Rotation"], inst.inputs["Rotation"])
+        L.new(inst.outputs["Instances"], join.inputs[0])
+        inst.location = (700, -i * 350)
+    L.new(join.outputs["Geometry"], gout.inputs["Geometry"])
+    gin.location, store.location, b_in.location, mul.location = (-700, 0), (-200, 250), (-700, 300), (-450, 300)
+    info_body.location, info_wing.location = (350, 0), (350, -350)
+    body_vel.location, body_align.location = (100, 150), (350, 150)
+    join.location, gout.location = (1000, 0), (1200, 0)
+    return g
 
 
 def compositor_bloom(scene):
@@ -363,58 +433,25 @@ def build_fireflies(scene):
     freal = gn_link.insert_make_real(ftree, look)
     freal.location = (-1500 + 6 * 240 + 20, 260)
 
-    # render side: a firefly on each point, wings flapping from its phase, abdomen lit by brightness
+    # render side: one "Firefly Model" node: a little firefly on each point, wings flapping from its phase
     fly, wing = firefly_parts()
     n = ftree.nodes
-    info_body = n.new("GeometryNodeObjectInfo")
-    info_body.inputs["Object"].default_value = fly
-    info_wing = n.new("GeometryNodeObjectInfo")
-    info_wing.inputs["Object"].default_value = wing
-    for inf in (info_body, info_wing):
-        inf.transform_space = 'ORIGINAL'
-    body_vel = n.new("GeometryNodeInputNamedAttribute")
-    body_vel.data_type = 'FLOAT_VECTOR'
-    body_vel.inputs["Name"].default_value = "velocity"
-    body_align = n.new("FunctionNodeAlignRotationToVector")
-    body_align.axis = 'X'
-    ftree.links.new(body_vel.outputs["Attribute"], body_align.inputs["Vector"])
-    body_vel.location, body_align.location = (100, -150), (300, -150)
-    lw_rot, _ = flap_rotation(ftree, -300, -800, "phase", 1)
-    rw_rot, _ = flap_rotation(ftree, -300, -1100, "phase", -1)
-    inst_body = n.new("GeometryNodeInstanceOnPoints")
-    inst_lw = n.new("GeometryNodeInstanceOnPoints")
-    inst_rw = n.new("GeometryNodeInstanceOnPoints")
-    for inst, info, rot in ((inst_body, info_body, None), (inst_lw, info_wing, lw_rot), (inst_rw, info_wing, rw_rot)):
-        ftree.links.new(freal.outputs["Geometry"], inst.inputs["Points"])
-        ftree.links.new(info.outputs["Geometry"], inst.inputs["Instance"])
-        inst.inputs["Scale"].default_value = (FIREFLY_SIZE,) * 3
-        if rot is not None:
-            ftree.links.new(rot.outputs["Rotation"], inst.inputs["Rotation"])
-    # the body just faces along its velocity (no flap)
-    ftree.links.new(body_align.outputs["Rotation"], inst_body.inputs["Rotation"])
-    join = n.new("GeometryNodeJoinGeometry")
-    for inst in (inst_body, inst_lw, inst_rw):
-        ftree.links.new(inst.outputs["Instances"], join.inputs[0])
-    link_out(ftree, join.outputs["Geometry"], fgout)
-    info_body.location, info_wing.location = (400, -300), (400, -600)
-    inst_body.location, inst_lw.location, inst_rw.location, join.location = (700, 0), (700, -400), (700, -800), (1100, 0)
-    fgout.location = (1350, 0)
+    model = n.new("GeometryNodeGroup")
+    model.node_tree = firefly_model_group(fly, wing)
+    model.label = "Firefly Model"
+    ftree.links.new(freal.outputs["Geometry"], model.inputs["Points"])
+    link_out(ftree, model.outputs["Geometry"], fgout)
+    model.location = (-1500 + 7 * 240 + 60, 260)
+    fgout.location = (-1500 + 8 * 240 + 120, 260)
     live_frame = n.new("NodeFrame")
-    live_frame.label = "Fireflies: a chain of code nodes, drawn live (edit any node's code)"
+    live_frame.label = "Fireflies: code nodes drawn live (edit any node's code)"
     live_frame.label_size = 20
     for nd in chain + [wind, freal]:
         nd.parent = live_frame
-    for nd in list(n):                             # the render side sits right of the live chain
-        if nd.type not in ('FRAME', 'GROUP_INPUT', 'GROUP_OUTPUT') and nd not in chain and nd not in (wind, freal):
-            nd.location.x += 650
-    fgout.location.x += 650
     render_frame = n.new("NodeFrame")
-    render_frame.label = "For renders: a little firefly on each point, wings flapping from its phase"
+    render_frame.label = "For renders: a little firefly on each point"
     render_frame.label_size = 20
-    for nd in list(n):
-        if nd.type not in ('FRAME', 'GROUP_INPUT', 'GROUP_OUTPUT') and nd.parent is None and nd not in chain \
-                and nd not in (wind, freal):
-            nd.parent = render_frame
+    model.parent = render_frame
 
     gn_link.sync()
     creal.inputs["When"].default_value = "Only for Render"

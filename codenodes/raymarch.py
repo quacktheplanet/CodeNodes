@@ -217,11 +217,32 @@ void main() {
 VERT = "void main() { vUv = pos * 0.5 + 0.5; gl_Position = vec4(pos, 0.0, 1.0); }"
 
 COMPOSITE = """
+// The surface is marched at a lower resolution (Live Resolution) and scaled up here. Filtering the
+// hit distance across the surface's outline would blend a real distance with "no hit" (-1) into a
+// small positive one: a dark fringe placed right in front of the camera, over whatever is behind
+// (a thin black jagged line where the surface meets a mesh). So the distance is read unfiltered
+// from the nearest texel, and the colour is only filtered among texels that hit.
 void main() {
-  vec4 c = texture(colTex, vUv);
-  float d = texture(depthTex, vUv).r;
-  if (d < -1.5) { gl_FragDepth = 0.999999; fragColor = c; return; }   // sky
-  if (d < 0.0 || c.a <= 0.0) discard;
+  ivec2 size = textureSize(depthTex, 0);
+  vec2 fp = vUv * vec2(size) - 0.5;
+  ivec2 near = clamp(ivec2(floor(fp + 0.5)), ivec2(0), size - 1);
+  float d = texelFetch(depthTex, near, 0).r;
+  if (d < -1.5) { gl_FragDepth = 0.999999; fragColor = texelFetch(colTex, near, 0); return; }   // sky
+  if (d < 0.0) discard;
+  ivec2 i0 = clamp(ivec2(floor(fp)), ivec2(0), size - 1);
+  ivec2 i1 = min(i0 + 1, size - 1);
+  vec2 f = fract(fp);
+  vec4 acc = vec4(0.0);
+  float wsum = 0.0;
+  for (int k = 0; k < 4; k++) {
+    ivec2 ij = ivec2(k & 1, k >> 1);
+    ivec2 at = ivec2(ij.x == 1 ? i1.x : i0.x, ij.y == 1 ? i1.y : i0.y);
+    float w = (ij.x == 1 ? f.x : 1.0 - f.x) * (ij.y == 1 ? f.y : 1.0 - f.y);
+    float dk = texelFetch(depthTex, at, 0).r;
+    if (dk >= 0.0 && abs(dk - d) < max(0.05 * d, 0.02)) { acc += texelFetch(colTex, at, 0) * w; wsum += w; }
+  }
+  vec4 c = wsum > 0.0 ? acc / wsum : texelFetch(colTex, near, 0);
+  if (c.a <= 0.0) discard;
   vec2 uv = vUv * 2.0 - 1.0;
   vec4 wn = invViewProj * vec4(uv, -1.0, 1.0);
   vec4 wf = invViewProj * vec4(uv, 1.0, 1.0);
