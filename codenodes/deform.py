@@ -47,9 +47,9 @@ void main() {
 TEMPLATES = {
     "Wave": """\
 // Wave: ripples travel across the incoming mesh along its normals; colour follows the height.
-// @param amplitude 0.08 0.0 1.0
-// @param frequency 6.0 0.5 30.0
-// @param speed 2.0 0.0 10.0
+// @param amplitude 0.08 0.0 1.0  "Height of the waves, in metres"
+// @param frequency 6.0 0.5 30.0  "Number of waves across the mesh"
+// @param speed 2.0 0.0 10.0  "How fast the waves travel"
 void deform(inout Vertex v) {
   float h = sin(v.position.x * frequency + uTime * speed) * cos(v.position.y * frequency * 0.7 + uTime * speed * 0.6);
   v.position += v.normal * h * amplitude;
@@ -59,9 +59,9 @@ void deform(inout Vertex v) {
 """,
     "Noise Displace": """\
 // Noise Displace: fractal noise pushes every vertex out along its normal, like weathered rock.
-// @param strength 0.15 0.0 1.0
-// @param scale 3.0 0.2 20.0
-// @param seed 0.0 0.0 100.0
+// @param strength 0.15 0.0 1.0  "How far the noise pushes vertices out, in metres"
+// @param scale 3.0 0.2 20.0  "Size of the noise: higher = finer detail"
+// @param seed 0.0 0.0 100.0  "Changes the noise pattern"
 void deform(inout Vertex v) {
   float h = fbm3(v.position * scale + seed) - 0.5;
   v.position += v.normal * h * strength;
@@ -72,9 +72,9 @@ void deform(inout Vertex v) {
     "Mesa": """\
 // Mesa: a rocky plateau rising out of a flat grid: soft-edged, roughened by noise, coloured by height,
 // with a flat summit (put something on it).
-// @param height 1.1 0.0 4.0
-// @param radius 2.4 0.5 6.0
-// @param rough 0.22 0.0 1.0
+// @param height 1.1 0.0 4.0  "Height of the plateau, in metres"
+// @param radius 2.4 0.5 6.0  "Radius of the plateau top, in metres"
+// @param rough 0.22 0.0 1.0  "How rough and rocky the sides are"
 void deform(inout Vertex v) {
   vec3 p = v.position;
   float r = length(p.xy) + (fbm3(p * 1.1 + 3.0) - 0.5) * 0.9;
@@ -91,8 +91,8 @@ void deform(inout Vertex v) {
 """,
     "Twist": """\
 // Twist: turn the mesh around its Z axis, more the higher it goes.
-// @param turns 0.5 -4.0 4.0
-// @param height 2.0 0.1 20.0
+// @param turns 0.5 -4.0 4.0  "Full turns from bottom to top (negative twists the other way)"
+// @param height 2.0 0.1 20.0  "Height over which the twist happens, in metres"
 void deform(inout Vertex v) {
   float a = v.position.z / height * turns * 6.2831853;
   v.position = rotateZ(v.position, a);

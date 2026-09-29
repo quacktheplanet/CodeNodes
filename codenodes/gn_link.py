@@ -61,11 +61,11 @@ KINDS = {
 CASTLE = """\
 // The Aerie citadel as a GPU surface: a ring wall with towers, a keep and roofs.
 // Units: the citadel is about 25 across; `scale` is metres per unit.
-// @param towers 6 3 12
-// @param radius 10 6 12.5
-// @param wallHeight 4.5 2 9
-// @param keepHeight 14 6 26
-// @param scale 0.1 0.02 1.0
+// @param towers 6 3 12  "Number of towers on the ring wall"
+// @param radius 10 6 12.5  "Radius of the ring wall"
+// @param wallHeight 4.5 2 9  "Height of the wall"
+// @param keepHeight 14 6 26  "Height of the central keep"
+// @param scale 0.1 0.02 1.0  "Overall size (the castle is modelled in tens of metres)"
 
 float citadel(vec3 p) {
   float ring = abs(length(p.xy) - radius) - 0.7;
@@ -113,10 +113,10 @@ vec3 color(vec3 p) {
 PLANET = """\
 // A small planet, Tellus-style: continents from fractal noise, shallow seas, snow on the peaks
 // and at the poles.
-// @param radius 1.0 0.3 3.0
-// @param relief 0.05 0.0 0.25
-// @param sea 0.5 0.3 0.7
-// @param seed 3.0 0.0 100.0
+// @param radius 1.0 0.3 3.0  "Radius of the planet, in metres"
+// @param relief 0.05 0.0 0.25  "Height of the mountains compared to the radius"
+// @param sea 0.5 0.3 0.7  "Sea level: higher floods more land"
+// @param seed 3.0 0.0 100.0  "Changes the continents"
 
 float land(vec3 n) { return fbm3(n * 2.3 + seed); }
 
@@ -138,10 +138,10 @@ vec3 color(vec3 p) {
 
 SATURN = """\
 // A ringed planet: a banded sphere and a tilted ring, one surface.
-// @param radius 0.9 0.1 2.0
-// @param ring 1.55 0.5 3.0
-// @param width 0.35 0.02 1.0
-// @param tilt 0.45 0.0 1.5
+// @param radius 0.9 0.1 2.0  "Radius of the planet"
+// @param ring 1.55 0.5 3.0  "Radius of the ring"
+// @param width 0.35 0.02 1.0  "Width of the ring"
+// @param tilt 0.45 0.0 1.5  "Tilt of the ring, in radians"
 
 float planet(vec3 p) { return sdSphere(p, radius) + 0.012 * sin(p.z * 18.0 + uTime * 3.0); }
 float band(vec3 p) {
@@ -163,9 +163,9 @@ vec3 color(vec3 p) {
 GALAXY = """\
 // Galaxy: a million stars on twisted ellipses (a density wave, as in Myriad). Each ring of orbits is
 // turned a little more than the one inside it, so the spiral arms never wind up.
-// @param size 2.4 0.5 10.0
-// @param twist 2.4 0.0 6.0
-// @param spin 0.9 0.0 3.0
+// @param size 2.4 0.5 10.0  "Radius of the galaxy"
+// @param twist 2.4 0.0 6.0  "How strongly the orbits twist into spiral arms"
+// @param spin 0.9 0.0 3.0  "How fast it turns"
 
 void spawn(inout Particle p) { p.life = 1e9; }        // stars live forever
 
@@ -203,9 +203,9 @@ vec4 look(Particle p) {
 
 FLOW = """\
 // Flow: particles ride a curl-noise current (as in Myriad): crisp filaments that never clump.
-// @param scale 0.55 0.1 3.0
-// @param speed 1.9 0.1 6.0
-// @param radius 2.2 0.5 8.0
+// @param scale 0.55 0.1 3.0  "Size of the current's swirls"
+// @param speed 1.9 0.1 6.0  "How fast particles ride the current"
+// @param radius 2.2 0.5 8.0  "Size of the region they live in"
 
 void spawn(inout Particle p) {
   p.position = randSphere(p.seed + uTime * 13.7) * radius * (0.9 + 0.2 * rand1(p.seed * 3.7));
@@ -231,8 +231,8 @@ vec4 look(Particle p) {
 
 ATTRACTOR = """\
 // Attractor: the Aizawa strange attractor, integrated on the GPU (as in Myriad).
-// @param size 2.1 0.5 8.0
-// @param rate 0.45 0.05 2.0
+// @param size 2.1 0.5 8.0  "Size of the attractor"
+// @param rate 0.45 0.05 2.0  "How fast particles move along it"
 
 vec3 toWorld(vec3 q) { return (q - vec3(0.0, 0.0, 0.6)) * size; }
 vec3 toAizawa(vec3 w) { return w / size + vec3(0.0, 0.0, 0.6); }
@@ -288,25 +288,25 @@ TEMPLATES = {
         "Donut": """\
 // A donut. sdf(p) is the distance to the surface: negative inside, positive outside (metres).
 // Each @param line below becomes an input on the node.
-// @param major 0.8 0.2 2.0
-// @param minor 0.3 0.05 1.0
+// @param major 0.8 0.2 2.0  "Radius from the centre to the middle of the tube"
+// @param minor 0.3 0.05 1.0  "Radius of the tube"
 float sdf(vec3 p) {
   return sdTorus(p, major, minor);
 }
 """,
         "Rounded Box": """\
 // A box with rounded edges.
-// @param size 0.8 0.1 2.0
-// @param roundness 0.15 0.0 0.5
+// @param size 0.8 0.1 2.0  "Half the box's width"
+// @param roundness 0.15 0.0 0.5  "Radius of the rounded edges"
 float sdf(vec3 p) {
   return sdRoundBox(p, vec3(size), min(roundness, size));
 }
 """,
         "Gyroid Ball": """\
 // A sphere carved into a gyroid lattice.
-// @param radius 1.0 0.2 2.0
-// @param cells 6.0 1.0 16.0
-// @param thickness 0.05 0.01 0.3
+// @param radius 1.0 0.2 2.0  "Radius of the ball"
+// @param cells 6.0 1.0 16.0  "Number of lattice cells across it"
+// @param thickness 0.05 0.01 0.3  "Thickness of the lattice walls"
 float sdf(vec3 p) {
   vec3 q = p * cells;
   float g = abs(dot(sin(q), cos(q.yzx))) / cells - thickness;
@@ -342,8 +342,8 @@ part body
         "Spark Ball": None,         # stage_templates.SPARK_BALL
         "Fountain": """\
 // A fountain: particles shoot up from the origin and fall back under gravity.
-// @param power 4.0 0.5 10.0
-// @param gravity 9.8 0.0 20.0
+// @param power 4.0 0.5 10.0  "Launch speed upwards"
+// @param gravity 9.8 0.0 20.0  "Pull back down (9.8 = Earth)"
 void spawn(inout Particle p) {
   vec3 r = rand3(p.seed);
   p.position = vec3(0.0);
@@ -1056,6 +1056,8 @@ def build_join():
     iface.new_socket("Particles", in_out="OUTPUT", socket_type="NodeSocketBundle")
     gin, gout = group.nodes.new("NodeGroupInput"), group.nodes.new("NodeGroupOutput")
     gin.location, gout.location = (-300, 0), (200, 0)
+    from . import gn_sockets
+    gn_sockets.apply_tips(group, gn_sockets.JOIN_TIPS, gn_sockets.JOIN_TIPS_OUT)
     return group
 
 
@@ -1670,6 +1672,17 @@ def sync():
             if edit is not None and not edit.is_linked and edit.default_value:
                 edit.default_value = False            # behaves like a button
                 request_popup(obj)
+    for g in groups:                           # tooltips on the fixed CodeNodes nodes (also in older files)
+        try:
+            if is_cache(g):
+                from . import gpu_cache
+                gn_sockets.apply_tips(g, dict(gn_sockets.CACHE_TIPS, **{gpu_cache.BAKE: "Switch on to record Start–End "
+                                      "now (it switches itself back off)", gpu_cache.CLEAR: "Switch on to delete the "
+                                      "recording (it switches itself back off)"}), gn_sockets.CACHE_TIPS_OUT)
+            elif is_join(g):
+                gn_sockets.apply_tips(g, gn_sockets.JOIN_TIPS, gn_sockets.JOIN_TIPS_OUT)
+        except ReferenceError:
+            pass
     host_map = sync_make_real()
     try:
         from . import lights

@@ -49,6 +49,16 @@ and the node's sockets follow at once.
 
 A function input with nothing wired returns zero (or the value after `=`), so a node always compiles.
 
+**Tooltips.** End any declaration line with a sentence in double quotes and it becomes that socket's
+hover tooltip in the node editor (and its "What it does" entry below):
+
+```glsl
+// @in float calm 0.92 0.0 0.999  "How smoothly they turn: higher = lazier"
+// @out attr heat 0.0  "How hot each particle is (0 to 1)"
+```
+
+The first comment line of the code (one that isn't a declaration) becomes the node's own description.
+
 ### Outputs
 
 | Line | Socket | Meaning |
@@ -212,10 +222,14 @@ def sockets(group):
             if item.socket_type in ("NodeSocketGeometry", "NodeSocketBundle", "NodeSocketClosure",
                                     "NodeSocketMaterial", "NodeSocketObject", "NodeSocketMenu"):
                 default = default if item.socket_type == "NodeSocketMenu" else None
-            ins.append((panel, item.name, t, default, rng))
+            ins.append((panel, item.name, t, default, rng, _tip(item)))
         else:
-            outs.append((item.name, t))
+            outs.append((item.name, t, _tip(item)))
     return ins, outs
+
+
+def _tip(item):
+    return (getattr(item, "description", "") or "").replace("|", "/").replace(chr(10), " ")
 
 
 def _menu_items(group, name):
@@ -244,15 +258,16 @@ def node_section(title, kind_label, code, group, example):
         out += [d, ""]
     if example:
         out += [f"**Example chain:** {example}", ""]
-    out += ["**Inputs**", "", "| Socket | Type | Default | Range | Panel |", "|---|---|---|---|---|"]
-    for panel, name, t, default, rng in ins:
+    out += ["**Inputs**", "", "| Socket | Type | Default | Range | Panel | What it does |",
+            "|---|---|---|---|---|---|"]
+    for panel, name, t, default, rng, tip in ins:
         if t == "menu":
             items = _menu_items(group, name)
             rng = ", ".join(items)
-        out.append(f"| {name} | {t} | {_fmt(default)} | {rng} | {panel} |")
+        out.append(f"| {name} | {t} | {_fmt(default)} | {rng} | {panel} | {tip} |")
     out += ["", "**Outputs**", ""]
     if outs:
-        out += ["| Socket | Type |", "|---|---|"] + [f"| {n} | {t} |" for n, t in outs]
+        out += ["| Socket | Type | What it gives |", "|---|---|---|"] + [f"| {n} | {t} | {tip} |" for n, t, tip in outs]
     else:
         out.append("(none)")
     out.append("")

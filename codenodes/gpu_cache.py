@@ -159,6 +159,9 @@ def build_group():
     gin.location, gout.location = (-400, 0), (250, 0)
     gn_sockets.ensure_menu_switch(group, "Mode", MODES)
     gn_sockets._hook_menus(group)
+    gn_sockets.apply_tips(group, dict(gn_sockets.CACHE_TIPS, **{
+        BAKE: "Switch on to record Start–End now (it switches itself back off)",
+        CLEAR: "Switch on to delete the recording (it switches itself back off)"}), gn_sockets.CACHE_TIPS_OUT)
     return group
 
 

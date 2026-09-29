@@ -81,6 +81,8 @@ class Decls:
         self.roles: set[str] = set()
         self.hidden: set[str] = set()        # sliders the add-on fills in itself (no socket)
         self.materials: list[str] = []       # Material inputs (their values arrive as hidden sliders)
+        self.descriptions: dict[str, str] = {}   # socket name -> the "…" written at the end of its line
+        self.summary = ""                    # the code's first comment line: the node's own description
 
     # the sockets this node shows ---------------------------------------------------------------
     def takes_particles(self):
@@ -130,17 +132,28 @@ def parse(source):
         d.kinds[name] = kind
 
     for n, line in enumerate(source.splitlines(), 1):
+        if not d.summary:
+            cm = re.match(r"^\s*//\s*(?!@)(.+?)\s*$", line)
+            if cm:
+                d.summary = cm.group(1)
         m = _PARAM_RE.match(line)
         if m:
             lo = float(m.group(3)) if m.group(3) else None
             hi = float(m.group(4)) if m.group(4) else None
             add_param(m.group(1), float(m.group(2)), lo, hi, 'FLOAT', n)
+            if m.group(5):
+                d.descriptions[m.group(1)] = m.group(5).strip()
             continue
         m = DECL_LINE.match(line)
         if not m:
             continue
         word, rest = m.group(1), m.group(2).strip()
+        rest, desc = split_description(rest)
         bits = rest.split()
+        if desc:
+            named = _declared_name(word, bits, rest)
+            if named:
+                d.descriptions[named] = desc
         if word == "shape":
             if not bits or bits[0] not in SHAPES:
                 raise SdfCodeError(f"line {n}: @shape takes one of: {', '.join(SHAPES)}")
@@ -225,6 +238,26 @@ def parse(source):
         sig = _function_signature(source, "sdf")
         d.func_outs.append(FuncOut("sdf", "float", sig[1] if sig else "vec3 p", 0))
     return d
+
+
+def split_description(rest):
+    """`float calm 0.92 0 0.999 "How smoothly they turn"` -> ("float calm 0.92 0 0.999", "How smoothly…")."""
+    m = re.match(r'^(.*?)\s*"([^"]*)"\s*$', rest)
+    return (m.group(1), m.group(2).strip()) if m else (rest, "")
+
+
+def _declared_name(word, bits, rest):
+    """The socket name a declaration line makes (for its description)."""
+    if word == "attr":
+        return bits[0] if bits else None
+    if word == "out":
+        return bits[1] if len(bits) > 1 else None
+    if word == "in" and bits:
+        if bits[0] == "func":
+            fm = re.match(rf"func\s+{_NAME}\s+({_NAME})", rest)
+            return fm.group(1) if fm else None
+        return bits[1] if len(bits) > 1 else None
+    return None
 
 
 def strip(source):

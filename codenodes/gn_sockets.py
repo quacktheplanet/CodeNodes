@@ -59,6 +59,124 @@ SETTINGS = {
 
 MENU_ITEMS = {"Colour By": [n for n, _ in COLOR_BY], "When": [n for n, _ in WHEN]}
 
+# Tooltips (the hover text in the node editor) for the sockets CodeNodes adds itself. A code's own sliders
+# get theirs from the "…" written at the end of their @in / @param line.
+FIXED_TIPS = {
+    EDIT: "Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. "
+          "Double-click the node or press Ctrl+E for the same",
+    "Template": "Load one of the ready-made codes for this kind of node. If you had edited the code, your "
+                "version is kept in a text named '… (before …)'",
+    "Count": "How many particles to simulate. Drawing them live handles millions; To Geometry copies them into "
+             "Blender, which costs more",
+    "Emit From": "An object whose surface the particles are born on (optional). Without one, the code decides "
+                 "where they start",
+    "Colour By": "What colours the particles when no Look node is wired: the code's own colour, their speed or "
+                 "their age",
+    "Slow / Young": "Colour of slow particles (Colour By: Speed) or young ones (Colour By: Age)",
+    "Fast / Old": "Colour of fast particles (Colour By: Speed) or old ones (Colour By: Age)",
+    "Glow": "Draw additively, so overlapping particles add up to a glow. Off draws them solid",
+    "Point Size": "Size of each particle on screen, in pixels, when no Look node sets a size",
+    "Brightness": "Overall brightness of the live particles",
+    "Speed Range": "The speed (metres per second) that counts as fully fast for Colour By: Speed",
+    "Substeps": "Simulation steps per frame. More is steadier for fast or stiff motion, and costs more",
+    "Pre-warm": "Seconds simulated before the first frame, so the particles open already in shape",
+    "Stagger": "How spread out the births are: 0 = all at once, 1 = evenly over their lifetime",
+    "Colour": "Base colour of the live surface (when no Material is wired)",
+    "Shadows": "Soft shadows the surface casts on itself in the live view",
+    "Ambient Occlusion": "Darkens creases and corners in the live view",
+    "Fog": "Distance haze in the live view (0 = none)",
+    "Sky": "Draws a sky behind the surface in the live view",
+    "Live Resolution": "Resolution of the live view (1 = full). Lower is faster while you work",
+    "Bounds Min": "One corner of the box the surface lives in. To Geometry builds the mesh inside it",
+    "Bounds Max": "The opposite corner of the box the surface lives in",
+    "Smooth": "Smooth shading on the built model",
+    "Lights": "Wire a Scene Lights node's light output here to light this surface with the scene's lamps and "
+              "world",
+    "Material": "Wire a Material Look node's material output here to use a Blender material's colours and "
+                "roughness",
+}
+STREAM_TIPS_IN = {
+    "Particles": "The particle stream to work on: wire in the Particles output of the node before",
+    "Mesh": "The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex",
+}
+STREAM_TIPS_OUT = {
+    "Particles": "The particle stream after this node: wire it into the next stage, a Look, or To Geometry",
+    "Mesh": "The mesh after this node's code. Add To Geometry (To Mesh) to use it in regular nodes or renders",
+    "Geometry": "Stays empty: GPU nodes draw live in the viewport. Add To Geometry after this node to get real "
+                "geometry",
+}
+REAL_TIPS = {
+    "Geometry": "The GPU node or chain to make real: particles become points, surfaces and mesh code become a mesh",
+    "Particles": "The particle chain to make real: the particles become points with all their attributes",
+    "When": "When to rebuild the real geometry: Automatic (every frame for particles and animated code, "
+            "otherwise when something changes), Every Frame, When Changed, or Only for Render",
+    "Resolution": "Detail of the mesh built from a surface: cells along each side of its bounds (higher is "
+                  "finer and slower)",
+    "Max Points": "At most this many particles become points (0 = all of them)",
+    "Keep Velocity": "Write each point's velocity and speed (for motion blur, or colouring by speed)",
+    "Keep Age": "Write each point's age and life",
+}
+REAL_TIPS_OUT = {"Geometry": "The real geometry: use it like the output of any Geometry Nodes node"}
+CACHE_TIPS = {
+    "Particles": "The particle chain to record",
+    "Mode": "Live runs the simulation as you work. Cached plays back the recorded frames (instant scrubbing; "
+            "renders read them too)",
+    "Start": "First frame to record",
+    "End": "Last frame to record",
+}
+CACHE_TIPS_OUT = {"Particles": "The same particles, live or played back from the recording"}
+JOIN_TIPS = {"Particles A": "The first particle stream", "Particles B": "The second particle stream"}
+JOIN_TIPS_OUT = {"Particles": "Both streams together: everything wired after this applies to both"}
+
+
+def code_tips(obj):
+    """(input tips, output tips, node description) for a code node."""
+    d = decls_of(obj)
+    tips_in = dict(FIXED_TIPS)
+    tips_in.update(STREAM_TIPS_IN)
+    tips_out = dict(STREAM_TIPS_OUT)
+    for name, text in d.descriptions.items():
+        tips_in[name] = text
+        tips_out[name] = text
+    for a in d.attrs:
+        tips_out.setdefault(a.name, f"The per-particle value '{a.name}' this node writes, as a field: after "
+                                    f"To Geometry every point carries it")
+    for f in d.func_outs:
+        tips_out.setdefault(f.name, f"The function '{f.name}': wire it into a function input of another node")
+    for f in d.func_ins:
+        tips_in.setdefault(f.name, f"Wire a function here (e.g. from a field node); the code calls {f.name}(…)")
+    for m in d.materials:
+        tips_in.setdefault(m, "A Blender material: its Principled BSDF colours, roughness, metallic and "
+                              "emission come into the code")
+    return tips_in, tips_out, d.summary
+
+
+def apply_tips(group, tips_in, tips_out, summary=None, prefix=""):
+    """Write hover tooltips onto the group's sockets (and its description). Only writes what differs, so a
+    steady file causes no updates."""
+    for item in group.interface.items_tree:
+        if item.item_type != 'SOCKET':
+            continue
+        text = (tips_in if item.in_out == 'INPUT' else tips_out).get(item.name)
+        if text is not None and getattr(item, "description", text) != text:
+            try:
+                item.description = text
+            except (AttributeError, TypeError):
+                pass
+    if summary:
+        want = prefix + summary
+        if group.description != want:
+            group.description = want
+
+
+GPU_NODE_NOTE = " (Drawn live on the GPU; add To Geometry after it to use it in nodes or renders.)"
+
+
+def apply_code_tips(group, obj):
+    tips_in, tips_out, summary = code_tips(obj)
+    note = GPU_NODE_NOTE if obj.codenodes.kind in ('PARTICLES', 'STAGE', 'DEFORM', 'MESH') else ""
+    apply_tips(group, tips_in, tips_out, (summary + note) if summary else None)
+
 
 def templates_for(kind):
     from . import gn_link
@@ -333,6 +451,7 @@ def sync_interface(group, obj):
     outs_changed = sync_outputs(group, obj)
     if signature(group) == [(w[0], w[1], w[2]) for w in wanted]:
         _sync_menus(group, wanted)
+        apply_code_tips(group, obj)
         return outs_changed
     saved = _save_users(group)
     iface = group.interface
@@ -355,6 +474,7 @@ def sync_interface(group, obj):
             _new_socket(iface, name, stype, default, lo, hi, panels[pname])
     _sync_menus(group, wanted)
     _restore_users(group, saved, {w[1]: w[3] for w in wanted})
+    apply_code_tips(group, obj)
     return True
 
 
@@ -776,6 +896,7 @@ def sync_real_interface(group, kind, src=None):
             group.links.new(geo, join.inputs[0])
         _sync_menus(group, wanted)
         _restore_users(group, saved, {w[1]: w[3] for w in wanted})
+        apply_tips(group, REAL_TIPS, REAL_TIPS_OUT)
         for tree, node, from_socket in feeds:
             if node.inputs and not node.inputs[0].is_linked:
                 try:
@@ -784,6 +905,7 @@ def sync_real_interface(group, kind, src=None):
                     pass
         return
     _sync_menus(group, wanted)
+    apply_tips(group, REAL_TIPS, REAL_TIPS_OUT)
 
 
 WHEN_MAP = dict(WHEN)

@@ -152,9 +152,9 @@ TEMPLATE = """\
 // Particles. spawn() places one; update() moves it, called once per step.
 // Particle: position, velocity, age, life, seed.
 // Helpers: rand1 rand3 randBall noise3 fbm3, plus uTime. Sliders are declared below.
-// @param speed 1.0 0.0 4.0
-// @param swirl 1.6 0.1 5.0
-// @param drag 0.9 0.5 1.0
+// @param speed 1.0 0.0 4.0  "How fast particles swirl"
+// @param swirl 1.6 0.1 5.0  "Size of the swirling pattern (higher = tighter)"
+// @param drag 0.9 0.5 1.0  "How much speed they keep each step (1 = none lost)"
 
 vec3 curl(vec3 p) {                       // a divergence-free field: particles swirl, never pile up
   float e = 0.35;

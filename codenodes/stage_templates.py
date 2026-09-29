@@ -12,9 +12,9 @@ and may declare inputs, function inputs/outputs and per-particle attributes (see
 FIREFLY_SWARM = """\
 // Firefly Swarm: fireflies born just above the Emit From surface (or in a ball when there is none).
 // Wire stages after it: Wander, Rise, Blink, then Firefly Look.
-// @in float height 0.35 0.0 3.0
-// @in float radius 2.0 0.1 20.0
-// @in float lifetime 7.0 1.0 30.0
+// @in float height 0.35 0.0 3.0  "How high above the surface they're born, in metres"
+// @in float radius 2.0 0.1 20.0  "Radius of the swarm when there's no Emit From surface"
+// @in float lifetime 7.0 1.0 30.0  "How long each firefly lives, in seconds, before it's reborn"
 void spawn(inout Particle p) {
   bool surface = cnEmitCount > 0;
   vec3 base = surface ? emitPoint(p.seed) : randBall(p.seed) * radius;
@@ -27,9 +27,9 @@ void spawn(inout Particle p) {
 
 SPARK_BALL = """\
 // Spark Ball: particles born in a ball, with a small random kick. A plain source for stages.
-// @in float radius 1.0 0.05 20.0
-// @in float kick 0.3 0.0 5.0
-// @in float lifetime 4.0 0.5 30.0
+// @in float radius 1.0 0.05 20.0  "Radius of the ball they're born in"
+// @in float kick 0.3 0.0 5.0  "Random speed each one starts with"
+// @in float lifetime 4.0 0.5 30.0  "How long each particle lives, in seconds, before it's reborn"
 void spawn(inout Particle p) {
   p.position = randBall(p.seed) * radius;
   p.velocity = (rand3(p.seed * 3.1) * 2.0 - 1.0) * kick;
@@ -41,9 +41,9 @@ STAGES = {
     # ---- particles: what they do -----------------------------------------------------------------
     "Wander": """\
 // Wander: lazy curl-noise drifting, like insects on a summer evening.
-// @in float strength 0.5 0.0 5.0
-// @in float scale 1.2 0.05 10.0
-// @in float calm 0.92 0.0 0.999
+// @in float strength 0.5 0.0 5.0  "How hard the drifting current pushes (0 = no drift)"
+// @in float scale 1.2 0.05 10.0  "Size of the swirls: low = big lazy loops across the scene, high = small twitchy wiggles"
+// @in float calm 0.92 0.0 0.999  "How smoothly they turn: higher = lazier, smoother paths; 0 = they snap to the current"
 void behave(inout Particle p, float dt) {
   vec3 f = curlNoise(p.position * scale + vec3(0.0, 0.0, uTime * 0.15)) * strength;
   p.velocity = mix(f, p.velocity, calm);
@@ -51,8 +51,8 @@ void behave(inout Particle p, float dt) {
 """,
     "Rise": """\
 // Rise: a gentle buoyancy; particles climb towards a speed and ease off near their ceiling.
-// @in float climb 0.12 0.0 3.0
-// @in float ceiling 2.5 0.1 50.0
+// @in float climb 0.12 0.0 3.0  "Upward speed they ease towards (metres per second)"
+// @in float ceiling 2.5 0.1 50.0  "Height where the rise fades out, so they hover instead of flying away"
 void behave(inout Particle p, float dt) {
   float room = clamp((ceiling - p.position.z) / max(ceiling, 1e-3), 0.0, 1.0);
   p.velocity.z = mix(p.velocity.z, climb * room - (1.0 - room) * climb, 1.0 - exp(-dt * 1.5));
@@ -60,15 +60,15 @@ void behave(inout Particle p, float dt) {
 """,
     "Gravity": """\
 // Gravity: a constant pull (down by default).
-// @in float strength 9.8 0.0 50.0
+// @in float strength 9.8 0.0 50.0  "Pull downwards, in metres per second squared (9.8 = Earth)"
 void behave(inout Particle p, float dt) {
   p.velocity.z -= strength * dt;
 }
 """,
     "Vortex": """\
 // Vortex: swirl around the vertical axis through the node's centre.
-// @in float spin 1.5 -20.0 20.0
-// @in float pull 0.3 -10.0 10.0
+// @in float spin 1.5 -20.0 20.0  "How fast they circle the vertical axis (negative turns the other way)"
+// @in float pull 0.3 -10.0 10.0  "Draws them in towards the axis (negative pushes them out)"
 void behave(inout Particle p, float dt) {
   vec3 r = vec3(p.position.xy, 0.0);
   float d = max(length(r), 0.05);
@@ -77,7 +77,7 @@ void behave(inout Particle p, float dt) {
 """,
     "Drag": """\
 // Drag: slows particles down, like moving through air or water.
-// @in float amount 1.0 0.0 20.0
+// @in float amount 1.0 0.0 20.0  "How quickly they slow down, like moving through air (low) or water (high)"
 void behave(inout Particle p, float dt) {
   p.velocity *= exp(-amount * dt);
 }
@@ -85,10 +85,10 @@ void behave(inout Particle p, float dt) {
     "Blink": """\
 // Blink: each particle pulses on its own rhythm. Adds two per-particle values later nodes can use:
 // brightness (0..1) and phase (0..1, fixed per particle).
-// @in float rate 0.6 0.05 6.0
-// @in float sharpness 6.0 1.0 30.0
-// @out attr brightness 1.0
-// @out attr phase 0.0
+// @in float rate 0.6 0.05 6.0  "Blinks per second"
+// @in float sharpness 6.0 1.0 30.0  "How sudden each blink is: low = gentle pulses, high = quick flashes"
+// @out attr brightness 1.0  "Each particle's blink brightness right now (0 to 1), for later nodes"
+// @out attr phase 0.0  "Where each particle is in its own blink cycle (0 to 1), for later nodes"
 void born(inout Particle p) {
   p.phase = rand1(p.seed * 9.13);
 }
@@ -99,17 +99,17 @@ void behave(inout Particle p, float dt) {
 """,
     "Push by Field": """\
 // Push by Field: a force from a function wired into 'field' (e.g. Wind Field).
-// @in func vec3 field(vec3 p)
-// @in float amount 1.0 0.0 10.0
+// @in func vec3 field(vec3 p)  "The force to push with: wire in a function such as Wind Field's wind"
+// @in float amount 1.0 0.0 10.0  "How strongly the field pushes"
 void behave(inout Particle p, float dt) {
   p.velocity += field(p.position) * amount * dt;
 }
 """,
     "Collide with Shape": """\
 // Collide with Shape: bounce off a surface wired into 'sdf' (a GPU Surface node's sdf output).
-// @in func float sdf(vec3 p) = 1e9
-// @in float bounce 0.4 0.0 1.0
-// @in float radius 0.02 0.0 1.0
+// @in func float sdf(vec3 p) = 1e9  "The surface to bounce off: wire in a GPU Surface node's sdf output"
+// @in float bounce 0.4 0.0 1.0  "How much speed is kept after a bounce (0 = stop dead, 1 = perfectly bouncy)"
+// @in float radius 0.02 0.0 1.0  "Particle radius used for contact, in metres"
 void behave(inout Particle p, float dt) {
   float d = sdf(p.position);
   if (d < radius) {
@@ -127,9 +127,9 @@ void behave(inout Particle p, float dt) {
     "Glow Look": """\
 // Glow Look: soft glowing sprites that fade in and out over each particle's life.
 // @shape glow
-// @in color tint 1.0 0.6 0.25
-// @in float intensity 2.0 0.0 20.0
-// @in float size 0.03 0.001 1.0
+// @in color tint 1.0 0.6 0.25  "Colour of the glow"
+// @in float intensity 2.0 0.0 20.0  "Brightness of the glow"
+// @in float size 0.03 0.001 1.0  "Size of each sprite, in metres"
 vec4 look(Particle p) {
   float k = clamp(p.age / max(p.life, 1e-4), 0.0, 1.0);
   float fade = smoothstep(0.0, 0.1, k) * smoothstep(1.0, 0.85, k);
@@ -140,13 +140,13 @@ vec4 look(Particle p) {
 // Firefly Look: a glowing abdomen with a soft halo, and two little wings that flap.
 // Reads brightness and phase (from Blink, or their defaults without it).
 // @shape firefly
-// @in color glow 1.0 0.78 0.22
-// @in float intensity 3.0 0.0 40.0
-// @in float size 0.012 0.001 0.2
-// @in float flap 18.0 0.0 60.0
-// @in float wing 2.4 0.2 6.0
-// @out attr brightness 1.0
-// @out attr phase 0.0
+// @in color glow 1.0 0.78 0.22  "Colour of the glowing abdomen"
+// @in float intensity 3.0 0.0 40.0  "Brightness of the glow"
+// @in float size 0.012 0.001 0.2  "Size of each firefly's body, in metres"
+// @in float flap 18.0 0.0 60.0  "Wing beats per second"
+// @in float wing 2.4 0.2 6.0  "Wing length compared to the body"
+// @out attr brightness 1.0  "Each firefly's glow right now (0 to 1), for later nodes"
+// @out attr phase 0.0  "Each firefly's wing-beat phase (0 to 1), for later nodes"
 vec4 look(Particle p) {
   float k = clamp(p.age / max(p.life, 1e-4), 0.0, 1.0);
   float fade = smoothstep(0.0, 0.08, k) * smoothstep(1.0, 0.9, k);
@@ -157,10 +157,10 @@ vec4 look(Particle p) {
 // Streak Look: each particle drawn as a glowing streak along its motion (a trail). Wire it next to
 // another look from the same stream to get heads and trails from the same particles.
 // @shape streak
-// @in color tint 0.55 0.75 1.0
-// @in float intensity 1.2 0.0 20.0
-// @in float size 0.01 0.001 0.5
-// @in float trail 0.25 0.0 5.0
+// @in color tint 0.55 0.75 1.0  "Colour of the streaks"
+// @in float intensity 1.2 0.0 20.0  "Brightness of the streaks"
+// @in float size 0.01 0.001 0.5  "Thickness of each streak, in metres"
+// @in float trail 0.25 0.0 5.0  "Streak length, in seconds of motion"
 vec4 look(Particle p) {
   float k = clamp(p.age / max(p.life, 1e-4), 0.0, 1.0);
   float fade = smoothstep(0.0, 0.1, k) * smoothstep(1.0, 0.85, k);
@@ -173,10 +173,10 @@ vec4 look(Particle p) {
 // Wire its 'material' output into a GPU Surface's Material input to shade a surface with it.
 // Each particle is shaded as a small sphere facing the camera.
 // @shape glow
-// @in material mat
-// @in func vec3 light(vec3 p, vec3 n, vec3 v, vec3 albedo, float roughness, float metallic) = albedo * 0.8
-// @in float size 0.03 0.001 1.0
-// @in float brightness 1.0 0.0 10.0
+// @in material mat  "The Blender material whose colours, roughness and metallic the particles take"
+// @in func vec3 light(vec3 p, vec3 n, vec3 v, vec3 albedo, float roughness, float metallic) = albedo * 0.8  "How they're lit: wire in Scene Lights' light (unwired: a soft default light)"
+// @in float size 0.03 0.001 1.0  "Size of each particle, in metres"
+// @in float brightness 1.0 0.0 10.0  "Overall brightness"
 // @out func material
 vec4 material(vec3 q) { return vec4(mat_base, mat_roughness); }
 vec4 look(Particle p) {
@@ -191,11 +191,11 @@ vec4 look(Particle p) {
 // Bend: bends, stretches and twists whatever comes in (particles or a mesh) along an axis, without
 // changing it: the particles still move as before, they're just shown bent.
 // axis: 0 = X, 1 = Y, 2 = Z (the length being bent). A flat galaxy curls when bent along X.
-// @in float angle 1.2 -6.2832 6.2832
-// @in float span 3.0 0.1 50.0
-// @in float stretch 1.0 0.1 5.0
-// @in float twist 0.0 -12.566 12.566
-// @in int axis 2 0 2
+// @in float angle 1.2 -6.2832 6.2832  "How far to bend, in radians across the span (0 = straight)"
+// @in float span 3.0 0.1 50.0  "Length over which the bend happens, in metres"
+// @in float stretch 1.0 0.1 5.0  "Stretch along the axis (1 = unchanged)"
+// @in float twist 0.0 -12.566 12.566  "Twist around the axis across the span, in radians"
+// @in int axis 2 0 2  "Axis to bend along: 0 = X, 1 = Y, 2 = Z"
 vec3 toAxis(vec3 q) { return axis == 0 ? q.yzx : (axis == 1 ? q.zxy : q); }
 vec3 fromAxis(vec3 q) { return axis == 0 ? q.zxy : (axis == 1 ? q.yzx : q); }
 vec3 warp(vec3 q) {
@@ -213,8 +213,8 @@ vec3 warp(vec3 q) {
 """,
     "Taper": """\
 // Taper: squeezes or flares whatever comes in along Z.
-// @in float amount 0.5 -2.0 2.0
-// @in float span 3.0 0.1 50.0
+// @in float amount 0.5 -2.0 2.0  "Squeeze (positive) or flare (negative) towards the top"
+// @in float span 3.0 0.1 50.0  "Height over which the taper happens, in metres"
 vec3 warp(vec3 q) {
   float s = max(1.0 + amount * q.z / max(span, 1e-3), 0.0);
   return vec3(q.xy * s, q.z);
@@ -223,9 +223,9 @@ vec3 warp(vec3 q) {
     # ---- meshes ---------------------------------------------------------------------------------------
     "Ripple": """\
 // Ripple: rings travel out from the centre along the normals; colour follows the height.
-// @in float amplitude 0.05 0.0 1.0
-// @in float wavelength 0.4 0.02 5.0
-// @in float speed 1.0 0.0 10.0
+// @in float amplitude 0.05 0.0 1.0  "Height of the rings, in metres"
+// @in float wavelength 0.4 0.02 5.0  "Distance between rings, in metres"
+// @in float speed 1.0 0.0 10.0  "How fast the rings travel outwards"
 void deform(inout Vertex v) {
   float h = sin(length(v.position.xy) / wavelength * 6.2831853 - uTime * speed * 6.2831853);
   v.position += v.normal * h * amplitude;
@@ -236,9 +236,9 @@ void deform(inout Vertex v) {
     "Sway by Field": """\
 // Sway by Field: bends a mesh (grass, cloth, hair cards) with a force function wired into 'field'
 // (e.g. Wind Field): the higher a vertex, the further it's pushed. Colour darkens where it bends most.
-// @in func vec3 field(vec3 p)
-// @in float amount 0.15 0.0 5.0
-// @in float height 0.6 0.01 10.0
+// @in func vec3 field(vec3 p)  "The force to sway with: wire in a function such as Wind Field's wind"
+// @in float amount 0.15 0.0 5.0  "How far it sways"
+// @in float height 0.6 0.01 10.0  "Height at which the sway is full; below it the mesh bends less (roots stay put)"
 void deform(inout Vertex v) {
   float k = clamp(v.position.z / height, 0.0, 1.0);
   vec3 push = field(v.position) * amount * k * k;
@@ -250,9 +250,9 @@ void deform(inout Vertex v) {
     # ---- functions for other nodes --------------------------------------------------------------------
     "Wind Field": """\
 // Wind Field: a gusty breeze as a function other nodes can call (wire 'wind' into Push by Field).
-// @in float strength 0.4 0.0 10.0
-// @in float gusts 0.7 0.0 5.0
-// @in float turbulence 0.3 0.0 5.0
+// @in float strength 0.4 0.0 10.0  "Average wind speed"
+// @in float gusts 0.7 0.0 5.0  "How much the wind rises and falls over time"
+// @in float turbulence 0.3 0.0 5.0  "Small-scale swirling on top of the breeze"
 // @out func wind
 vec3 wind(vec3 q) {
   float g = 0.6 + 0.4 * sin(uTime * gusts + q.y * 0.5);
@@ -271,9 +271,9 @@ def _scene_lights_code(slots=8):
             "// other nodes call: wire 'light' into a lit look (Material Look) or a GPU Surface's Lights input.",
             "// CodeNodes keeps the light data (hidden inputs) in step with the scene, up to 8 lamps.",
             "// No shadows are cast between GPU nodes and Blender objects.",
-            "// @in float intensity 1.0 0.0 10.0",
-            "// @in float world 1.0 0.0 10.0",
-            "// @out func light",
+            "// @in float intensity 1.0 0.0 10.0  \"Multiplies the brightness of the scene's lamps\"",
+            "// @in float world 1.0 0.0 10.0  \"Multiplies the world (sky) light\"",
+            "// @out func light  \"The scene's lighting as a function: wire it into a Look's or Surface's light input\"",
             "// @in hidden w_r 0.05", "// @in hidden w_g 0.05", "// @in hidden w_b 0.05"]
     fields = ("type", "px", "py", "pz", "dx", "dy", "dz", "r", "g", "b", "size", "c0", "c1")
     for i in range(slots):

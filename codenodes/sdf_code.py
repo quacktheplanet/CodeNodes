@@ -64,8 +64,8 @@ TEMPLATE = """\
 // Define sdf(p): the distance to the surface, negative inside, positive outside, in Blender units.
 // Helpers: sdSphere sdBox sdRoundBox sdTorus sdCapsule sdCylinder smin smax rotateX/Y/Z noise3 fbm3
 // Time: uTime (seconds), uFrame. Sliders: declare them like the lines below.
-// @param blend 0.35 0.0 1.0
-// @param wobble 0.08 0.0 0.3
+// @param blend 0.35 0.0 1.0  "How smoothly the spheres melt into each other"
+// @param wobble 0.08 0.0 0.3  "How much the blob wobbles over time"
 
 float sdf(vec3 p) {
   float d = sdSphere(p, 0.85);
@@ -80,7 +80,8 @@ float sdf(vec3 p) {
 }
 """
 
-_PARAM_RE = re.compile(r"^\s*//\s*@param\s+([A-Za-z_]\w*)\s+([-+0-9.eE]+)(?:\s+([-+0-9.eE]+)\s+([-+0-9.eE]+))?\s*$")
+_PARAM_RE = re.compile(r"^\s*//\s*@param\s+([A-Za-z_]\w*)\s+([-+0-9.eE]+)(?:\s+([-+0-9.eE]+)\s+([-+0-9.eE]+))?"
+                       r'(?:\s+"([^"]*)")?\s*$')
 _PARAM_START = re.compile(r"^\s*//\s*@param\b")
 _RESERVED = re.compile(r"^(cn[A-Z_]|gl_|u(Time|Frame)$)")
 # Parameters become #defines, so they can't shadow GLSL words or the helpers.
