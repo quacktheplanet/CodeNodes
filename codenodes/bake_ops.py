@@ -89,7 +89,7 @@ class CODENODES_OT_bake(bpy.types.Operator):
             self.report({'ERROR'}, str(exc).splitlines()[0])
             return {'CANCELLED'}
         except Exception as exc:
-            traceback.print_exc()
+            _report_exc()
             self.report({'ERROR'}, f"{type(exc).__name__}: {exc}")
             return {'CANCELLED'}
         finally:
@@ -175,3 +175,9 @@ def register():
 def unregister():
     for c in reversed(classes):
         bpy.utils.unregister_class(c)
+
+
+def _report_exc():
+    """Print the current error without letting Python touch freed Blender structs (see safe_errors)."""
+    from .safe_errors import report
+    report()

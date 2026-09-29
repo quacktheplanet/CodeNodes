@@ -1603,6 +1603,22 @@ def tap_of(src):
     return bpy.data.objects.get(f"CN Tap · {links.base_name(src)}")
 
 
+def _fresh(user):
+    """The same user (a group node or a modifier) looked up again by name, or None if it's gone. Blender
+    objects are never trusted across a rebuild: sockets are freed when a group's interface changes."""
+    kind, owner, thing = user
+    try:
+        if kind == 'node':
+            tree = bpy.data.node_groups.get(owner.name)
+            node = tree.nodes.get(thing.name) if tree is not None else None
+            return (kind, tree, node) if node is not None and node.node_tree is not None else None
+        obj = bpy.data.objects.get(owner.name)
+        mod = obj.modifiers.get(thing.name) if obj is not None else None
+        return (kind, obj, mod) if mod is not None and mod.node_group is not None else None
+    except (ReferenceError, AttributeError):
+        return None
+
+
 def sync():
     """One pass: split duplicates, match inputs to code, push values, queue rebuilds, show status."""
     from . import gn_sockets, gpu_live
@@ -1643,6 +1659,11 @@ def sync():
                 gpu_live.redraw()
             if s.live:
                 live.request(obj)
+        user = _fresh(user)                    # a template switch rebuilt the group: re-find everything
+        if user is None:
+            _dirty[0] = True
+            continue
+        group = user[2].node_tree if user[0] == 'node' else user[2].node_group
         if user[0] == 'node':
             gn_sockets.update_status(group, obj, [user[2]])
             edit = user[2].inputs.get(gn_sockets.EDIT)
@@ -1655,7 +1676,7 @@ def sync():
         if lights.sync():
             gpu_live.redraw()
     except Exception:
-        traceback.print_exc()
+        _report_exc()
     if host_map != gpu_live.hosts:
         gpu_live.hosts.clear()
         gpu_live.hosts.update(host_map)
@@ -1672,7 +1693,7 @@ def _poll():
             _dirty[0] = False
             sync()
     except Exception:
-        traceback.print_exc()
+        _report_exc()
     return POLL_S
 
 
@@ -1748,7 +1769,7 @@ def _on_save(*_args):
             if obj.codenodes.enabled and obj.name not in used:
                 bpy.data.objects.remove(obj)
     except Exception:
-        traceback.print_exc()
+        _report_exc()
 
 
 def register():
@@ -1767,3 +1788,9 @@ def unregister():
                     (bpy.app.handlers.load_post, _on_load), (bpy.app.handlers.save_pre, _on_save)):
         if fn in lst:
             lst.remove(fn)
+
+
+def _report_exc():
+    """Print the current error without letting Python touch freed Blender structs (see safe_errors)."""
+    from .safe_errors import report
+    report()

@@ -233,7 +233,7 @@ def _run_pending():
                 clear(obj)
         except Exception as exc:  # report on the source, never take Blender down
             import traceback
-            traceback.print_exc()
+            _report_exc()
             obj.codenodes.last_error = f"cache: {exc}"
     from . import gn_link, gpu_live
     gn_link._dirty[0] = True
@@ -352,3 +352,9 @@ def playback(owner, comp, scene):
         _upload(sim, state)
         sim.cache_key = key
     return sim
+
+
+def _report_exc():
+    """Print the current error without letting Python touch freed Blender structs (see safe_errors)."""
+    from .safe_errors import report
+    report()

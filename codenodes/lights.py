@@ -267,7 +267,7 @@ def _on_depsgraph(scene, depsgraph):
             gpu_live.redraw()
     except Exception:
         import traceback
-        traceback.print_exc()
+        _report_exc()
 
 
 def register():
@@ -277,3 +277,9 @@ def register():
 def unregister():
     if _on_depsgraph in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_on_depsgraph)
+
+
+def _report_exc():
+    """Print the current error without letting Python touch freed Blender structs (see safe_errors)."""
+    from .safe_errors import report
+    report()

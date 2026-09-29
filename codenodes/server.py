@@ -291,7 +291,7 @@ def _poll():
             _state["clients"] = alive
     except Exception:
         import traceback
-        traceback.print_exc()                       # never let a bug kill the timer
+        _report_exc()                       # never let a bug kill the timer
     return BUSY_INTERVAL if time.time() - _state["last"] < IDLE_AFTER else IDLE_INTERVAL
 
 
@@ -351,3 +351,9 @@ def unregister():
     if _on_load in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_load)
     stop()
+
+
+def _report_exc():
+    """Print the current error without letting Python touch freed Blender structs (see safe_errors)."""
+    from .safe_errors import report
+    report()

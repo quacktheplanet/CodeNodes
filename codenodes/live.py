@@ -232,7 +232,7 @@ def rebuild(obj):
         s.last_error = str(exc)
         return s.last_error
     except Exception as exc:   # never let a bug take Blender down; report it instead
-        traceback.print_exc()
+        _report_exc()
         s.last_error = f"internal error ({type(exc).__name__}): {exc}"
         return s.last_error
     nx, ny, nz = st["dims"]
@@ -309,7 +309,7 @@ def _poll_text():
                 if h != s.code_hash:
                     request(obj)
     except Exception:
-        traceback.print_exc()
+        _report_exc()
     return POLL_S
 
 
@@ -325,7 +325,7 @@ def _on_frame(scene, depsgraph=None):
             if s is not None and s.enabled and (s.animate or s.real_mode == 'EVERY_FRAME'):
                 rebuild(obj)
     except Exception:
-        traceback.print_exc()
+        _report_exc()
 
 
 _RENDER_HANDLERS = (("render_init", _render_started), ("render_complete", _render_ended),
@@ -349,3 +349,9 @@ def unregister():
     for fn in (_poll_text, _flush):
         if bpy.app.timers.is_registered(fn):
             bpy.app.timers.unregister(fn)
+
+
+def _report_exc():
+    """Print the current error without letting Python touch freed Blender structs (see safe_errors)."""
+    from .safe_errors import report
+    report()

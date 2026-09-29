@@ -611,7 +611,7 @@ def _show_code_tick():
                 break
     except Exception:
         import traceback
-        traceback.print_exc()
+        _report_exc()
     return 0.4
 
 
@@ -675,3 +675,9 @@ def unregister():
     bpy.types.NODE_MT_add.remove(_add_menu)
     for c in reversed(classes):
         bpy.utils.unregister_class(c)
+
+
+def _report_exc():
+    """Print the current error without letting Python touch freed Blender structs (see safe_errors)."""
+    from .safe_errors import report
+    report()

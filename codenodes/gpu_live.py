@@ -56,6 +56,91 @@ def fps():
     return _fps["value"]
 
 
+# ---- the preview clock -------------------------------------------------------------------------
+# Behaviour sliders (Wander's strength, a Vortex's spin...) change how particles *move*, so with the
+# timeline stopped they'd show nothing. While playback is paused, the viewport keeps its own clock
+# running: live particle chains (and surfaces or mesh code set to Animate) keep simulating on the GPU,
+# so a slider you drag shows its effect straight away. The scene frame never changes. Renders,
+# To Geometry and the GPU Cache always use the real frame; the preview runs its own copy of each
+# simulation (named with PREVIEW_SUFFIX) so it never disturbs them.
+
+PREVIEW_SUFFIX = "\x00preview"
+PREVIEW_HZ = 30.0
+_preview = {"extra": 0.0, "anchor": None, "last_tick": 0.0, "last_draw": 0.0, "running": False}
+
+
+def _playing():
+    wm = bpy.context.window_manager
+    return any(win.screen is not None and win.screen.is_animation_playing for win in getattr(wm, "windows", ()))
+
+
+def preview_allowed():
+    """The preference (on unless switched off in Preferences > Add-ons > CodeNodes)."""
+    from . import prefs
+    p = prefs.get()
+    return True if p is None else bool(getattr(p, "preview_while_paused", True))
+
+
+def preview_active(scene):
+    """True while the viewport runs its preview clock for this scene's current frame."""
+    return (_preview["running"] and not gpu_guard.rendering()
+            and _preview["anchor"] == (scene.name, scene.frame_current))
+
+
+def view_frame(scene):
+    """The frame the viewport shows: the scene's, plus the preview frames while playback is paused."""
+    if preview_active(scene):
+        return scene.frame_current + int(_preview["extra"])
+    return scene.frame_current
+
+
+def _animates(src):
+    from . import links
+    if links.ekind(src) == 'PARTICLES':
+        return True
+    return bool(getattr(src.codenodes, "animate", False))
+
+
+def _stop_preview():
+    from . import particles
+    _preview.update(running=False, extra=0.0, anchor=None)
+    for name in list(getattr(particles, "_sims", {}).keys()):
+        if name.endswith(PREVIEW_SUFFIX):
+            particles.forget(name)
+    redraw()
+
+
+def _preview_tick():
+    try:
+        if (not hosts or not preview_allowed() or gpu_guard.rendering() or bpy.app.background
+                or _playing()):
+            if _preview["running"]:
+                _stop_preview()
+            return 0.25
+        live_srcs = [bpy.data.objects.get(n) for n in list(hosts)]
+        if not any(o is not None and shows_live(o) and _animates(o) for o in live_srcs):
+            if _preview["running"]:
+                _stop_preview()
+            return 0.25
+        scene = bpy.context.scene
+        now = time.perf_counter()
+        key = (scene.name, scene.frame_current)
+        if _preview["anchor"] != key:                 # the frame was changed: start again from there
+            _preview.update(anchor=key, extra=0.0, last_tick=now, last_draw=now)
+        if not _preview["running"]:
+            _preview.update(running=True, last_tick=now, last_draw=now)
+        if now - _preview["last_draw"] > 1.0:         # nothing drew for a second (minimised, hidden)
+            _preview["last_tick"] = now
+            return 0.25
+        fps_ = scene.render.fps / (scene.render.fps_base or 1.0)
+        _preview["extra"] += min(now - _preview["last_tick"], 0.1) * fps_
+        _preview["last_tick"] = now
+        redraw()
+    except Exception:
+        _report_exc()
+    return 1.0 / PREVIEW_HZ
+
+
 # ---- emitters ---------------------------------------------------------------------------------
 
 def sample_emitter(emitter, host, n=None):
@@ -158,7 +243,7 @@ def sim_owner(src):
     return src, comp, values
 
 
-def step_particles(src, scene):
+def step_particles(src, scene, preview=False):
     """Advance a live particle pipeline to the scene's frame on the GPU (no readback).
     Returns (sim, composite, values): the composite and values are this pipeline's own (its look and
     warps); the sim may be its head's when the two share a simulation."""
@@ -175,7 +260,10 @@ def step_particles(src, scene):
     if cached is not None:
         return cached, comp, values
     emitter = emitters.get(owner.name) if os_.emitter is not None else None
-    sim, _steps = particles.advance(owner.name, sim_comp.source, os_.count, scene.frame_current,
+    use_preview = preview and preview_active(scene)
+    sim_name = owner.name + PREVIEW_SUFFIX if use_preview else owner.name
+    frame = view_frame(scene) if use_preview else scene.frame_current
+    sim, _steps = particles.advance(sim_name, sim_comp.source, os_.count, frame,
                                     scene.frame_start, fps, sim_values, os_.substeps, os_.stagger,
                                     os_.prewarm, emitter)
     return sim, comp, values
@@ -333,12 +421,12 @@ def _ubo(sim, values, cam=None, comp=None):
 def draw_particles(src, host, rv3d, scene):
     import gpu
     s = src.codenodes
-    got = step_particles(src, scene)
+    got = step_particles(src, scene, preview=True)
     if got is None:
         return
     sim, comp, values = got
     fps_ = scene.render.fps / (scene.render.fps_base or 1.0)
-    t = (scene.frame_current - scene.frame_start) / fps_
+    t = (view_frame(scene) - scene.frame_start) / fps_
     shape = comp.shape if comp.has_look else None
     if shape in ("glow", "firefly", "streak"):
         draw_sprites(sim, comp, values, host, rv3d, scene, t, shape)
@@ -579,8 +667,9 @@ def draw_surface(src, host, region, rv3d, scene):
     from . import lights
     fps_ = scene.render.fps / (scene.render.fps_base or 1.0)
     lit, mat = lights.surface_uniforms(src, scene)
+    frame = view_frame(scene) if _animates(src) else scene.frame_current
     raymarch.draw(src.name + "|" + host.name, s, source, _values(src), host.matrix_world, region, rv3d, scene,
-                  (scene.frame_current - scene.frame_start) / fps_, scene.frame_current, lit, mat)
+                  (frame - scene.frame_start) / fps_, frame, lit, mat)
 
 
 def _draw():
@@ -618,8 +707,9 @@ def _draw():
                 if not src.codenodes.last_error:
                     src.codenodes.last_error = "live: " + (str(exc) or type(exc).__name__)
                     if not isinstance(exc, SdfCodeError):
-                        traceback.print_exc()
+                        _report_exc()
     if drew:
+        _preview["last_draw"] = time.perf_counter()
         _fps["frames"] += 1
         _fps["total"] = _fps.get("total", 0) + 1
         _fps["last_ms"] = (time.perf_counter() - t0) * 1000
@@ -672,7 +762,7 @@ def deform_input(src, fresh=False):
     return got
 
 
-def run_deform(src, scene):
+def run_deform(src, scene, preview=False):
     """Run a GPU Mesh node's code on its incoming mesh. Returns the MeshState, or None."""
     from . import deform, links
     s = src.codenodes
@@ -683,13 +773,14 @@ def run_deform(src, scene):
     co, nrm, tris, key = inp
     state = deform.state_for(src.name, co, nrm, tris, key)
     fps_ = scene.render.fps / (scene.render.fps_base or 1.0)
-    state.run(comp.source, values, (scene.frame_current - scene.frame_start) / fps_, scene.frame_current)
+    frame = view_frame(scene) if preview and _animates(src) else scene.frame_current
+    state.run(comp.source, values, (frame - scene.frame_start) / fps_, frame)
     return state
 
 
 def draw_deform(src, host, rv3d, scene):
     from . import deform
-    state = run_deform(src, scene)
+    state = run_deform(src, scene, preview=True)
     if state is not None:
         deform.draw(state, host.matrix_world, rv3d)
 
@@ -713,7 +804,7 @@ def refresh_emitters():
                     emitter_for(src)
                     redraw()
                 except Exception:
-                    traceback.print_exc()
+                    _report_exc()
 
 
 @bpy.app.handlers.persistent
@@ -754,7 +845,7 @@ def refresh_deform_inputs():
                 live.request(src)
             redraw()
         except Exception:
-            traceback.print_exc()
+            _report_exc()
             _deform_dirty.discard(name)
 
 
@@ -765,7 +856,7 @@ def _tick():
         if _deform_dirty:
             refresh_deform_inputs()
     except Exception:
-        traceback.print_exc()
+        _report_exc()
     return 0.2
 
 
@@ -774,6 +865,7 @@ def register():
         _handle[0] = bpy.types.SpaceView3D.draw_handler_add(_draw, (), 'WINDOW', 'POST_VIEW')
     bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph)
     bpy.app.timers.register(_tick, first_interval=0.3, persistent=True)
+    bpy.app.timers.register(_preview_tick, first_interval=0.5, persistent=True)
 
 
 def unregister():
@@ -784,5 +876,14 @@ def unregister():
         bpy.app.handlers.depsgraph_update_post.remove(_on_depsgraph)
     if bpy.app.timers.is_registered(_tick):
         bpy.app.timers.unregister(_tick)
+    if bpy.app.timers.is_registered(_preview_tick):
+        bpy.app.timers.unregister(_preview_tick)
+    _preview.update(running=False, extra=0.0, anchor=None)
     hosts.clear()
     emitters.clear()
+
+
+def _report_exc():
+    """Print the current error without letting Python touch freed Blender structs (see safe_errors)."""
+    from .safe_errors import report
+    report()

@@ -230,8 +230,9 @@ def sync_outputs(group, obj):
             continue
         for node in tree.nodes:
             if node.type == 'GROUP' and node.node_tree == group:
-                saved.append((tree, node, [(l.from_socket.name, l.to_socket) for l in tree.links
-                                           if l.from_node == node]))
+                saved.append((tree.name, node.name,
+                              [(l.from_socket.name, l.to_node.name, l.to_socket.identifier, l.to_socket.name)
+                               for l in tree.links if l.from_node == node]))
     iface = group.interface
     for item in _outputs(iface):
         if (item.name, item.socket_type) not in wanted:
@@ -243,8 +244,16 @@ def sync_outputs(group, obj):
         item = next(i for i in _outputs(iface) if i.name == name and i.socket_type == stype)
         if item.position != pos:
             iface.move(item, pos)
-    for tree, node, links in saved:
-        for name, to in links:
+    for tree_name, node_name, links in saved:           # names only: re-found after the rebuild
+        tree = bpy.data.node_groups.get(tree_name)
+        node = tree.nodes.get(node_name) if tree is not None else None
+        if node is None:
+            continue
+        for name, to_node_name, to_id, to_name in links:
+            to_node = tree.nodes.get(to_node_name)
+            to = _socket_by(to_node.inputs, to_id, to_name) if to_node is not None else None
+            if to is None:
+                continue
             out = node.outputs.get(name)
             if out is None and name in ("Geometry", "Particles"):          # the stream was renamed
                 out = next((o for o in node.outputs if o.name in ("Particles", "Mesh", "Geometry")), None)
@@ -349,8 +358,19 @@ def sync_interface(group, obj):
     return True
 
 
+def _socket_by(sockets, identifier, name):
+    """Re-find a socket after a rebuild: by identifier first, then by name."""
+    for sock in sockets:
+        if sock.identifier == identifier:
+            return sock
+    return sockets.get(name) if name else None
+
+
 def _save_users(group):
-    """Links and typed values going into every node that uses `group`, by input name."""
+    """Links and typed values going into every node that uses `group`, by input name.
+
+    Everything is kept as names (tree, node, socket), never as Blender objects: rebuilding the group's
+    interface frees the node's sockets, and touching a freed socket later can crash Blender."""
     saved = []
     for tree in bpy.data.node_groups:
         if tree.bl_idname != "GeometryNodeTree":
@@ -358,7 +378,8 @@ def _save_users(group):
         for node in tree.nodes:
             if node.type != 'GROUP' or node.node_tree != group:
                 continue
-            links = [(l.from_socket, l.to_socket.name) for l in tree.links if l.to_node == node]
+            links = [(l.from_node.name, l.from_socket.identifier, l.from_socket.name, l.to_socket.name)
+                     for l in tree.links if l.to_node == node]
             values = {}
             for sock in node.inputs:
                 if hasattr(sock, "default_value") and sock.bl_idname != "NodeSocketMenu":
@@ -370,7 +391,7 @@ def _save_users(group):
                         pass
                 elif sock.bl_idname == "NodeSocketMenu":
                     values[sock.name] = (sock.bl_idname, sock.default_value)
-            saved.append((tree, node, links, values))
+            saved.append((tree.name, node.name, links, values))
     return saved
 
 
@@ -378,7 +399,11 @@ def _restore_users(group, saved, defaults=None):
     """Put back what went into each node; sockets that are new get the spec's default (Blender gives a
     socket added to a group in use a value of 0, not the interface default)."""
     defaults = defaults or {}
-    for tree, node, links, values in saved:
+    for tree_name, node_name, links, values in saved:
+        tree = bpy.data.node_groups.get(tree_name)
+        node = tree.nodes.get(node_name) if tree is not None else None
+        if node is None:
+            continue
         for sock in node.inputs:
             got = values.get(sock.name)
             if got is None or got[0] != sock.bl_idname:
@@ -397,11 +422,13 @@ def _restore_users(group, saved, defaults=None):
                     sock.default_value = got[1]
             except (TypeError, ValueError, AttributeError):
                 pass
-        for from_socket, name in links:
-            to = node.inputs.get(name)
-            if to is not None:
+        for from_node_name, from_id, from_name, to_name in links:
+            src = tree.nodes.get(from_node_name)
+            to = node.inputs.get(to_name)
+            frm = _socket_by(src.outputs, from_id, from_name) if src is not None else None
+            if to is not None and frm is not None:
                 try:
-                    tree.links.new(from_socket, to)
+                    tree.links.new(frm, to)
                 except RuntimeError:
                     pass
 
@@ -575,8 +602,14 @@ def switch_template(obj, key, user=None):
         pass
     if user is not None and user[0] == 'node':
         _kind, tree, node = user
+        tree_name, node_name = tree.name, node.name
         group = node.node_tree
         sync_interface(group, obj)
+        tree = bpy.data.node_groups.get(tree_name)            # re-find: the rebuild freed the old sockets
+        node = tree.nodes.get(node_name) if tree is not None else None
+        if node is None:
+            return
+        group = node.node_tree
         # show the template's own settings on the node
         for panel, name, stype, prop, lo, hi in SETTINGS.get(s.kind, []):
             sock = node.inputs.get(name)

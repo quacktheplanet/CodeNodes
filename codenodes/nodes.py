@@ -558,7 +558,7 @@ def _build_output(tree, out):
         out.error = str(exc)
         return out.error
     except Exception as exc:  # never let a bug take Blender down
-        traceback.print_exc()
+        _report_exc()
         out.error = f"internal error ({type(exc).__name__}): {exc}"
         return out.error
     nx, ny, nz = st["dims"]
@@ -595,7 +595,7 @@ def _build_shape_node(tree, node):
         node.error = str(exc)
         return node.error
     except Exception as exc:
-        traceback.print_exc()
+        _report_exc()
         node.error = f"internal error ({type(exc).__name__}): {exc}"
         return node.error
     node.error = ""
@@ -647,7 +647,7 @@ def _build_points_output(tree, out):
         out.error = str(exc)
         return out.error
     except Exception as exc:
-        traceback.print_exc()
+        _report_exc()
         out.error = f"internal error ({type(exc).__name__}): {exc}"
         return out.error
     out.error = ""
@@ -693,7 +693,7 @@ def _poll_text():
                 if live_outs and _code_hash(tree) != live_outs[0].code_hash:
                     request(tree)
     except Exception:
-        traceback.print_exc()
+        _report_exc()
     return POLL_S
 
 
@@ -708,7 +708,7 @@ def _on_frame(scene, depsgraph=None):
                     if out.animate:
                         build_output(tree, out)
     except Exception:
-        traceback.print_exc()
+        _report_exc()
 
 
 # ---- operators -----------------------------------------------------------------------
@@ -897,3 +897,9 @@ def unregister():
     bpy.types.NODE_MT_add.remove(_add_menu)
     for c in reversed(classes):
         bpy.utils.unregister_class(c)
+
+
+def _report_exc():
+    """Print the current error without letting Python touch freed Blender structs (see safe_errors)."""
+    from .safe_errors import report
+    report()

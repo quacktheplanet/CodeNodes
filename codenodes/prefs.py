@@ -33,9 +33,18 @@ class CodeNodesPreferences(bpy.types.AddonPreferences):
         default=False,
     )
 
+    preview_while_paused: BoolProperty(
+        name="Keep simulating in the viewport while paused",
+        description=("With the timeline stopped, live particle chains (and code set to Animate) keep moving in "
+                     "the viewport, so behaviour sliders show their effect straight away. The scene frame "
+                     "doesn't change, and renders, To Geometry and the GPU Cache always use the real frame"),
+        default=True,
+    )
+
     def draw(self, context):
         from . import server
         layout = self.layout
+        layout.prop(self, "preview_while_paused")
         layout.prop(self, "open_code_editor")
         layout.prop(self, "link_enabled")
         info = server.status()
