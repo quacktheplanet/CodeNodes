@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.3.0 (unreleased, draft): code nodes you write, wired into chains
+
+### A node's sockets come from its code
+- `// @in float|int name default min max`, `// @in color name r g b` and
+  `// @in func vec3 name(vec3 p)` become inputs; `// @out func name` and `// @out attr name` become
+  outputs. `@param` still works. Sockets change as soon as the code does.
+- Streams follow from the functions a node defines: `spawn` (a source, Particles out), `born` /
+  `behave` / `look` (particle stages), `warp` (particles and meshes alike), `deform` (meshes).
+- Socket types show what connects to what: Particles travel on Bundle sockets, functions on Closure
+  sockets, meshes on Geometry sockets, per-particle attributes come out as float fields.
+
+### Chains compile into one GPU program
+- A particle source and the GPU Stage nodes wired after it (or a mesh and its stages) are stitched
+  together. Each node's names get a per-node prefix, so nodes never clash, and modularity costs no
+  speed (the six-node firefly chain draws at about 150 fps).
+- Function sockets wire one node's function into another's input (Wind Field -> Push by Field; a GPU
+  Surface's `sdf` -> Collide with Shape).
+- Per-particle attributes (up to four per chain) are shared state every later node can read and
+  write, and To Geometry writes them out.
+- Compile errors name the node and the line in the code you wrote.
+- Warps run where particles are shown and converted, never in the simulation: straighten a Bend and
+  the swirl is exactly as before.
+
+### New: GPU Stage, and the starters the examples need
+- Particle stages: Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape.
+- Looks: Glow Look, and Firefly Look (a glowing abdomen with a soft halo, and flapping wings).
+- Warps: Bend (with an axis, stretch and twist) and Taper, on particles and meshes.
+- Mesh stages: Ripple. Functions: Wind Field.
+- Sources: Firefly Swarm and Spark Ball. GPU Mesh: Mesa.
+- The rest of the starter library is written up as proposals in docs/GPU_NODES.md.
+
+### Make Real is now To Geometry
+- Same node, clearer name; older files are renamed when they open. Its first input follows what comes
+  in (Particles or Geometry), and it writes every attribute the chain declares.
+
+### Also
+- A Bend (or any warp or deform stage) wired straight to ordinary geometry heads its own mesh chain.
+- The CodeNodes Sources collection is excluded from the view layer, so the Outliner stays clean.
+- The demo (`examples/gpu_demo.py`) has two scenes: Fireflies (a six-node chain; a firefly model with
+  flapping wings on each point for renders, lit by `brightness`, with bloom) and Bend. It is saved at a
+  window size that fits common screens, without the Spreadsheet, and every code node shows its
+  template's name.
+- The assistant can build chains: `code_stage` adds and wires a stage (MCP tool and skill updated).
+- `update()` is optional on a particle source: without it, the chain moves particles by their
+  velocity.
+- tests/test_modular.py (27 checks, Blender 5.0.1 and 5.1.2).
+
 ## 0.2.0 (unreleased, draft): GPU nodes
 
 ### GPU code as nodes, drawn live
