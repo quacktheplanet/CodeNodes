@@ -67,6 +67,14 @@ can wire it into more nodes (a Transform, a Join, an Instance on Points). Update
   template="Firefly Swarm", values={"Emit From": "Ground"})`, then `code_stage` Wander, Rise, Blink,
   Firefly Look.
 
+Code nodes form a **graph**: an output wired into two stages splits the stream (e.g. Blink → Firefly
+Look and Blink → Streak Look: heads and trails from one simulation); **Join Particles** merges two
+streams; one function output (Wind Field's `wind`, a surface's `sdf`, Scene Lights' `light`) can
+feed many nodes. **GPU Cache** bakes a particle simulation (its ⟳ Bake Now toggle) and plays it back;
+Blender's own Bake node works after To Geometry. **Scene Lights** + **Material Look** light code
+nodes with the scene's lamps and a Blender material (`// @in material mat`); a GPU Surface has Lights
+and Material inputs. Every node's code and sockets: docs/NODE_REFERENCE.md in the repo.
+
 GPU nodes (mesh, particles, deform, stages) are drawn live in the viewport and are not real
 geometry until a To Geometry node follows them; `code_node` adds one by default. `render()`
 includes live-only GPU nodes too (they're made real just for that frame).
