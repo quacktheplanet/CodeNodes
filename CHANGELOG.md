@@ -13,6 +13,11 @@
   - stages: **Gravity to Bodies**, **Collide with Bodies**, **Follow Body** (a warp), **Star Colours**,
     **Colour by Height**
   - **Planet Terrain** (GPU Mesh) and **Sun** (GPU Surface)
+- **F12 and Ctrl+F12 render GPU nodes.** With GPU code nodes in the scene, F12, Ctrl+F12 and Render ›
+  Render Image / Render Animation step the GPU for each frame, convert, then render (the GPU and the
+  renderer take turns). Stills go to the Render window; animations go to the output path in its format,
+  movies included. A scene without GPU nodes gets Blender's own render. tests/test_render_f12.py
+  presses the real keys, and passes with a copy of a real user profile (other add-ons installed) too.
 - **`uSceneTime`**: the timeline's time, which stays on the timeline's frame while the viewport
   previews a paused scene, so live particles line up with real geometry.
 - Function inputs with any signature (ints, several arguments, none) are documented and used by the

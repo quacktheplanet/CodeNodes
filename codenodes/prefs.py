@@ -41,9 +41,19 @@ class CodeNodesPreferences(bpy.types.AddonPreferences):
         default=True,
     )
 
+    render_gpu_nodes: BoolProperty(
+        name="F12 and Render menu include GPU nodes",
+        description=("When the scene has GPU code nodes, F12, Ctrl+F12 and Render › Render Image / Animation "
+                     "render them: for each frame CodeNodes runs the GPU code, turns the results into geometry, "
+                     "then renders that frame (the GPU and the renderer take turns). Off: Blender's own render, "
+                     "which only shows what To Geometry has already made"),
+        default=True,
+    )
+
     def draw(self, context):
         from . import server
         layout = self.layout
+        layout.prop(self, "render_gpu_nodes")
         layout.prop(self, "preview_while_paused")
         layout.prop(self, "open_code_editor")
         layout.prop(self, "link_enabled")

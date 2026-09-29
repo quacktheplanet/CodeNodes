@@ -18,7 +18,7 @@ scenes as interactive web pages.
 
 ![Night falls on the Aerie castle: fireflies glow across a plateau shaped by GPU code](docs/gpu_demo.jpg)
 
-*The demo scene (`examples/gpu_demo.py`), rendered with Render › Render Image with CodeNodes:*
+*The demo scene (`examples/gpu_demo.py`), rendered with F12:*
 - *a flat grid shaped into a plateau by a GPU Mesh node*
 - *the Aerie citadel as a GPU Surface, raymarched live*
 - *fireflies from a chain of six code nodes, with a little firefly model on each for the render*
@@ -54,7 +54,8 @@ After installing (see [Install](#install)), open the demo (build it with `exampl
    carrying `velocity`, `age` and each attribute the chain declares (Blink's `brightness` and
    `phase`). Wire them into Instance on Points, Set Material or anything else. Set its **When** to
    *Only for Render* to keep the live look in the viewport.
-6. **Render › Render Image with CodeNodes** renders with the GPU nodes included.
+6. **F12** (or Render › Render Image) renders with the GPU nodes included; **Ctrl+F12** renders the
+   animation, to the output path in its format (movies too).
 7. Code nodes form a **graph**: wire Blink's **Particles** output into both Firefly Look and
    **Streak Look**, and you get glowing heads *and* trails from one simulation. **Join Particles**
    merges two streams; one **Wind Field** can push the fireflies and sway a grass mesh at once.
@@ -100,17 +101,21 @@ and proposals for the rest of the starter library.
 - the six-node firefly chain at about 150
 - all depth-tested against your objects
 
-That's a viewport picture: it isn't selectable, and later nodes and Blender's own F12 can't see it.
-**To Geometry** turns it into geometry.
+That's a viewport picture: it isn't selectable, and later nodes can't see it. **To Geometry** turns
+it into geometry.
 
-**Rendering.** Running GPU code while Blender renders crashes Blender, so CodeNodes takes turns.
-**Render › Render Image / Animation with CodeNodes** does this for each frame:
+**Rendering: just press F12.** Running GPU code while Blender renders crashes Blender, so when a
+scene has GPU code nodes, F12, Ctrl+F12 and Render › Render Image / Render Animation take turns, for
+each frame:
 1. step the GPU chains to that frame
-2. convert them
+2. convert them (live-only chains just for the render)
 3. render that frame, then move on
 
-No bake is needed. Blender's own F12 renders what's real (To Geometry, bakes) and CodeNodes stays off
-the GPU while it runs. For command-line or farm renders, bake first.
+No bake is needed. Stills land in the Render window, animations are written to the output path in its
+format (a movie is written from the rendered frames with Blender's own movie writer), and a scene
+without GPU nodes gets Blender's own render. The Rendered viewport keeps drawing the live GPU nodes. A
+preference (CodeNodes › "F12 and Render menu include GPU nodes") switches it off. For command-line or
+farm renders, bake first.
 
 **Tab into a code node** to see its code in a frame, and its full status or error in another. The
 Node Editor sidebar (N) only has what Blender can't put on a node: an Edit Code button, an Add To
@@ -181,7 +186,7 @@ scene, the asteroids keep moving, but the planets they orbit stay where the real
 | **GPU Surface** | a distance function raymarched live in the viewport, lit, depth-tested with your objects; To Geometry → a watertight mesh | works |
 | **GPU Mesh** | code run on every vertex of the mesh wired into it; To Geometry → the same topology with new positions, `color` and `value` | works |
 | **To Geometry** | the node that turns a GPU node's result into real geometry: When (every frame / when changed / only for render), limits, attributes | works |
-| **Render with CodeNodes** | Render › Render Image / Animation with CodeNodes: GPU and renderer take turns per frame, no bake needed | works |
+| **Rendering GPU nodes** | F12, Ctrl+F12 and the Render menu: GPU and renderer take turns per frame, no bake needed | works |
 | **Everything on the node** | settings as node inputs (Template dropdown, count, colours, toggles), status in the header, ✎ Edit Code toggle opens a code pop-up | works |
 | **Node editor** | code nodes with typed sockets that compile into one GPU program | works |
 | **Bake to Disk** | animations written to files that play back with stock nodes; renders with no GPU and no add-on | works |

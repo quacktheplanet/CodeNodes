@@ -202,7 +202,7 @@ line:
     otherwise
   - Every Frame
   - When Changed
-  - Only for Render: stays live in the viewport, and is converted for Render with CodeNodes
+  - Only for Render: stays live in the viewport, and is converted for renders (F12, Ctrl+F12)
 - **Resolution** for surfaces, or **Max Points** for particles.
 - **Keep Velocity** and **Keep Age** pick which particle attributes to write. The chain's own
   attributes (`brightness`, `phase`, …) are always written.
@@ -249,16 +249,26 @@ Sources" collection, which is excluded from the view layer. Object Info still re
 
 The GPU must never run while Blender's renderer works: that crashes Blender. So:
 
-1. **Render › Render Image / Render Animation with CodeNodes.** For each frame, on Blender's main
-   thread:
+1. **F12, Ctrl+F12 and Render › Render Image / Render Animation**, when the scene has GPU code nodes.
+   For each frame, on Blender's main thread:
    1. Step every GPU chain to that frame.
-   2. Convert it. Chains without To Geometry are converted just for the render, then go back to live.
+   2. Convert it. Chains without To Geometry (or set to Only for Render) are converted just for the
+      render, then go back to live.
    3. Render that one frame and wait for it.
 
-   The GPU and the renderer take turns, so no bake is needed. The tests count GPU work during
-   rendering, and it stays at 0.
-2. **Blender's own F12 / Ctrl+F12** render what is real: chains with To Geometry, and baked caches.
-   CodeNodes refuses all GPU work while any render runs. Live-only chains don't appear there.
+   The GPU and the renderer take turns, so no bake is needed. A still lands in the Render window. An
+   animation is written to the output path in the output format; a movie format is written by
+   rendering the frames, then encoding them with Blender's own movie writer. The tests press the real
+   keys (tests/test_render_f12.py) and count GPU work during rendering: it stays at 0.
+   - How: CodeNodes adds F12 and Ctrl+F12 to the Screen key map and takes the Render menu's first two
+     items, calling `codenodes.render_auto`. A scene without GPU nodes, or the preference "F12 and Render
+     menu include GPU nodes" switched off, gets Blender's own render.
+   - Why not a render handler: Blender runs render_init, and frame_change_pre during an animation render,
+     on the render job's thread, where GPU work crashes.
+   - Not covered: `bpy.ops.render.render()` called directly by a script, and command-line renders. They
+     render what is real (To Geometry results, bakes). Use `bpy.ops.codenodes.render()` in a script.
+2. **The Rendered viewport** (EEVEE or Cycles) keeps drawing the live GPU nodes over the render.
+   CodeNodes refuses all GPU work while any final render runs.
 
 The live glow is a viewport drawing, so a render gets what your nodes build from the converted
 points. The demo places a small firefly model on each point, flaps its wings from `phase` and the
@@ -349,7 +359,7 @@ and Closure sockets, and frames that show text. The same tests run on both.
 
 ## Limits, honestly
 
-- **Live results are an overlay until converted:** not selectable, not in Blender's own F12, not
+- **Live results are an overlay until converted:** not selectable, not in a direct `bpy.ops.render.render()`, not
   visible to later nodes.
 - **Branches made real run their own simulation:** live branches share their head's simulation, but
   a branch that To Geometry converts steps its own copy (the same particles, computed again).

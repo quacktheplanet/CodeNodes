@@ -1,18 +1,28 @@
-"""Render › Render Image / Render Animation with CodeNodes.
+"""Rendering GPU nodes: F12, Ctrl+F12 and Render › Render Image / Render Animation.
 
 The GPU must never run while Blender's renderer works (that crashes Blender), so this takes turns.
 For each frame, on the main thread: step every GPU node to the frame, make its result real, render
 that one frame and wait for it, then go on. No bake is needed first. GPU nodes that are only drawn
 live (no To Geometry after them) are made real just for the render, then go back to being live.
 
-Blender's own F12 / Ctrl+F12 still work: they render whatever is real or baked, and CodeNodes
-refuses all GPU work while they run.
+When the scene has GPU code nodes, F12, Ctrl+F12 and the Render menu's Render Image / Render Animation
+go through this: an add-on key map entry and the Render menu's first two items call
+`codenodes.render_auto`, which falls back to Blender's own render when there are no GPU nodes (or when
+the preference is off). Blender's render handlers (render_init, and frame_change_pre during an animation
+render) run on the render job's thread, where GPU work crashes, so the stepping can't be done from them.
+
+Stills land in Blender's Render window. Animations write every frame to the scene's output path in its
+format; a movie format is written by rendering the frames to PNG, then encoding them with Blender's own
+movie writer (a temporary scene plays them as an image strip).
 """
 
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 import time
+import types
 
 import bpy
 from bpy.props import BoolProperty
@@ -34,6 +44,9 @@ def gpu_sources():
 
 
 RENDER_JOIN = "CodeNodes render join"
+
+# The last CodeNodes render: frames rendered, whether it finished, where it went (for tests and reports)
+LAST = {"count": 0, "frames": 0, "finished": False, "animation": False, "path": ""}
 
 
 def _host_trees(src):
@@ -85,6 +98,36 @@ def _link_in_host(src, on):
 
 def _group_of(src):
     return next((g for g in bpy.data.node_groups if gn_link.is_code_group(g) and g[gn_link.TAG] == src.name), None)
+
+
+def _trees_containing(group):
+    """Every Geometry Nodes tree that uses `group`, directly or through nested groups."""
+    found, todo = set(), [group]
+    while todo:
+        g = todo.pop()
+        for t in bpy.data.node_groups:
+            if t.bl_idname == "GeometryNodeTree" and t not in found and \
+                    any(n.type == 'GROUP' and n.node_tree == g for n in t.nodes):
+                found.add(t)
+                todo.append(t)
+    return found
+
+
+def scene_has_gpu_nodes(scene):
+    """True when an object this scene renders uses a GPU code node (directly or in a nested group)."""
+    trees = set()
+    for src in gpu_sources():
+        group = _group_of(src)
+        if group is not None:
+            trees |= _trees_containing(group)
+    if not trees:
+        return False
+    for obj in scene.objects:
+        if obj.hide_render:
+            continue
+        if any(m.type == 'NODES' and m.show_render and m.node_group in trees for m in obj.modifiers):
+            return True
+    return False
 
 
 def _link_for_render(src, on):
@@ -158,16 +201,25 @@ class CODENODES_OT_render(bpy.types.Operator):
 
     _timer = None
 
-    def invoke(self, context, event):
+    def _setup(self, context):
         scene = context.scene
         self.sources = gpu_sources()
         self.frames = (list(range(scene.frame_start, scene.frame_end + 1, max(1, scene.frame_step)))
                        if self.animation else [scene.frame_current])
         self.orig = scene.frame_current
         self.done = 0
-        self.t0 = time.perf_counter()
         self.movie = self.animation and _is_movie(scene)
+        self.pngs = []
+        self.tmpdir = tempfile.mkdtemp(prefix="codenodes_frames_") if self.movie else None
+
+    def invoke(self, context, event):
+        self._setup(context)
+        self.t0 = time.perf_counter()
         self.guard_before = gpu_guard.stats()["during_render"]
+        try:                                     # the Render window, as with Blender's own F12
+            bpy.ops.render.view_show('INVOKE_DEFAULT')
+        except RuntimeError:
+            pass
         if self.animation:
             context.window_manager.progress_begin(0, len(self.frames))
         wm = context.window_manager
@@ -178,17 +230,28 @@ class CODENODES_OT_render(bpy.types.Operator):
     def execute(self, context):
         """Blocking version (scripts and tests): render every frame, then return."""
         scene = context.scene
-        self.sources = gpu_sources()
-        self.frames = (list(range(scene.frame_start, scene.frame_end + 1, max(1, scene.frame_step)))
-                       if self.animation else [scene.frame_current])
-        self.orig = scene.frame_current
-        self.movie = self.animation and _is_movie(scene)
-        for i, frame in enumerate(self.frames):
+        self._setup(context)
+        for frame in self.frames:
             self._render_one(context, frame)
         if self.animation:
             scene.frame_set(self.orig)
+        self._write_movie(context)
+        self._record(True)
         self.report({'INFO'}, self._summary())
         return {'FINISHED'}
+
+    def _record(self, finished):
+        LAST.update(count=LAST["count"] + 1, frames=len(self.frames), finished=finished,
+                    animation=bool(self.animation), path=bpy.context.scene.render.filepath)
+
+    def _write_movie(self, context):
+        if not self.movie:
+            return
+        try:
+            if self.pngs:
+                encode_movie(context.scene, self.pngs)
+        finally:
+            shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _summary(self):
         n = len(self.frames)
@@ -203,21 +266,28 @@ class CODENODES_OT_render(bpy.types.Operator):
         finally:
             finish(self.sources, temporary)
         if self.animation:
-            path = scene.render.frame_path(frame=frame)
-            if self.movie:
-                root, _ext = os.path.splitext(path)
-                path = root + ".png"
             img = bpy.data.images.get("Render Result")
-            if img is not None:
-                if self.movie:
-                    fmt = scene.render.image_settings.file_format
-                    scene.render.image_settings.file_format = 'PNG'
-                    try:
-                        img.save_render(path, scene=scene)
-                    finally:
-                        scene.render.image_settings.file_format = fmt
-                else:
+            if img is None:
+                return
+            if self.movie:
+                path = os.path.join(self.tmpdir, f"frame_{frame:06d}.png")
+                settings = scene.render.image_settings
+                media = getattr(settings, "media_type", None)
+                fmt = settings.file_format
+                if media is not None:
+                    settings.media_type = 'IMAGE'         # Blender 5: PNG is an image format
+                settings.file_format = 'PNG'
+                try:
                     img.save_render(path, scene=scene)
+                finally:
+                    if media is not None:
+                        settings.media_type = media
+                    settings.file_format = fmt
+                self.pngs.append(path)
+            else:
+                path = scene.render.frame_path(frame=frame)
+                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+                img.save_render(path, scene=scene)
 
     def modal(self, context, event):
         wm = context.window_manager
@@ -238,6 +308,9 @@ class CODENODES_OT_render(bpy.types.Operator):
 
     def _end(self, context, cancelled=False):
         wm = context.window_manager
+        if cancelled and self.movie:
+            shutil.rmtree(self.tmpdir, ignore_errors=True)
+            self.movie = False
         if self._timer is not None:
             wm.event_timer_remove(self._timer)
         if self.animation:
@@ -245,40 +318,161 @@ class CODENODES_OT_render(bpy.types.Operator):
             context.scene.frame_set(self.orig)
         context.workspace.status_text_set(None)
         if cancelled:
+            self._record(False)
             self.report({'WARNING'}, f"CodeNodes render stopped after {self.done} frame(s)")
             return {'CANCELLED'}
-        if not self.animation:
-            try:
-                bpy.ops.render.view_show('INVOKE_DEFAULT')
-            except RuntimeError:
-                pass
-        msg = self._summary()
-        if self.movie:
-            msg += " (as PNG frames: a movie can't be written frame by frame; join them in the Video Editor)"
-        self.report({'INFO'}, msg)
+        self._write_movie(context)
+        self._record(True)
+        self.report({'INFO'}, self._summary())
         return {'FINISHED'}
 
 
-def _render_menu(self, context):
+def _copy_rna(src, dst):
+    for prop in src.bl_rna.properties:
+        if prop.identifier == "rna_type" or prop.is_readonly:
+            continue
+        try:
+            setattr(dst, prop.identifier, getattr(src, prop.identifier))
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+
+def encode_movie(scene, pngs):
+    """Write rendered PNG frames as the movie the scene's output settings ask for, with Blender's own
+    movie writer: a temporary scene plays them as an image strip and renders its sequencer."""
+    tmp = bpy.data.scenes.new("CodeNodes movie")
+    try:
+        r, s = tmp.render, scene.render
+        for attr in ("resolution_x", "resolution_y", "resolution_percentage", "fps", "fps_base", "filepath",
+                     "pixel_aspect_x", "pixel_aspect_y", "use_file_extension"):
+            setattr(r, attr, getattr(s, attr))
+        if hasattr(r.image_settings, "media_type"):
+            r.image_settings.media_type = s.image_settings.media_type     # Blender 5: before the format
+        r.image_settings.file_format = s.image_settings.file_format
+        _copy_rna(s.image_settings, r.image_settings)
+        _copy_rna(s.ffmpeg, r.ffmpeg)
+        r.use_sequencer, r.use_compositing = True, False
+        tmp.view_settings.view_transform = 'Standard'   # the PNGs already carry the scene's colour management
+        tmp.view_settings.look = 'None'
+        tmp.view_settings.exposure, tmp.view_settings.gamma = 0.0, 1.0
+        tmp.frame_start = scene.frame_start
+        tmp.frame_end = scene.frame_start + len(pngs) - 1
+        se = tmp.sequence_editor_create()
+        strips = getattr(se, "strips", None)
+        if strips is None:
+            strips = se.sequences
+        strip = strips.new_image(name="CodeNodes frames", filepath=pngs[0], channel=1,
+                                 frame_start=scene.frame_start)
+        for path in pngs[1:]:
+            strip.elements.append(os.path.basename(path))
+        try:
+            strip.colorspace_settings.name = 'sRGB'
+        except (AttributeError, TypeError):
+            pass
+        bpy.ops.render.render(animation=True, scene=tmp.name)
+    finally:
+        bpy.data.scenes.remove(tmp)
+
+
+def wants_codenodes_render(scene):
+    from . import prefs
+    p = prefs.get()
+    if p is not None and not p.render_gpu_nodes:
+        return False
+    return scene is not None and scene_has_gpu_nodes(scene)
+
+
+class CODENODES_OT_render_auto(bpy.types.Operator):
+    """Render the scene; with GPU code nodes, CodeNodes steps them for each frame and renders them too"""
+    bl_idname = "codenodes.render_auto"
+    bl_label = "Render"
+    bl_description = ("Render the scene. When it has GPU code nodes, CodeNodes runs their GPU code for each "
+                      "frame, turns the results into geometry and renders that, so they're in the picture; "
+                      "otherwise this is Blender's own render")
+
+    animation: BoolProperty(name="Animation", default=False)
+    use_viewport: BoolProperty(name="Use 3D Viewport", default=False)
+
+    def invoke(self, context, event):
+        return self.execute(context)
+
+    def execute(self, context):
+        if wants_codenodes_render(context.scene):
+            ret = bpy.ops.codenodes.render('INVOKE_DEFAULT', animation=self.animation)
+        else:
+            ret = bpy.ops.render.render('INVOKE_DEFAULT', animation=self.animation, use_viewport=self.use_viewport)
+        return {'FINISHED'} if ret & {'FINISHED', 'RUNNING_MODAL'} else {'CANCELLED'}
+
+
+class _SkipRender:
+    """Hands Blender's Render menu drawing through, leaving out its first two render.render entries
+    (ours take their place)."""
+
+    def __init__(self, layout, skip):
+        self._layout, self._skip = layout, skip
+
+    def operator(self, idname, *args, **kwargs):
+        if self._skip and idname == "render.render":
+            self._skip -= 1
+            return types.SimpleNamespace()
+        return self._layout.operator(idname, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._layout, name)
+
+
+_menu_orig = [None]
+
+
+def _render_menu_draw(self, context):
+    orig = _menu_orig[0]
+    if not wants_codenodes_render(context.scene):
+        return orig(self, context)
     layout = self.layout
-    layout.separator()
-    op = layout.operator(CODENODES_OT_render.bl_idname, text="Render Image with CodeNodes", icon='RENDER_STILL')
-    op.animation = False
-    op = layout.operator(CODENODES_OT_render.bl_idname, text="Render Animation with CodeNodes",
-                         icon='RENDER_ANIMATION')
-    op.animation = True
+    op = layout.operator(CODENODES_OT_render_auto.bl_idname, text="Render Image", icon='RENDER_STILL')
+    op.use_viewport = True
+    op = layout.operator(CODENODES_OT_render_auto.bl_idname, text="Render Animation", icon='RENDER_ANIMATION')
+    op.animation, op.use_viewport = True, True
+    return orig(types.SimpleNamespace(layout=_SkipRender(layout, 2)), context)
 
 
-classes = (CODENODES_OT_render,)
+_keymaps = []
+
+
+def _add_keymaps():
+    kc = bpy.context.window_manager.keyconfigs.addon
+    if kc is None:
+        return
+    km = kc.keymaps.new(name="Screen", space_type='EMPTY')
+    for ctrl, anim in ((False, False), (True, True)):
+        kmi = km.keymap_items.new(CODENODES_OT_render_auto.bl_idname, 'F12', 'PRESS', ctrl=ctrl)
+        kmi.properties.animation = anim
+        kmi.properties.use_viewport = True
+        _keymaps.append((km, kmi))
+
+
+classes = (CODENODES_OT_render, CODENODES_OT_render_auto)
 
 
 def register():
     for c in classes:
         bpy.utils.register_class(c)
-    bpy.types.TOPBAR_MT_render.append(_render_menu)
+    funcs = bpy.types.TOPBAR_MT_render._dyn_ui_initialize()
+    if funcs and funcs[0] is not _render_menu_draw:
+        _menu_orig[0] = funcs[0]
+        funcs[0] = _render_menu_draw
+    _add_keymaps()
 
 
 def unregister():
-    bpy.types.TOPBAR_MT_render.remove(_render_menu)
+    for km, kmi in _keymaps:
+        try:
+            km.keymap_items.remove(kmi)
+        except (ReferenceError, RuntimeError):
+            pass
+    _keymaps.clear()
+    funcs = bpy.types.TOPBAR_MT_render._dyn_ui_initialize()
+    if funcs and funcs[0] is _render_menu_draw and _menu_orig[0] is not None:
+        funcs[0] = _menu_orig[0]
     for c in reversed(classes):
         bpy.utils.unregister_class(c)

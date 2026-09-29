@@ -71,7 +71,11 @@ Code nodes form a **graph**: an output wired into two stages splits the stream (
 Look and Blink → Streak Look: heads and trails from one simulation); **Join Particles** merges two
 streams; one function output (Wind Field's `wind`, a surface's `sdf`, Scene Lights' `light`) can
 feed many nodes. **GPU Cache** bakes a particle simulation (its ⟳ Bake Now toggle) and plays it back;
-Blender's own Bake node works after To Geometry. **Scene Lights** + **Material Look** light code
+Blender's own Bake node works after To Geometry. Function outputs can take any signature (ints,
+several arguments): **Orbits** gives `planetPos(i, t)`, `planetRadius(i)`, `planetMass(i)` and
+`planetCount()`, which **Points from Function**, **Gravity to Bodies**, **Collide with Bodies** and
+**Follow Body** consume (examples/galaxy_scene.py builds a whole solar system this way). Use
+`uSceneTime` (the timeline's time) in code that must line up with real geometry. **Scene Lights** + **Material Look** light code
 nodes with the scene's lamps and a Blender material (`// @in material mat`); a GPU Surface has Lights
 and Material inputs. Every node's code and sockets: docs/NODE_REFERENCE.md in the repo.
 
@@ -114,6 +118,6 @@ Read `nodes_help()` first. The rules that matter:
 - Build in steps and look after each one, rather than writing everything in one call.
 - Prefer editing what exists (`get_code`, `nodes_read`) over replacing it: the user may
   have tuned values.
-- Final renders and animations: `bake(name)` code objects first, so they play and render
-  without the GPU code running.
+- Final renders: F12 and Ctrl+F12 include GPU nodes when the scene has them (CodeNodes steps the GPU
+  between frames). For command-line or farm renders, `bake(name)` code objects first.
 - If a tool says Blender isn't open, don't retry in a loop: tell the user.

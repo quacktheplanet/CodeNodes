@@ -514,7 +514,8 @@ def phase_render(st):
     check(gpu_guard.stats()["during_render"] == 0, f"Blender's own F12 runs no GPU code while it renders "
           f"({gpu_guard.stats()})")
     menu = bpy.types.TOPBAR_MT_render._dyn_ui_initialize()
-    check(render_ops._render_menu in menu, "Render › Render Image / Animation with CodeNodes are in the Render menu")
+    check(menu and menu[0] is render_ops._render_menu_draw,
+          "the Render menu's Render Image / Render Animation go through CodeNodes (and F12 / Ctrl+F12 too)")
     bpy.ops.wm.save_as_mainfile(filepath=SAVE)
     return True
 
