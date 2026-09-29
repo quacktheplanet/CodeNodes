@@ -132,11 +132,16 @@ def stream_inputs(obj):
     return out
 
 
+SURFACE_LINKS = ("Lights", "Material")      # GPU Surface inputs for Scene Lights and Material Look
+
+
 def param_sockets(obj):
     """[(name, socket type, default, min, max)] for the code's sliders: floats, whole numbers, colours."""
     out = []
     params = list(obj.codenodes.params)
     for p in params:
+        if p.kind == 'HIDDEN':
+            continue                        # filled in by the add-on (light data, material values)
         if p.kind == 'COLOR':
             if not p.name.endswith("_r"):
                 continue
@@ -167,8 +172,15 @@ def spec(obj):
     for name, stype, default, lo, hi in param_sockets(obj):
         out.append((None, name, stype, default, lo, hi, None))
     if s.kind in ('PARTICLES', 'STAGE', 'DEFORM', 'MESH'):
-        for f in decls_of(obj).func_ins:
+        d = decls_of(obj)
+        for m in d.materials:
+            out.append((None, m, "NodeSocketMaterial", None, None, None, None))
+        for f in d.func_ins:
             out.append((None, f.name, "NodeSocketClosure", None, None, None, None))
+    if s.kind == 'MESH':
+        # a surface can be lit by the scene's lights and take a Blender material's values
+        for name in SURFACE_LINKS:
+            out.append((None, name, "NodeSocketClosure", None, None, None, None))
     for panel, name, stype, prop, lo, hi in SETTINGS.get(s.kind, []):
         if panel is not None:
             out.append((panel, name, stype, setting_value(s, prop), lo, hi, MENU_ITEMS.get(name)))

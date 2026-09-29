@@ -144,13 +144,46 @@ vec4 look(Particle p) {
 // @in float intensity 3.0 0.0 40.0
 // @in float size 0.012 0.001 0.2
 // @in float flap 18.0 0.0 60.0
-// @in float wing 1.6 0.2 5.0
+// @in float wing 2.4 0.2 6.0
 // @out attr brightness 1.0
 // @out attr phase 0.0
 vec4 look(Particle p) {
   float k = clamp(p.age / max(p.life, 1e-4), 0.0, 1.0);
   float fade = smoothstep(0.0, 0.08, k) * smoothstep(1.0, 0.9, k);
   return vec4(glow * intensity * (0.08 + 0.92 * p.brightness) * fade, 1.0);
+}
+""",
+    "Streak Look": """\
+// Streak Look: each particle drawn as a glowing streak along its motion (a trail). Wire it next to
+// another look from the same stream to get heads and trails from the same particles.
+// @shape streak
+// @in color tint 0.55 0.75 1.0
+// @in float intensity 1.2 0.0 20.0
+// @in float size 0.01 0.001 0.5
+// @in float trail 0.25 0.0 5.0
+vec4 look(Particle p) {
+  float k = clamp(p.age / max(p.life, 1e-4), 0.0, 1.0);
+  float fade = smoothstep(0.0, 0.1, k) * smoothstep(1.0, 0.85, k);
+  return vec4(tint * intensity * fade, 1.0);
+}
+""",
+    "Material Look": """\
+// Material Look: particles in a Blender material's colours (its Principled BSDF: base colour,
+// roughness, metallic, emission), lit by the scene when a Scene Lights node is wired into 'light'.
+// Wire its 'material' output into a GPU Surface's Material input to shade a surface with it.
+// Each particle is shaded as a small sphere facing the camera.
+// @shape glow
+// @in material mat
+// @in func vec3 light(vec3 p, vec3 n, vec3 v, vec3 albedo, float roughness, float metallic) = albedo * 0.8
+// @in float size 0.03 0.001 1.0
+// @in float brightness 1.0 0.0 10.0
+// @out func material
+vec4 material(vec3 q) { return vec4(mat_base, mat_roughness); }
+vec4 look(Particle p) {
+  vec3 v = normalize(cnCamera - p.position);
+  vec3 n = normalize(v + vec3(0.0, 0.0, 0.35));
+  vec3 c = light(p.position, n, v, mat_base, mat_roughness, mat_metallic) + mat_emit;
+  return vec4(c * brightness, mat_alpha);
 }
 """,
     # ---- both: space warps ------------------------------------------------------------------------
@@ -200,6 +233,20 @@ void deform(inout Vertex v) {
   v.color = vec4(mix(vec3(0.15, 0.35, 0.8), vec3(0.9, 0.95, 1.0), h * 0.5 + 0.5), 1.0);
 }
 """,
+    "Sway by Field": """\
+// Sway by Field: bends a mesh (grass, cloth, hair cards) with a force function wired into 'field'
+// (e.g. Wind Field): the higher a vertex, the further it's pushed. Colour darkens where it bends most.
+// @in func vec3 field(vec3 p)
+// @in float amount 0.15 0.0 5.0
+// @in float height 0.6 0.01 10.0
+void deform(inout Vertex v) {
+  float k = clamp(v.position.z / height, 0.0, 1.0);
+  vec3 push = field(v.position) * amount * k * k;
+  v.position += vec3(push.xy, -0.25 * length(push.xy) * k);
+  v.value = length(push);
+  v.color = vec4(mix(vec3(0.12, 0.32, 0.08), vec3(0.45, 0.62, 0.2), k), 1.0);
+}
+""",
     # ---- functions for other nodes --------------------------------------------------------------------
     "Wind Field": """\
 // Wind Field: a gusty breeze as a function other nodes can call (wire 'wind' into Push by Field).
@@ -214,12 +261,76 @@ vec3 wind(vec3 q) {
 """,
 }
 
+
+
+def _scene_lights_code(slots=8):
+    """Scene Lights: the scene's lights and world as a function other nodes call. The light data are
+    hidden inputs CodeNodes keeps up to date (move a lamp and the light moves), in the space of the
+    object whose tree holds the node. Up to `slots` lights; the code itself never changes."""
+    head = ["// Scene Lights: the scene's lamps (sun, point, spot, area) and world colour as a function",
+            "// other nodes call: wire 'light' into a lit look (Material Look) or a GPU Surface's Lights input.",
+            "// CodeNodes keeps the light data (hidden inputs) in step with the scene, up to 8 lamps.",
+            "// No shadows are cast between GPU nodes and Blender objects.",
+            "// @in float intensity 1.0 0.0 10.0",
+            "// @in float world 1.0 0.0 10.0",
+            "// @out func light",
+            "// @in hidden w_r 0.05", "// @in hidden w_g 0.05", "// @in hidden w_b 0.05"]
+    fields = ("type", "px", "py", "pz", "dx", "dy", "dz", "r", "g", "b", "size", "c0", "c1")
+    for i in range(slots):
+        for f in fields:
+            head.append(f"// @in hidden l{i}_{f} {-1.0 if f == 'type' else 0.0}")
+    body = """
+const float PI_L = 3.14159265;
+// GGX specular + Lambert diffuse, the same model as Principled BSDF's main lobes
+vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
+  float nl = max(dot(n, l), 0.0);
+  if (nl <= 0.0) return vec3(0.0);
+  vec3 h = normalize(l + v);
+  float nv = max(dot(n, v), 1e-4), nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);
+  float a = max(rough * rough, 0.002), a2 = a * a;
+  float dn = nh * nh * (a2 - 1.0) + 1.0;
+  float d = a2 / (PI_L * dn * dn);
+  float k = (rough + 1.0) * (rough + 1.0) / 8.0;
+  float g = (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
+  vec3 f0 = mix(vec3(0.04), albedo, metal);
+  vec3 fr = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
+  vec3 spec = d * g * fr / (4.0 * nv * nl + 1e-4);
+  vec3 kd = (1.0 - fr) * (1.0 - metal);
+  return (kd * albedo / PI_L + spec) * nl;
+}
+// one lamp: the direction towards it (l) and the irradiance it delivers (rad)
+void lamp(vec3 p, float type, vec3 pos, vec3 dir, vec3 col, float size, float c0, float c1,
+          out vec3 l, out vec3 rad) {
+  if (type < 0.5) { l = -dir; rad = col; return; }                 // sun: colour x strength (W/m2)
+  vec3 d = pos - p;
+  float r2 = max(dot(d, d), size * size * 0.25 + 1e-4);
+  l = d * inversesqrt(dot(d, d) + 1e-12);
+  rad = col / (4.0 * PI_L * r2);                                   // point: colour x power (W)
+  if (type > 1.5 && type < 2.5) rad *= smoothstep(c0, c1, dot(-l, dir));        // spot cone
+  if (type > 2.5) rad *= 4.0 * max(dot(-l, dir), 0.0);                           // area: one side
+}
+vec3 light(vec3 p, vec3 n, vec3 v, vec3 albedo, float roughness, float metallic) {
+  vec3 c = albedo * vec3(w_r, w_g, w_b) * world * (1.0 - 0.5 * metallic);
+  vec3 l, rad;
+"""
+    for i in range(slots):
+        body += (f"  if (l{i}_type > -0.5) {{ lamp(p, l{i}_type, vec3(l{i}_px, l{i}_py, l{i}_pz), "
+                 f"vec3(l{i}_dx, l{i}_dy, l{i}_dz), vec3(l{i}_r, l{i}_g, l{i}_b), l{i}_size, l{i}_c0, l{i}_c1, "
+                 f"l, rad); c += brdf(n, v, l, albedo, roughness, metallic) * rad * intensity; }}\n")
+    body += "  return c;\n}\n"
+    return "\n".join(head) + "\n" + body
+
+
+STAGES["Scene Lights"] = _scene_lights_code()
+LIGHT_SLOTS = 8
+
 # the order the Add menu shows them in, by section
 SECTIONS = [
     ("Particle Stages", 'FORCE_TURBULENCE', ["Wander", "Rise", "Gravity", "Vortex", "Drag", "Blink",
                                              "Push by Field", "Collide with Shape"]),
-    ("Particle Looks", 'LIGHT_POINT', ["Glow Look", "Firefly Look"]),
+    ("Particle Looks", 'LIGHT_POINT', ["Glow Look", "Firefly Look", "Streak Look", "Material Look"]),
     ("Warps (particles and meshes)", 'MOD_SIMPLEDEFORM', ["Bend", "Taper"]),
-    ("Mesh Stages", 'MOD_WAVE', ["Ripple"]),
+    ("Mesh Stages", 'MOD_WAVE', ["Ripple", "Sway by Field"]),
     ("Functions", 'FORCE_WIND', ["Wind Field"]),
+    ("Lighting", 'LIGHT_SUN', ["Scene Lights"]),
 ]

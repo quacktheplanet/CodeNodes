@@ -41,6 +41,8 @@ def row_for(count):
 PARTICLE_PRELUDE = """\
 // ---- CodeNodes particle helpers ----
 struct Particle { vec3 position; vec3 velocity; float age; float life; float seed; vec4 cnX; };
+// the viewing camera in the particles' object space (set when drawing live; the origin otherwise)
+#define cnCamera (cnParams.v[63].xyz)
 // An integer hash (PCG) of the float's bits: sin()-based hashes lose precision at the seeds of
 // millions of particles, and neighbouring particles then line up in streaks.
 uint cnPcg(uint v) { uint s = v * 747796405u + 2891336453u; uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u; return (w >> 22u) ^ w; }

@@ -37,6 +37,10 @@ MAKE_REAL_NAME = "To Geometry"
 GPU_KINDS = ('MESH', 'PARTICLES', 'DEFORM')
 CODE_KINDS = GPU_KINDS + ('STAGE',)     # kept as text and run on demand (not built at once like a shape)
 TAP = "codenodes_tap"              # on a hidden tap tree: which GPU Mesh source it feeds
+JOIN = "codenodes_join"            # on a Join Particles node group
+CACHE = "codenodes_gpu_cache"      # on a GPU Cache node group
+PIPE_KEY = "cn_pipe_key"           # on a branch object: head name | stage names
+PIPE_HEAD = "cn_pipe_head"         # on a branch object: its head source name
 
 KINDS = {
     'PARTICLES': ("GPU Particles", "A particle source you write. Runs and draws on the GPU (live) by default; "
@@ -190,8 +194,9 @@ vec4 look(Particle p) {
   float r = length(p.position.xy) / size;
   float rnd = rand1(s * 6.1 + 21.0);
   vec3 old = vec3(1.0, 0.78, 0.5), young = vec3(0.55, 0.7, 1.0), rosy = vec3(1.0, 0.55, 0.75);
-  vec3 c = bulge > 0.5 ? old * 0.55 : mix(mix(old, young, smoothstep(0.15, 0.9, r)), rosy, step(0.985, rnd) * 0.9);
-  c *= (0.25 + 0.75 * smoothstep(0.0, 0.7, r)) * (0.6 + 0.8 * rnd);
+  vec3 c = bulge > 0.5 ? old * 0.3 : mix(mix(old, young, smoothstep(0.15, 0.9, r)), rosy, step(0.985, rnd) * 0.9);
+  // the middle is where most stars are: dim each one there, so their sum glows instead of clipping
+  c *= (0.08 + 0.92 * smoothstep(0.03, 0.75, r)) * (0.6 + 0.8 * rnd);
   return vec4(c, 1.0);
 }
 """
@@ -260,7 +265,7 @@ vec4 look(Particle p) {
 
 # Settings a template starts with (anything not listed keeps the defaults)
 TEMPLATE_SETTINGS = {
-    "Galaxy": {"count": 1_000_000, "color_by": 'CODE', "gain": 0.45, "point_px": 1.0},
+    "Galaxy": {"count": 1_000_000, "color_by": 'CODE', "gain": 0.32, "point_px": 1.0},
     "Flow": {"count": 1_000_000, "color_by": 'CODE', "gain": 0.3, "point_px": 1.0, "prewarm": 3.0},
     "Attractor": {"count": 600_000, "color_by": 'CODE', "gain": 0.3, "point_px": 1.0, "prewarm": 4.0},
     "Swirl": {"count": 200_000, "gain": 0.4},
@@ -1009,13 +1014,76 @@ def _next_stage(tree, node, out_name, in_name):
     return None
 
 
-def find_chains(tree):
-    """{head source name: chain info} and the mesh-head stage names, for one tree."""
+def _targets(tree, sock):
+    """[(node, input socket)] that `sock` feeds, followed through reroutes (muted links skipped)."""
+    out, todo, seen = [], [l for l in tree.links if l.from_socket == sock and not l.is_muted], set()
+    while todo:
+        l = todo.pop()
+        to = l.to_node
+        if to.type == 'REROUTE':
+            if to.name in seen:
+                continue
+            seen.add(to.name)
+            todo.extend(m for m in tree.links if m.from_node == to and not m.is_muted)
+            continue
+        out.append((to, l.to_socket))
+    return out
+
+
+def is_join(group):
+    return group is not None and JOIN in group
+
+
+def is_cache(group):
+    return group is not None and CACHE in group
+
+
+def build_join():
+    """A Join Particles node group: two particle streams in, one out. The stages after it run on
+    both (each source keeps its own simulation; they're drawn and made real together)."""
+    group = bpy.data.node_groups.new(_unique("Join Particles", bpy.data.node_groups), "GeometryNodeTree")
+    group[JOIN] = True
+    group.description = ("CodeNodes: merges two particle streams. Everything wired after it applies to both, "
+                         "and a To Geometry after it outputs both")
+    if hasattr(group, "color_tag"):
+        try:
+            group.color_tag = 'GEOMETRY'
+        except TypeError:
+            pass
+    iface = group.interface
+    for name in ("Particles A", "Particles B"):
+        iface.new_socket(name, in_out="INPUT", socket_type="NodeSocketBundle")
+    iface.new_socket("Particles", in_out="OUTPUT", socket_type="NodeSocketBundle")
+    gin, gout = group.nodes.new("NodeGroupInput"), group.nodes.new("NodeGroupOutput")
+    gin.location, gout.location = (-300, 0), (200, 0)
+    return group
+
+
+def _stream_names(obj):
+    """(output a code node's stream leaves by, input a stage takes it by, pipeline kind)."""
+    kind = obj.codenodes.kind
+    if kind == 'PARTICLES':
+        return "Particles", "Particles", 'PARTICLES'
+    if kind == 'DEFORM':
+        return "Geometry", "Mesh", 'DEFORM'
+    return "Mesh", "Mesh", 'DEFORM'
+
+
+def find_pipelines(tree):
+    """The code-node graph of one tree, as pipelines.
+
+    Returns (pipes, mesh_heads, terminals):
+      pipes       {(head name, (stage names...)): {"kind", "funcs", "leaf": bool, "cache": node name or None}}
+      mesh_heads  stage sources that head a mesh chain (a warp or deform wired to plain geometry)
+      terminals   {To Geometry node name: [pipeline keys it outputs]}
+
+    A pipeline is every path from a source through stages (and Join Particles / GPU Cache nodes, which
+    pass the stream on) to where it ends: a node nothing continues from (drawn live), or a node wired
+    into a To Geometry (made real there). A stream wired into two stages splits into two pipelines.
+    """
     from . import gn_sockets
     nodes = _code_nodes(tree)
     by_node = {n.name: o for n, o in nodes}
-    chains, mesh_heads = {}, set()
-    # function wiring: consumer input <- provider output, anywhere in the tree
     funcs = {}
     for node, obj in nodes:
         for sock in node.inputs:
@@ -1041,25 +1109,50 @@ def find_chains(tree):
                     todo.append(prov[0])
         return out
 
-    def walk(head_node, out_name, in_name):
-        stages, seen, cur = [], {head_node.name}, head_node
-        while True:
-            nxt = _next_stage(tree, cur, out_name, in_name)
-            if nxt is None or nxt.name in seen:
-                break
-            seen.add(nxt.name)
-            stages.append(by_node[nxt.name].name)
-            cur, out_name = nxt, in_name
-        return stages
+    pipes, terminals, mesh_heads = {}, {}, set()
+
+    def record(key, kind, leaf, cache):
+        info = pipes.get(key)
+        if info is None:
+            info = pipes[key] = {"kind": kind, "funcs": reachable([key[0], *key[1]]), "leaf": False,
+                                 "cache": None}
+        info["leaf"] = info["leaf"] or leaf
+        if cache is not None and info["cache"] is None:
+            info["cache"] = cache
+
+    def explore(node, out_name, in_name, kind, head, path, cache, depth):
+        if depth > 64:
+            return
+        out = node.outputs.get(out_name)
+        children, ends = [], []
+        for to, sock in (_targets(tree, out) if out is not None else []):
+            g = to.node_tree if to.type == 'GROUP' else None
+            if g is None:
+                continue
+            if is_code_group(g):
+                obj = by_node.get(to.name)
+                if obj is not None and obj.codenodes.kind == 'STAGE' and sock.name == in_name \
+                        and obj.name not in path:
+                    children.append((to, path + (obj.name,), cache))
+            elif (is_join(g) or is_cache(g)) and sock.bl_idname == "NodeSocketBundle" and kind == 'PARTICLES':
+                children.append((to, path, f"{tree.name}\x00{to.name}" if is_cache(g) else cache))
+            elif is_make_real(g):
+                ends.append(to.name)
+        key = (head, path)
+        if ends or not children:
+            record(key, kind, not children, cache)
+        for t in ends:
+            lst = terminals.setdefault(t, [])
+            if key not in lst:
+                lst.append(key)
+        for child, p, c in children:
+            explore(child, in_name, in_name, kind, head, p, c, depth + 1)
 
     for node, obj in nodes:
         kind = obj.codenodes.kind
-        if kind == 'PARTICLES':
-            stages = walk(node, "Particles", "Particles")
-            chains[obj.name] = {"stages": stages, "kind": 'PARTICLES', "funcs": reachable([obj.name] + stages)}
-        elif kind == 'DEFORM':
-            stages = walk(node, "Geometry", "Mesh")
-            chains[obj.name] = {"stages": stages, "kind": 'DEFORM', "funcs": reachable([obj.name] + stages)}
+        if kind in ('PARTICLES', 'DEFORM'):
+            out_name, in_name, k = _stream_names(obj)
+            explore(node, out_name, in_name, k, obj.name, (), None, 0)
         elif kind == 'STAGE' and gn_sockets.decls_of(obj).takes_mesh():
             mesh_in = node.inputs.get("Mesh")
             l = _feeding(tree, mesh_in) if mesh_in is not None else None
@@ -1072,9 +1165,77 @@ def find_chains(tree):
                 continue                         # part of a mesh chain started further up
             # a warp or deform wired straight to ordinary geometry: it heads its own mesh chain
             mesh_heads.add(obj.name)
-            stages = walk(node, "Mesh", "Mesh")
-            chains[obj.name] = {"stages": stages, "kind": 'DEFORM', "funcs": reachable([obj.name] + stages)}
+            explore(node, "Mesh", "Mesh", 'DEFORM', obj.name, (), None, 0)
+    return pipes, mesh_heads, terminals
+
+
+def find_chains(tree):
+    """{head source name: chain info} for the main pipeline of each head (older callers)."""
+    pipes, mesh_heads, _t = find_pipelines(tree)
+    chains = {}
+    for (head, stages), info in sorted(pipes.items(), key=_pipe_order):
+        if head not in chains:
+            chains[head] = {"stages": list(stages), "kind": info["kind"], "funcs": info["funcs"]}
     return chains, mesh_heads
+
+
+def _pipe_order(kv):
+    """Which of a head's pipelines is its main one: drawn-live ends first, then the longest path, then
+    by name (stable while you wire)."""
+    (head, stages), info = kv
+    return (head, 0 if info["leaf"] else 1, -len(stages), stages)
+
+
+def _branch_label(stages):
+    return (stages[-1].replace(PREFIX, "").replace("CN · ", "") if stages else "source")[:28]
+
+
+def branch_object(head, stages):
+    """The hidden object standing for one extra branch of a head (created on first use)."""
+    pkey = head.name + "|" + ">".join(stages)
+    col = sources_collection()
+    for o in col.objects:
+        if o.get(PIPE_KEY) == pkey:
+            return o
+    name = _unique(f"{head.name} › {_branch_label(stages)}", bpy.data.objects)
+    obj = bpy.data.objects.new(name, bpy.data.meshes.new(name))
+    col.objects.link(obj)
+    obj[PIPE_KEY] = pkey
+    obj[PIPE_HEAD] = head.name
+    mirror_settings(head, obj)
+    return obj
+
+
+_MIRROR = ("kind", "count", "text", "template_key", "color_by", "color_a", "color_b", "speed_range", "blend",
+           "point_px", "gain", "prewarm", "emitter", "quality", "surface_color", "shadows", "ao", "fog", "sky",
+           "substeps", "point_radius", "stagger", "resolution", "bounds_min", "bounds_max", "live", "animate",
+           "smooth")
+
+
+def mirror_settings(head, branch):
+    """A branch runs with its head's settings: copy only what differs (setting unchanged values would
+    queue needless rebuilds)."""
+    hs, bs = head.codenodes, branch.codenodes
+    if not bs.enabled:
+        bs.enabled = True
+    for name in _MIRROR:
+        a = getattr(hs, name)
+        b = getattr(bs, name)
+        same = (tuple(a) == tuple(b)) if hasattr(a, "__len__") and not isinstance(a, str) else a == b
+        if not same:
+            setattr(bs, name, a)
+    have = {p.name: p for p in bs.params}
+    for p in hs.params:
+        q = have.get(p.name)
+        if q is None:
+            q = bs.params.add()
+            q.name = p.name
+        if q.value != p.value:
+            q.value = p.value
+
+
+def is_branch_object(obj):
+    return obj is not None and PIPE_KEY in obj
 
 
 def _migrate_make_real_names():
@@ -1084,18 +1245,98 @@ def _migrate_make_real_names():
             g.name = _unique(MAKE_REAL_NAME + g.name[len("Make Real"):], bpy.data.node_groups)
 
 
+def _set_real_objects(group, objs):
+    """Point a To Geometry group's Object Info node(s) at `objs` (one per pipeline it outputs; a To
+    Geometry after a Join Particles outputs several)."""
+    infos = sorted((n for n in group.nodes if n.type == 'OBJECT_INFO'), key=lambda n: n.name)
+    join = next((n for n in group.nodes if n.type == 'JOIN_GEOMETRY'), None)
+    want = max(1, len(objs))
+    while len(infos) < want and join is not None:
+        info = group.nodes.new("GeometryNodeObjectInfo")
+        info.name = info.label = f"Real Result {len(infos) + 1}"
+        info.transform_space = 'ORIGINAL'
+        info.location = (-420, -120 - 180 * len(infos))
+        group.links.new(info.outputs["Geometry"], join.inputs[0])
+        infos.append(info)
+    for extra in infos[want:]:
+        group.nodes.remove(extra)
+    for info, obj in zip(infos, list(objs) + [None] * want):
+        if info.inputs["Object"].default_value != obj:
+            info.inputs["Object"].default_value = obj
+
+
+def _sync_caches(trees, chains):
+    """Every GPU Cache node: the simulations passing through it, their mode and range, its buttons."""
+    from . import gpu_cache, gpu_live
+    seen = set()
+    for tree in trees:
+        for node in tree.nodes:
+            if node.type != 'GROUP' or not is_cache(node.node_tree):
+                continue
+            key = f"{tree.name}\x00{node.name}"
+            owners, names = [], set()
+            for name, info in chains.items():
+                if info.get("cache") != key:
+                    continue
+                obj = bpy.data.objects.get(name)
+                if obj is None:
+                    continue
+                try:
+                    owner = gpu_live.sim_owner(obj)[0]
+                except Exception:
+                    owner = obj
+                if owner.name not in names:
+                    names.add(owner.name)
+                    owners.append(owner)
+            gpu_cache.sync(tree, node, owners)
+            seen |= names
+    gpu_cache.forget_missing(seen)
+
+
 def sync_make_real():
-    """Find the chains of code nodes, point every To Geometry node at the chain feeding it, and work
-    out for each GPU source whether (and when) it is made real. Returns {source name: [host names]}."""
+    """Find the code-node pipelines, point every To Geometry node at the pipelines ending at it, and
+    work out for each pipeline whether (and when) it is made real. Returns {pipeline name: [host names]}."""
     from . import gn_sockets, gpu_live, links
     _migrate_make_real_names()
     trees = [t for t in bpy.data.node_groups if t.bl_idname == "GeometryNodeTree" and TAP not in t]
-    all_chains, all_mesh_heads = {}, set()
+    per_tree, all_pipes, all_mesh_heads = {}, {}, set()
     for tree in trees:
-        c, m = find_chains(tree)
-        all_chains.update(c)
-        all_mesh_heads |= m
-    changed = links.set_chains(all_chains, all_mesh_heads)
+        pipes, mesh_heads, terminals = find_pipelines(tree)
+        per_tree[tree.name] = terminals
+        for key, info in pipes.items():
+            if key in all_pipes:
+                all_pipes[key]["leaf"] = all_pipes[key]["leaf"] or info["leaf"]
+            else:
+                all_pipes[key] = info
+        all_mesh_heads |= mesh_heads
+    # name the pipelines: a head's main pipeline is the head itself, every other one a branch object
+    names, chains, used_branches = {}, {}, set()
+    for key, info in sorted(all_pipes.items(), key=_pipe_order):
+        head_name, stages = key
+        head = bpy.data.objects.get(head_name)
+        if head is None:
+            continue
+        if head_name not in chains:
+            name = head_name
+        else:
+            b = branch_object(head, stages)
+            mirror_settings(head, b)
+            used_branches.add(b.name)
+            name = b.name
+        names[key] = name
+        chains[name] = {"source": head_name, "stages": list(stages), "kind": info["kind"],
+                        "funcs": info["funcs"], "cache": info.get("cache")}
+    col = bpy.data.collections.get(SOURCES)
+    for obj in (list(col.objects) if col is not None else []):
+        if is_branch_object(obj) and obj.name not in used_branches:
+            from . import particles
+            particles.forget(obj.name)
+            gpu_live.hosts.pop(obj.name, None)
+            me = obj.data
+            bpy.data.objects.remove(obj)
+            if me is not None and me.users == 0:
+                bpy.data.meshes.remove(me)
+    changed = links.set_chains(chains, all_mesh_heads)
     for name in changed:
         obj = bpy.data.objects.get(name)
         if obj is not None:
@@ -1109,6 +1350,7 @@ def sync_make_real():
     for tree in trees:
         hosts_ = None
         seen_real = set()
+        terminals = per_tree.get(tree.name, {})
         for node in tree.nodes:
             if node.type != 'GROUP' or node.node_tree is None:
                 continue
@@ -1129,35 +1371,45 @@ def sync_make_real():
                     node.node_tree = new
                     group = new
                 seen_real.add(group.name)
-                up = upstream_code_node(tree, node)
-                src = source_of(up.node_tree) if up is not None else None
-                if src is not None and not links.is_gpu(src):
-                    src = None                          # a Code Shape is real already: pass it through
-                info = real_info_node(group)
-                if info is not None and info.inputs["Object"].default_value != src:
-                    info.inputs["Object"].default_value = src
+                objs = [bpy.data.objects.get(names[k]) for k in terminals.get(node.name, []) if k in names]
+                objs = [o for o in objs if o is not None]
+                if not objs:
+                    up = upstream_code_node(tree, node)
+                    src = source_of(up.node_tree) if up is not None else None
+                    if src is not None and links.is_gpu(src):
+                        objs = [src]
+                    else:
+                        src = None                      # a Code Shape is real already: pass it through
+                _set_real_objects(group, objs)
+                src = objs[0] if objs else None
                 sync_real_interface(group, links.ekind(src) if src is not None else None, src)
                 if src is None:
+                    up = upstream_code_node(tree, node)
                     label = "To Geometry (nothing to convert)" if up is None else MAKE_REAL_NAME
                     if node.label != label:
                         node.label = label
                     continue
-                s = src.codenodes
-                real_nodes.setdefault(src.name, []).append(node)
-                want = REAL_INPUTS.get(links.ekind(src), (None,))[0]
-                sock = node.inputs.get(want) if want else None
-                val = resolve(tree, sock) if sock is not None else None
-                if val is not None:
-                    limits.setdefault(src.name, int(val))
-                when_sock = node.inputs.get("When")
-                when_name = resolve(tree, when_sock) if when_sock is not None else None
-                mode = resolve_when(gn_sockets.WHEN_MAP.get(when_name or "Automatic", 'AUTO'), src)
-                if _RANK[mode] > _RANK.get(modes.get(src.name, 'NONE'), 0):
-                    modes[src.name] = mode
-                    for key, name in (("real_keep_vel", "Keep Velocity"), ("real_keep_age", "Keep Age")):
-                        ks = node.inputs.get(name)
-                        kv = resolve(tree, ks) if ks is not None else None
-                        s[key] = True if kv is None else bool(kv)
+                for src in objs:
+                    s = src.codenodes
+                    real_nodes.setdefault(src.name, []).append(node)
+                    want = REAL_INPUTS.get(links.ekind(src), (None,))[0]
+                    sock = node.inputs.get(want) if want else None
+                    val = resolve(tree, sock) if sock is not None else None
+                    if val is not None:
+                        limits.setdefault(src.name, int(val))
+                    when_sock = node.inputs.get("When")
+                    when_name = resolve(tree, when_sock) if when_sock is not None else None
+                    mode = resolve_when(gn_sockets.WHEN_MAP.get(when_name or "Automatic", 'AUTO'), src)
+                    if _RANK[mode] > _RANK.get(modes.get(src.name, 'NONE'), 0):
+                        modes[src.name] = mode
+                        for key, name in (("real_keep_vel", "Keep Velocity"), ("real_keep_age", "Keep Age")):
+                            ks = node.inputs.get(name)
+                            kv = resolve(tree, ks) if ks is not None else None
+                            s[key] = True if kv is None else bool(kv)
+    for name, info in chains.items():                  # a branch is shown where its head is
+        if info["source"] != name and info["source"] in host_map:
+            host_map[name] = list(host_map[info["source"]])
+    _sync_caches(trees, chains)
     col = bpy.data.collections.get(SOURCES)
     for src in (list(col.objects) if col is not None else []):
         s = getattr(src, "codenodes", None)
@@ -1346,7 +1598,9 @@ def request_popup(src):
 
 
 def tap_of(src):
-    return bpy.data.objects.get(f"CN Tap · {src.name}")
+    """The tap object holding what a GPU Mesh (or mesh-heading stage) receives; a branch uses its head's."""
+    from . import links
+    return bpy.data.objects.get(f"CN Tap · {links.base_name(src)}")
 
 
 def sync():
@@ -1355,7 +1609,7 @@ def sync():
     if live._rendering():
         return
     groups = list(bpy.data.node_groups)
-    if not any(is_code_group(g) or is_make_real(g) for g in groups):
+    if not any(is_code_group(g) or is_make_real(g) or is_join(g) or is_cache(g) for g in groups):
         if gpu_live.hosts:
             gpu_live.hosts.clear()
             gpu_live.redraw()
@@ -1396,6 +1650,12 @@ def sync():
                 edit.default_value = False            # behaves like a button
                 request_popup(obj)
     host_map = sync_make_real()
+    try:
+        from . import lights
+        if lights.sync():
+            gpu_live.redraw()
+    except Exception:
+        traceback.print_exc()
     if host_map != gpu_live.hosts:
         gpu_live.hosts.clear()
         gpu_live.hosts.update(host_map)
@@ -1481,6 +1741,10 @@ def _on_save(*_args):
         if col is None:
             return
         for obj in list(col.objects):
+            if is_branch_object(obj):
+                if obj.get(PIPE_HEAD) not in used:
+                    bpy.data.objects.remove(obj)
+                continue
             if obj.codenodes.enabled and obj.name not in used:
                 bpy.data.objects.remove(obj)
     except Exception:

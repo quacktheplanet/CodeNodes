@@ -54,8 +54,18 @@ def simulate_object(obj):
     emitter = gpu_live.emitter_for(obj) if s.emitter is not None else None
     limit = min(s.real_limit or s.count, particles.MAX_REAL)
     attrs = tuple(name for name, _d in comp.attrs)
-    state, st = particles.simulate(obj.name, comp.source, s.count, scene.frame_current, scene.frame_start,
-                                   fps, values, s.substeps, s.stagger, s.prewarm, emitter, limit, attrs)
+    from . import gpu_cache
+    owner, sim_comp, _sim_values = gpu_live.sim_owner(obj)
+    cached = gpu_cache.playback(owner, sim_comp, scene)
+    if cached is not None:                  # a GPU Cache plays back the baked frame
+        t0 = time.perf_counter()
+        state = cached.read(limit, values, attrs, (scene.frame_current - scene.frame_start) / fps,
+                            scene.frame_current)
+        st = {"count": len(state["position"]), "steps": 0, "sim_s": time.perf_counter() - t0,
+              "frame": scene.frame_current}
+    else:
+        state, st = particles.simulate(obj.name, comp.source, s.count, scene.frame_current, scene.frame_start,
+                                       fps, values, s.substeps, s.stagger, s.prewarm, emitter, limit, attrs)
     keep = []
     if s.get("real_keep_vel", True):
         keep += ["velocity", "speed"]

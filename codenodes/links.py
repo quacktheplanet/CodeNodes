@@ -1,8 +1,21 @@
-"""Which code nodes are wired into which: the chains the Geometry Nodes sync finds, and the composed
-program for each chain's first node (its "head").
+"""Which code nodes are wired into which: the pipelines the Geometry Nodes sync finds, and the
+composed program for each.
 
-    CHAINS[head source name] = {"stages": [stage source names], "kind": 'PARTICLES' | 'DEFORM',
-                                "funcs": {(consumer name, input name): (provider name, export name)}}
+Code nodes form a graph, not just a line. A stream (particles or a mesh) can split: one output wired
+into several stages, each branch going its own way; streams can merge (Join Particles); and one
+function output can feed any number of nodes. The sync turns that graph into *pipelines*: every
+path from a source (the "head") to where a stream ends (a node nothing continues from, or a To
+Geometry node). Each pipeline is compiled into one GPU program:
+
+    CHAINS[pipeline name] = {"source": head source name, "stages": [stage source names in order],
+                             "kind": 'PARTICLES' | 'DEFORM',
+                             "funcs": {(consumer name, input name): (provider name, export name)}}
+
+The first pipeline of a head is named after the head itself. Every further branch gets a hidden
+"branch" object in the CodeNodes Sources collection (BASE[branch] = head), which mirrors the head's
+settings, so everything that works per source (drawing, To Geometry, caches) works per branch.
+Branches whose simulation part is the same as their head's (the same born/behave stages) share the
+head's GPU simulation and only add their own drawing (Composite.sim_key).
 
 A GPU Stage node that sits first in a mesh chain (a Bend wired straight to ordinary geometry) is a
 head itself: it gets a tap like a GPU Mesh node and is drawn and made real the same way.
@@ -18,7 +31,9 @@ from . import chain
 
 CHAINS: dict[str, dict] = {}
 MESH_HEADS: set[str] = set()          # GPU Stage sources that head a mesh chain
-STAGE_HEADS: dict[str, list] = {}     # stage source name -> head source names it belongs to
+STAGE_HEADS: dict[str, list] = {}     # stage source name -> pipeline names it belongs to
+BASE: dict[str, str] = {}             # branch pipeline name -> its head source name
+BRANCHES: dict[str, list] = {}        # head source name -> its branch pipeline names
 _cache: dict[str, tuple] = {}         # head name -> (key, Composite)
 GPU_KINDS = ('MESH', 'PARTICLES', 'DEFORM')
 
@@ -41,6 +56,29 @@ def heads_of(obj):
     return STAGE_HEADS.get(obj.name, [])
 
 
+def base_name(obj_or_name):
+    """The head source a pipeline starts from: itself for a head, the head for a branch."""
+    name = obj_or_name if isinstance(obj_or_name, str) else obj_or_name.name
+    return BASE.get(name, name)
+
+
+def base_obj(obj):
+    """The head source object of a pipeline (the object itself unless it's a branch)."""
+    name = BASE.get(obj.name)
+    if name is None:
+        return obj
+    return bpy.data.objects.get(name) or obj
+
+
+def is_branch(obj):
+    return obj.name in BASE
+
+
+def pipelines_of(head_name):
+    """Every pipeline starting from a head: its own name first, then its branches."""
+    return [head_name] + list(BRANCHES.get(head_name, []))
+
+
 def _text(obj):
     t = obj.codenodes.text
     return t.as_string() if t is not None else ""
@@ -61,7 +99,7 @@ def _units(head, info):
             pool[obj.name] = u
         return u
 
-    names = [head.name] + list(info.get("stages", []))
+    names = [info.get("source", head.name)] + list(info.get("stages", []))
     objs = [bpy.data.objects.get(n) for n in names]
     if any(o is None for o in objs):
         objs = [o for o in objs if o is not None]
@@ -82,7 +120,8 @@ def _units(head, info):
 
 def _key(head, info, pool):
     h = hashlib.sha1()
-    h.update(repr((ekind(head), info.get("stages"), sorted(info.get("funcs", {}).items()))).encode())
+    h.update(repr((ekind(head), info.get("source"), info.get("stages"),
+                   sorted(info.get("funcs", {}).items()))).encode())
     for name in sorted(pool):
         h.update(name.encode() + b"\0" + pool[name].code.encode() + b"\0")
     return h.hexdigest()
@@ -135,13 +174,20 @@ def forget(name=None):
 
 
 def set_chains(chains, mesh_heads):
-    """Called by the Geometry Nodes sync. Returns the head names whose chain changed."""
+    """Called by the Geometry Nodes sync. Returns the pipeline names whose chain changed."""
     changed = {n for n in set(chains) | set(CHAINS) if chains.get(n) != CHAINS.get(n)}
     changed |= (set(mesh_heads) ^ MESH_HEADS)
     CHAINS.clear()
     CHAINS.update(chains)
     MESH_HEADS.clear()
     MESH_HEADS.update(mesh_heads)
+    BASE.clear()
+    BRANCHES.clear()
+    for name, info in chains.items():
+        src = info.get("source", name)
+        if src != name:
+            BASE[name] = src
+            BRANCHES.setdefault(src, []).append(name)
     STAGE_HEADS.clear()
     for head, info in chains.items():
         for st in info.get("stages", []):

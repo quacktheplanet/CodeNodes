@@ -140,19 +140,62 @@ def _source_text(src):
     return s.text.as_string() if s.text is not None else None
 
 
+def sim_owner(src):
+    """(object whose GPU simulation a pipeline uses, that pipeline's composite and values).
+
+    A branch whose simulation part matches its head's (same source and born/behave stages, the same
+    functions and attributes) shares the head's simulation: it only adds its own looks and warps."""
+    from . import links
+    comp, values = links.composite(src)
+    base = links.base_obj(src)
+    if base is not src:
+        try:
+            bcomp, bvalues = links.composite(base)
+        except Exception:
+            bcomp = None
+        if bcomp is not None and bcomp.sim_key and bcomp.sim_key == comp.sim_key:
+            return base, bcomp, bvalues
+    return src, comp, values
+
+
 def step_particles(src, scene):
-    """Advance a live particle system (its whole chain) to the scene's frame on the GPU (no readback).
-    Returns (sim, composite, values)."""
-    from . import links, particles
+    """Advance a live particle pipeline to the scene's frame on the GPU (no readback).
+    Returns (sim, composite, values): the composite and values are this pipeline's own (its look and
+    warps); the sim may be its head's when the two share a simulation."""
+    from . import gpu_cache, particles
     s = src.codenodes
     if s.text is None:
         return None
+    from . import links
     comp, values = links.composite(src)
+    owner, sim_comp, sim_values = sim_owner(src)
+    os_ = owner.codenodes
     fps = scene.render.fps / (scene.render.fps_base or 1.0)
-    emitter = emitters.get(src.name) if s.emitter is not None else None
-    sim, _steps = particles.advance(src.name, comp.source, s.count, scene.frame_current, scene.frame_start, fps,
-                                    values, s.substeps, s.stagger, s.prewarm, emitter)
+    cached = gpu_cache.playback(owner, sim_comp, scene)
+    if cached is not None:
+        return cached, comp, values
+    emitter = emitters.get(owner.name) if os_.emitter is not None else None
+    sim, _steps = particles.advance(owner.name, sim_comp.source, os_.count, scene.frame_current,
+                                    scene.frame_start, fps, sim_values, os_.substeps, os_.stagger,
+                                    os_.prewarm, emitter)
     return sim, comp, values
+
+
+_comp_params: dict[str, list] = {}
+
+
+def comp_params(source):
+    """The @param slots of a composed source (cached)."""
+    import hashlib
+    from .sdf_code import parse_params
+    key = hashlib.sha1(source.encode()).hexdigest()
+    got = _comp_params.get(key)
+    if got is None:
+        got = parse_params(source)
+        if len(_comp_params) > 64:
+            _comp_params.clear()
+        _comp_params[key] = got
+    return got
 
 
 _DRAW_MAIN = """
@@ -196,19 +239,26 @@ void main() {
 """
 
 
-def particle_draw_shader(sim):
-    """The point shader for a sim, including the user's look() when it has one."""
+_draw_shaders: dict = {}
+
+
+def particle_draw_shader(sim, comp=None):
+    """The point shader for a pipeline, including its look() when it has one. `comp` is the
+    pipeline's own composite (its look and warps); the sim supplies the particle state."""
+    import hashlib
     import gpu
     from . import particles, sampler
     from .sdf_code import PRELUDE, SdfCodeError, param_defines, user_errors
-    look = particles.has_look(sim.source)
-    key = (sim.key, look)
-    if sim.draw_shader is not None and sim.draw_key == key:
-        return sim.draw_shader
+    source = comp.source if comp is not None else sim.source
+    look = particles.has_look(source)
+    key = (hashlib.sha1(source.encode()).hexdigest(), sim.has_x, look)
+    got = _draw_shaders.get(key)
+    if got is not None:
+        return got
     head = (("#define CN_LOOK\n" if look else "")
             + "#define uTime (cnMisc.y)\n#define uFrame (cnMisc.z)\n#define cnEmitCount (cnInts.w)\n"
-            + PRELUDE + particles.PARTICLE_PRELUDE + param_defines(sim.params))
-    code = head + sim.source + "\n" + _DRAW_MAIN
+            + PRELUDE + particles.PARTICLE_PRELUDE + param_defines(comp_params(source)))
+    code = head + source + "\n" + _DRAW_MAIN
     iface = gpu.types.GPUStageInterfaceInfo("cn_pt_iface")
     iface.smooth('VEC4', "vColor")
     iface.flat('FLOAT', "cnSolidF")
@@ -232,8 +282,10 @@ def particle_draw_shader(sim):
     info.fragment_source(_DRAW_FRAG)
     shader, err, log = sampler._compile_capturing(info)
     if shader is None:
-        raise SdfCodeError("the look() code didn't compile:\n" + user_errors(log, head.count("\n"), sim.source))
-    sim.draw_shader, sim.draw_key = shader, key
+        raise SdfCodeError("the look() code didn't compile:\n" + user_errors(log, head.count("\n"), source))
+    if len(_draw_shaders) > 32:
+        _draw_shaders.clear()
+    _draw_shaders[key] = shader
     return shader
 
 
@@ -267,10 +319,11 @@ def _bind_particles(sh, sim):
             pass
 
 
-def _ubo(sim, values, cam=None):
+def _ubo(sim, values, cam=None, comp=None):
     import gpu
     slots = np.zeros(256, np.float32)
-    for i, prm in enumerate(sim.params[:252]):
+    params = comp_params(comp.source) if comp is not None else sim.params
+    for i, prm in enumerate(params[:252]):
         slots[i] = float(values.get(prm.name, prm.default))
     if cam is not None:
         slots[252:255] = tuple(cam)
@@ -287,12 +340,13 @@ def draw_particles(src, host, rv3d, scene):
     fps_ = scene.render.fps / (scene.render.fps_base or 1.0)
     t = (scene.frame_current - scene.frame_start) / fps_
     shape = comp.shape if comp.has_look else None
-    if shape in ("glow", "firefly"):
+    if shape in ("glow", "firefly", "streak"):
         draw_sprites(sim, comp, values, host, rv3d, scene, t, shape)
         return
-    sh = particle_draw_shader(sim)
+    sh = particle_draw_shader(sim, comp)
     gpu_guard.note_draw()
-    ubo = _ubo(sim, values)
+    cam = host.matrix_world.inverted_safe() @ rv3d.view_matrix.inverted().translation
+    ubo = _ubo(sim, values, cam, comp)
     solid = s.blend == 'SOLID'
     gpu.state.program_point_size_set(True)
     gpu.state.depth_test_set('LESS_EQUAL')
@@ -304,7 +358,7 @@ def draw_particles(src, host, rv3d, scene):
     mode = {'SPEED': 0, 'AGE': 1, 'CODE': 2}[s.color_by]
     if comp.has_look and s.color_by != 'AGE':
         mode = 2                                  # a Look stage in the chain decides the colour
-    if mode == 2 and not sim.draw_key[1]:
+    if mode == 2 and not comp.has_look:
         mode = 0                                  # "Code" colours, but the code has no look(): use speed
     for setter, name, value in (
             (sh.uniform_float, "cnMVP", rv3d.perspective_matrix @ host.matrix_world),
@@ -358,6 +412,19 @@ void main() {
     gl_Position = cnClip;
     vColor = cnCol;
     vKind = 0.0;
+  } else if (cnInts.y == 2) {                // streak: a quad from where it was to where it is
+    vec3 cnTail = cnWarp(p.position - p.velocity * cnMisc.z);
+    vec4 cnH = cnMVP * vec4(cnC, 1.0), cnT = cnMVP * vec4(cnTail, 1.0);
+    vec2 cnD = cnH.xy / max(cnH.w, 1e-6) - cnT.xy / max(cnT.w, 1e-6);
+    if (dot(cnD, cnD) < 1e-12) cnD = vec2(1.0, 0.0);
+    vec2 cnN = normalize(vec2(-cnD.y, cnD.x));
+    float cnAlong = cnCorner.y * 0.5 + 0.5;          // 0 at the tail, 1 at the head
+    vec4 cnClip = mix(cnT, cnH, cnAlong);
+    cnClip.xy += cnN * cnCorner.x * cnSize * (0.35 + 0.65 * cnAlong) * cnProj.xy * cnProj.z;
+    gl_Position = cnClip;
+    vUV = vec2(cnCorner.x, cnAlong);
+    vColor = cnCol;
+    vKind = 2.0;
   } else {                                   // wings: two quads flapping about the direction of travel
     vec3 cnAhead = cnWarp(p.position + p.velocity * 0.02) - cnC;
     vec3 cnF = length(cnAhead) > 1e-6 ? normalize(cnAhead) : vec3(1.0, 0.0, 0.0);
@@ -365,13 +432,19 @@ void main() {
     vec3 cnR = normalize(cross(cnF, cnUp));
     cnUp = cross(cnR, cnF);
     float cnPh = rand1(p.seed * 5.31);
-    float cnFlap = sin((uTime * cnMisc.y + cnPh) * 6.2831853) * 0.9 + 0.25;
+    // a fast beat with a short pause at the top of each stroke: reads as flapping, not shimmering
+    float cnBeat = fract(uTime * cnMisc.y + cnPh);
+    float cnFlap = 0.95 * (1.0 - pow(abs(sin(cnBeat * 3.14159265)), 0.6)) + 0.1;
     float cnSide = cnK < 6 ? 1.0 : -1.0;
     vec3 cnW = cnR * cnSide * cos(cnFlap) + cnUp * sin(cnFlap);
-    float cnSpan = cnSize * cnMisc.z, cnChord = cnSize * cnMisc.z * 0.45;
-    vec3 cnP = cnC + cnW * (0.5 + 0.5 * cnCorner.x) * cnSpan + cnF * cnCorner.y * cnChord - cnF * cnSize * 0.3;
+    float cnSpan = cnSize * cnMisc.z, cnChord = cnSpan * 0.42;
+    // the wing root sits on the thorax, a little ahead of the glowing abdomen
+    vec3 cnRoot = cnC + cnF * cnSize * 0.9 + cnUp * cnSize * 0.25;
+    vec3 cnP = cnRoot + cnW * (0.5 + 0.5 * cnCorner.x) * cnSpan
+             + (-cnF * 0.55 + cnF * cnCorner.y * 0.5) * cnChord;
     gl_Position = cnMVP * vec4(cnP, 1.0);
-    vColor = vec4(0.82, 0.88, 0.95, 0.35);
+    // lit a little by the insect's own glow near the root
+    vColor = vec4(mix(vec3(0.95, 0.85, 0.55), vec3(0.78, 0.9, 1.0), 0.5 + 0.5 * cnCorner.x), 0.6);
     vKind = 1.0;
   }
 }
@@ -385,12 +458,25 @@ void main() {
     // a hot core and a wide soft halo: reads as glow even without bloom
     float core = exp(-r2 * 70.0), halo = exp(-r2 * 9.0) * 0.16;
     fragColor = vec4(vColor.rgb * (core * 2.0 + halo), 1.0);
+  } else if (vKind < 1.5) {
+    // a wing: a teardrop outline (wide near the tip, narrow at the root), a bright rim, and veins
+    vec2 e = vec2(vUV.x * 0.5 + 0.5, vUV.y);          // e.x: root 0 -> tip 1, e.y: across (-1..1)
+    float width = 0.35 + 0.65 * sin(clamp(e.x, 0.0, 1.0) * 2.6);
+    float d = abs(e.y) / max(width, 1e-3);
+    if (d > 1.0 || e.x > 0.98) discard;
+    float tip = smoothstep(0.98, 0.8, e.x);
+    float rim = smoothstep(0.7, 1.0, d) + smoothstep(0.8, 0.98, e.x) * 0.6;
+    float vein = 0.0;
+    for (int i = 0; i < 3; i++) {
+      float off = (float(i) - 1.0) * 0.45 * e.x;
+      vein = max(vein, smoothstep(0.035, 0.0, abs(e.y - off)) * smoothstep(0.05, 0.25, e.x));
+    }
+    float a = vColor.a * (0.28 + 0.55 * rim + 0.35 * vein) * tip;
+    fragColor = vec4(vColor.rgb * (0.55 + 0.6 * rim + 0.4 * vein), a);
   } else {
-    vec2 e = vec2(vUV.x * 0.5 + 0.5, vUV.y);          // along the wing, across it
-    float d = (e.x - 0.5) * (e.x - 0.5) * 4.0 + e.y * e.y;
-    if (d > 1.0) discard;
-    float vein = smoothstep(0.02, 0.0, abs(e.y - 0.1 * sin(e.x * 3.0))) * 0.4;
-    fragColor = vec4(vColor.rgb * (0.7 + vein), vColor.a * (1.0 - d * 0.6));
+    // a streak: brightest at the head, fading to nothing at the tail and the edges
+    float a = (1.0 - vUV.x * vUV.x) * vUV.y * vUV.y;
+    fragColor = vec4(vColor.rgb * a, 1.0);
   }
 }
 """
@@ -398,16 +484,19 @@ void main() {
 _sprite_shaders: dict = {}
 
 
-def sprite_shader(sim):
+def sprite_shader(sim, comp=None):
     import gpu
     from . import particles, sampler
     from .sdf_code import PRELUDE, SdfCodeError, param_defines
-    got = _sprite_shaders.get(sim.key)
+    import hashlib
+    source = comp.source if comp is not None else sim.source
+    skey = (hashlib.sha1(source.encode()).hexdigest(), sim.has_x)
+    got = _sprite_shaders.get(skey)
     if got is not None:
         return got
     head = ("#define uTime (cnMisc.w)\n#define uFrame (0.0)\n#define cnEmitCount (cnInts.w)\n"
-            + PRELUDE + particles.PARTICLE_PRELUDE + param_defines(sim.params))
-    code = head + sim.source + "\n" + _SPRITE_MAIN
+            + PRELUDE + particles.PARTICLE_PRELUDE + param_defines(comp_params(source)))
+    code = head + source + "\n" + _SPRITE_MAIN
     iface = gpu.types.GPUStageInterfaceInfo("cn_sp_iface")
     iface.smooth('VEC4', "vColor")
     iface.smooth('VEC2', "vUV")
@@ -432,30 +521,33 @@ def sprite_shader(sim):
     shader, err, log = sampler._compile_capturing(info)
     if shader is None:
         from .sdf_code import user_errors
-        raise SdfCodeError("the look() code didn't compile:\n" + user_errors(log, head.count("\n"), sim.source))
-    if len(_sprite_shaders) > 16:
+        raise SdfCodeError("the look() code didn't compile:\n" + user_errors(log, head.count("\n"), source))
+    if len(_sprite_shaders) > 32:
         _sprite_shaders.clear()
-    _sprite_shaders[sim.key] = shader
+    _sprite_shaders[skey] = shader
     return shader
 
 
 def draw_sprites(sim, comp, values, host, rv3d, scene, t, shape):
     import gpu
-    sh = sprite_shader(sim)
+    sh = sprite_shader(sim, comp)
     gpu_guard.note_draw()
     cam = host.matrix_world.inverted_safe() @ rv3d.view_matrix.inverted().translation
-    ubo = _ubo(sim, values, cam)
+    ubo = _ubo(sim, values, cam, comp)
     lu = comp.look_unit or ""
     size = float(values.get(lu + "size", 0.02))
     flap = float(values.get(lu + "flap", 16.0))
     wing = float(values.get(lu + "wing", 1.5))
+    trail = float(values.get(lu + "trail", 0.25))
     mvp = rv3d.perspective_matrix @ host.matrix_world
     win = rv3d.window_matrix
     # a world-size quad in clip space: the projection's x/y scale (object scale ignored)
     proj = (float(win[0][0]), float(win[1][1]), max(host.matrix_world.to_scale()), 0.0)
     passes = [(0, 6, 'ADDITIVE', False)]
     if shape == "firefly":
-        passes.insert(0, (1, 12, 'ALPHA', False))      # wings first, then the glow on top
+        passes.append((1, 12, 'ALPHA', False))         # the glow, then the wings over it (they're on top)
+    elif shape == "streak":
+        passes = [(2, 6, 'ADDITIVE', False)]
     gpu.state.depth_test_set('LESS_EQUAL')
     sh.bind()
     sh.uniform_block("cnParams", ubo)
@@ -464,7 +556,8 @@ def draw_sprites(sim, comp, values, host, rv3d, scene, t, shape):
         gpu.state.blend_set(blend)
         gpu.state.depth_mask_set(depth_write)
         for setter, name, value in ((sh.uniform_float, "cnMVP", mvp),
-                                    (sh.uniform_float, "cnMisc", (size * (1.0 if kind else 3.0), flap, wing, t)),
+                                    (sh.uniform_float, "cnMisc", (size * (1.0 if kind else 3.0), flap,
+                                                                  trail if kind == 2 else wing, t)),
                                     (sh.uniform_float, "cnProj", proj),
                                     (sh.uniform_int, "cnInts", (sim.row, kind, per, sim.emit_count))):
             try:
@@ -483,9 +576,11 @@ def draw_surface(src, host, region, rv3d, scene):
     source = _source_text(src)
     if source is None:
         return
+    from . import lights
     fps_ = scene.render.fps / (scene.render.fps_base or 1.0)
+    lit, mat = lights.surface_uniforms(src, scene)
     raymarch.draw(src.name + "|" + host.name, s, source, _values(src), host.matrix_world, region, rv3d, scene,
-                  (scene.frame_current - scene.frame_start) / fps_, scene.frame_current)
+                  (scene.frame_current - scene.frame_start) / fps_, scene.frame_current, lit, mat)
 
 
 def _draw():
@@ -630,9 +725,11 @@ def _on_depsgraph(scene, depsgraph):
                if isinstance(u.id, bpy.types.Object) and (u.is_updated_geometry or u.is_updated_transform)}
     if not changed:
         return
+    from . import links
     for name in changed:                         # a tap re-evaluated: its GPU Mesh input changed
         if name.startswith("CN Tap · "):
-            _deform_dirty.add(name[len("CN Tap · "):])
+            head = name[len("CN Tap · "):]
+            _deform_dirty.update(links.pipelines_of(head))
     for src_name in hosts:
         src = bpy.data.objects.get(src_name)
         s = getattr(src, "codenodes", None)

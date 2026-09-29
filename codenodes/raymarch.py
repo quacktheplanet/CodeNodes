@@ -31,6 +31,11 @@ struct CNView {
   vec4 misc;          // x = uTime, y = uFrame, z = shadows (0/1), w = ambient occlusion (0/1)
   vec4 misc2;         // x = sky background (0/1)
 };
+struct CNLights {
+  vec4 L[32];         // 8 lamps x (position, type), (direction, size), (colour x energy, cone c0), (c1, ...)
+  vec4 world;         // uniform world light
+  vec4 mat[2];        // (base colour, roughness), (emission, metallic)
+};
 """
 
 HEAD = """
@@ -89,6 +94,52 @@ float cnAO(vec3 p, vec3 n, float diag) {
 
 vec3 cnAces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 
+#ifdef CN_SCENE_LIGHTS
+const float CN_PI = 3.14159265;
+vec3 cnBrdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
+  float nl = max(dot(n, l), 0.0);
+  if (nl <= 0.0) return vec3(0.0);
+  vec3 h = normalize(l + v);
+  float nv = max(dot(n, v), 1e-4), nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);
+  float a = max(rough * rough, 0.002), a2 = a * a;
+  float dn = nh * nh * (a2 - 1.0) + 1.0;
+  float d = a2 / (CN_PI * dn * dn);
+  float k = (rough + 1.0) * (rough + 1.0) / 8.0;
+  float g = (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
+  vec3 f0 = mix(vec3(0.04), albedo, metal);
+  vec3 fr = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
+  vec3 spec = d * g * fr / (4.0 * nv * nl + 1e-4);
+  return ((1.0 - fr) * (1.0 - metal) * albedo / CN_PI + spec) * nl;
+}
+// shade a hit with the scene's lamps (world space); soft self-shadows for the two brightest lamps
+vec3 cnSceneLit(vec3 p, vec3 n, vec3 pW, vec3 nW, vec3 vW, vec3 albedo, float rough, float metal, float diag,
+                float ao) {
+  vec3 c = albedo * cnLights.world.rgb * ao * (1.0 - 0.5 * metal);
+  for (int i = 0; i < 8; i++) {
+    vec4 a = cnLights.L[i * 4], b = cnLights.L[i * 4 + 1], cc = cnLights.L[i * 4 + 2], e = cnLights.L[i * 4 + 3];
+    float type = a.w;
+    if (type < -0.5) continue;
+    vec3 l, rad;
+    if (type < 0.5) { l = -b.xyz; rad = cc.rgb; }
+    else {
+      vec3 d = a.xyz - pW;
+      float r2 = max(dot(d, d), b.w * b.w * 0.25 + 1e-4);
+      l = d * inversesqrt(dot(d, d) + 1e-12);
+      rad = cc.rgb / (4.0 * CN_PI * r2);
+      if (type > 1.5 && type < 2.5) rad *= smoothstep(cc.w, e.x, dot(-l, b.xyz));
+      if (type > 2.5) rad *= 4.0 * max(dot(-l, b.xyz), 0.0);
+    }
+    float sh = 1.0;
+    if (i < 2 && cnView.misc.z > 0.5 && dot(nW, l) > 0.0) {
+      vec3 lL = normalize((cnView.toLocal * vec4(l, 0.0)).xyz);
+      sh = cnShadow(p + n * diag * 0.002, lL, diag * 0.004, diag, diag);
+    }
+    c += cnBrdf(nW, vW, l, albedo, rough, metal) * rad * sh;
+  }
+  return c;
+}
+#endif
+
 void main() {
   vec2 uv = vUv * 2.0 - 1.0;
   vec4 wn = cnView.invViewProj * vec4(uv, -1.0, 1.0);
@@ -123,10 +174,15 @@ void main() {
   vec3 n = cnNormal(p, max(diag * 0.0004, t * 0.0008));
   vec3 sunL = normalize((cnView.toLocal * vec4(cnView.sun.xyz, 0.0)).xyz);
   vec3 nW = normalize((transpose(cnView.toLocal) * vec4(n, 0.0)).xyz);
-#ifdef CN_HAS_COLOR
+#ifdef CN_MATERIAL
+  vec3 albedo = clamp(cnLights.mat[0].rgb, 0.0, 1.0);
+  float rough = cnLights.mat[0].w, metal = cnLights.mat[1].w;
+#elif defined(CN_HAS_COLOR)
   vec3 albedo = clamp(color(p), 0.0, 1.0);
+  float rough = 0.5, metal = 0.0;
 #else
   vec3 albedo = cnView.surf.rgb;
+  float rough = 0.5, metal = 0.0;
 #endif
   float dif = max(dot(n, sunL), 0.0);
   float sh = (cnView.misc.z > 0.5 && dif > 0.0) ? cnShadow(p + n * diag * 0.002, sunL, diag * 0.004, diag, diag) : 1.0;
@@ -135,8 +191,16 @@ void main() {
   vec3 skyAmb = cnSky(normalize(nW + vec3(0.0, 0.0, 0.6))) * 0.9;
   vec3 h = normalize(sunL - rd);
   float spec = pow(max(dot(n, h), 0.0), 48.0) * 0.18 * sh;
+#ifdef CN_SCENE_LIGHTS
+  vec3 pW = (cnView.toWorld * vec4(p, 1.0)).xyz;
+  vec3 col = cnSceneLit(p, n, pW, nW, -rdW, albedo, rough, metal, diag, ao);
+#else
   vec3 col = albedo * (sunC * dif * sh + skyAmb * ao * (0.55 + 0.45 * nW.z)
                        + vec3(0.25, 0.2, 0.15) * ao * max(-nW.z, 0.0) * 0.3) + sunC * spec;
+#endif
+#ifdef CN_MATERIAL
+  col += cnLights.mat[1].rgb;
+#endif
   float tW = t / sc;
   float fogK = 1.0 - exp(-cnView.hi.w * tW);
   col = mix(col, skyC, fogK);
@@ -181,11 +245,12 @@ _scene_cache: dict[str, tuple] = {}
 _comp = [None]
 
 
-def scene_shader(source, steps=192):
-    """(shader, params) for this SDF code, compiled once. Raises SdfCodeError with the user's lines."""
+def scene_shader(source, steps=192, lit=False, material=False):
+    """(shader, params) for this SDF code, compiled once. Raises SdfCodeError with the user's lines.
+    `lit`: shade with the scene's lamps (Scene Lights); `material`: take a Material Look's values."""
     import gpu
     from . import sampler
-    key = hashlib.sha1(f"{steps}\0{source}".encode()).hexdigest()
+    key = hashlib.sha1(f"{steps}\0{lit}\0{material}\0{source}".encode()).hexdigest()
     if key in _scene_cache:
         return _scene_cache[key]
     check_source(source)
@@ -193,12 +258,17 @@ def scene_shader(source, steps=192):
     head = HEAD + PRELUDE + param_defines(params)
     if has_color(source):
         head = "#define CN_HAS_COLOR\n" + head
+    if lit:
+        head = "#define CN_SCENE_LIGHTS\n" + head
+    if material:
+        head = "#define CN_MATERIAL\n" + head
     code = head + source + "\n" + MAIN
     offset = head.count("\n")
     info = gpu.types.GPUShaderCreateInfo()
     info.typedef_source("struct CNParams { vec4 v[64]; };" + VIEW_STRUCT)
     info.uniform_buf(0, "CNParams", "cnParams")
     info.uniform_buf(1, "CNView", "cnView")
+    info.uniform_buf(2, "CNLights", "cnLights")
     info.define("CN_STEPS", str(int(steps)))
     info.vertex_in(0, 'VEC2', "pos")
     info.vertex_out(_iface(gpu))
@@ -271,11 +341,13 @@ def scene_sun(scene):
     return (0.45, -0.35, 0.82), (1.0, 0.93, 0.82), 1.1
 
 
-def draw(key, settings, source, values, host_matrix, region, rv3d, scene, time_s, frame):
-    """Raymarch one live surface into the current view. Raises SdfCodeError on bad code."""
+def draw(key, settings, source, values, host_matrix, region, rv3d, scene, time_s, frame, lights=None,
+         material=None):
+    """Raymarch one live surface into the current view. Raises SdfCodeError on bad code.
+    `lights` / `material`: from lights.surface_uniforms (None: the built-in sun and sky)."""
     import gpu
     from . import gpu_guard
-    shader, params = scene_shader(source)
+    shader, params = scene_shader(source, lit=lights is not None, material=material is not None)
     q = max(0.15, min(1.0, float(settings.quality)))
     w, h = max(32, int(region.width * q)), max(24, int(region.height * q))
     tg = _target((key, region.as_pointer()), w, h)
@@ -300,6 +372,9 @@ def draw(key, settings, source, values, host_matrix, region, rv3d, scene, time_s
         slots[i] = float((values or {}).get(prm.name, prm.default))
     pbuf = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
     vbuf = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', len(view), view))
+    lvals = list(lights) if lights is not None else [-1.0, 0, 0, 0] * 32 + [0.05, 0.05, 0.05, 1.0]
+    lvals += list(material) if material is not None else [0.8, 0.8, 0.8, 0.5, 0.0, 0.0, 0.0, 0.0]
+    lbuf = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', len(lvals), [float(v) for v in lvals]))
     gpu_guard.note_draw()
     with tg[3].bind():
         with gpu.matrix.push_pop():
@@ -310,6 +385,7 @@ def draw(key, settings, source, values, host_matrix, region, rv3d, scene, time_s
             shader.bind()
             shader.uniform_block("cnParams", pbuf)
             shader.uniform_block("cnView", vbuf)
+            shader.uniform_block("cnLights", lbuf)
             _quad(shader).draw(shader)
     cs = comp_shader()
     gpu.state.depth_test_set('LESS_EQUAL')

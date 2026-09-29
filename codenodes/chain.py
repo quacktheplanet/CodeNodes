@@ -70,6 +70,10 @@ class Composite:
         self.look_unit = None         # prefix of the node whose look() is used (its size / flap sliders)
         self.warnings = []
         self.slots = []               # (node name, slider name, key in values): to refresh values cheaply
+        # what the simulation depends on (the source and every born/behave stage, the functions they
+        # call and the per-particle attributes): two pipelines with the same sim_key can share one GPU
+        # simulation and differ only in how they're drawn (looks, warps)
+        self.sim_key = ""
 
     def values_from(self, lookup):
         """Fresh values from `lookup(node name, slider name)` (None keeps the value composed in)."""
@@ -124,7 +128,8 @@ def translate_errors(text, source):
 
 
 def _ident(name):
-    return re.sub(r"\W", "_", name)
+    """A GLSL-safe piece of a name: no runs of underscores (GLSL reserves names containing '__')."""
+    return re.sub(r"_+", "_", re.sub(r"\W", "_", name)).strip("_") or "node"
 
 
 class _Builder:
@@ -209,7 +214,7 @@ class _Builder:
         key = id(p)
         if key in self.done_providers:
             return self.done_providers[key]
-        prefix = f"f{len(self.done_providers)}_{_ident(p.name)[:12]}_"
+        prefix = f"f{len(self.done_providers)}_{_ident(p.name)[:12].rstrip('_')}_"
         self.done_providers[key] = prefix
         self.unit(p, prefix)
         return prefix
@@ -261,6 +266,16 @@ def compose_particles(head, stages=()):
         if not useful and not d.func_outs:
             b.out.warnings.append(f"'{st.name}' has nothing for particles to do (no born, behave, look "
                                   f"or warp)")
+    import hashlib
+    sim_units = [(head.name, tuple(sorted(hd.roles & {"spawn", "update", "born", "behave"})))]
+    sim_units += [(st.name, tuple(sorted(st.decls.roles & {"born", "behave"}))) for st in stages
+                  if st.decls is not None and st.decls.roles & {"born", "behave"}]
+    sim_names = {n for n, _r in sim_units}
+    sim_funcs = []
+    for u in [head, *stages]:
+        if u.name in sim_names:
+            sim_funcs += sorted((u.name, k, v[0].name, v[1]) for k, v in u.funcs.items())
+    b.out.sim_key = hashlib.sha1(repr((sim_units, sim_funcs, b.out.attrs)).encode()).hexdigest()
     glue = ["\n// ---- the chain ----\n"]
     glue.append("void cnSpawn(inout Particle p) {\n  n0_spawn(p);\n"
                 + "".join(f"  {pf}born(p);\n" for pf in borns) + "}\n")

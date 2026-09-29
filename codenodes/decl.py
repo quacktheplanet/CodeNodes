@@ -10,6 +10,10 @@ A code node is a node you write on the fly. The code says which sockets the node
     // @out func  field                  your function `field` becomes an output socket
     // @out attr  brightness 1.0         a per-particle value later nodes (and Geometry Nodes) can read
     // @shape firefly                    how a Look node draws each particle: point, glow or firefly
+    // @in  hidden lightX 0.0            a value the add-on fills in itself (no socket), e.g. light data
+    // @in  material mat                 a Material socket: its Principled BSDF values arrive as
+                                         mat_base (vec3), mat_roughness, mat_metallic, mat_emit (vec3,
+                                         colour × strength) and mat_alpha
 
 The streams a node takes and gives follow from the functions it defines:
 
@@ -31,7 +35,10 @@ DECL_LINE = re.compile(r"^\s*//\s*@(in|out|attr|shape)\b(.*)$")
 _NAME = r"[A-Za-z_]\w*"
 _NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
 TYPES = ("float", "int", "vec2", "vec3", "vec4", "bool")
-SHAPES = ("point", "glow", "firefly")
+SHAPES = ("point", "glow", "firefly", "streak")
+# what a Material input brings in (as hidden sliders): base colour, roughness, metallic, emission
+MATERIAL_PARTS = (("base_r", 0.8), ("base_g", 0.8), ("base_b", 0.8), ("roughness", 0.5), ("metallic", 0.0),
+                  ("emit_r", 0.0), ("emit_g", 0.0), ("emit_b", 0.0), ("alpha", 1.0))
 MAX_ATTRS = 4
 
 
@@ -72,6 +79,8 @@ class Decls:
         self.attrs: list[Attr] = []
         self.shape = None
         self.roles: set[str] = set()
+        self.hidden: set[str] = set()        # sliders the add-on fills in itself (no socket)
+        self.materials: list[str] = []       # Material inputs (their values arrive as hidden sliders)
 
     # the sockets this node shows ---------------------------------------------------------------
     def takes_particles(self):
@@ -171,6 +180,26 @@ def parse(source):
                 lo = float(nm.group(3)) if nm.group(3) else None
                 hi = float(nm.group(4)) if nm.group(4) else None
                 add_param(nm.group(1), float(nm.group(2)), lo, hi, kind.upper(), n)
+            elif kind == "hidden":
+                hm = re.fullmatch(rf"hidden\s+(?:float\s+)?({_NAME})(?:\s+({_NUM}))?\s*", rest)
+                if not hm:
+                    raise SdfCodeError(f"line {n}: write it as  // @in hidden name [default]")
+                add_param(hm.group(1), float(hm.group(2) or 0.0), -1e9, 1e9, 'HIDDEN', n)
+                d.hidden.add(hm.group(1))
+            elif kind == "material":
+                mm = re.fullmatch(rf"material\s+({_NAME})\s*", rest)
+                if not mm:
+                    raise SdfCodeError(f"line {n}: write it as  // @in material name")
+                m = mm.group(1)
+                if m in seen:
+                    raise SdfCodeError(f"line {n}: '{m}' is declared twice")
+                seen.add(m)
+                d.materials.append(m)
+                for part, default in MATERIAL_PARTS:
+                    add_param(f"{m}_{part}", default, -1e9, 1e9, 'HIDDEN', n)
+                    d.hidden.add(f"{m}_{part}")
+                d.colors[f"{m}_base"] = tuple(f"{m}_base_{c}" for c in "rgb")
+                d.colors[f"{m}_emit"] = tuple(f"{m}_emit_{c}" for c in "rgb")
             elif kind in ("color", "colour"):
                 cm = re.fullmatch(rf"colou?r\s+({_NAME})(?:\s+({_NUM})\s+({_NUM})\s+({_NUM}))?\s*", rest)
                 if not cm:
@@ -186,7 +215,8 @@ def parse(source):
                     d.kinds[part] = 'COLOR'
                 d.colors[name] = parts
             else:
-                raise SdfCodeError(f"line {n}: unknown input type '{kind}'. Use float, int, color or func")
+                raise SdfCodeError(f"line {n}: unknown input type '{kind}'. Use float, int, color, func, "
+                                   f"material or hidden")
     if len(d.attrs) > MAX_ATTRS:
         raise SdfCodeError(f"at most {MAX_ATTRS} per-particle attributes (found {len(d.attrs)})")
     d.roles = roles(source)

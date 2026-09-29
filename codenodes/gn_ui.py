@@ -117,6 +117,45 @@ class CODENODES_OT_gn_add_make_real(bpy.types.Operator):
         return result
 
 
+class CODENODES_OT_gn_add_flow(bpy.types.Operator):
+    bl_idname = "codenodes.gn_add_flow"
+    bl_label = "Add Flow Node"
+    bl_description = "Add a node that routes a particle stream: Join Particles (merge two) or GPU Cache (bake)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    kind: EnumProperty(name="Kind", items=[
+        ('JOIN', "Join Particles", "Merge two particle streams: the stages after it apply to both"),
+        ('CACHE', "GPU Cache", "Bake the GPU simulation passing through it, and play it back"),
+    ])
+    use_transform: BoolProperty(default=True, options={'HIDDEN', 'SKIP_SAVE'})
+
+    @classmethod
+    def poll(cls, context):
+        return _in_geometry_nodes(context)
+
+    def execute(self, context):
+        from . import gpu_cache
+        tree = gn_link.ensure_tree(context)
+        if tree is None:
+            self.report({'ERROR'}, "select a mesh object (or open a Geometry Nodes tree) first")
+            return {'CANCELLED'}
+        group = gn_link.build_join() if self.kind == 'JOIN' else gpu_cache.build_group()
+        space = context.space_data
+        loc = tuple(space.cursor_location) if getattr(space, "edit_tree", None) is not None else (0.0, 0.0)
+        node = gn_link.insert(tree, group, loc)
+        node.width = 200 if self.kind == 'CACHE' else 160
+        gn_link.sync()
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        _place_at_cursor(context, event)
+        result = self.execute(context)
+        space = context.space_data
+        if self.use_transform and 'FINISHED' in result and getattr(space, "edit_tree", None) is not None:
+            bpy.ops.node.translate_attach_remove_on_cancel('INVOKE_DEFAULT')
+        return result
+
+
 def _active(context, op=None, group_name=""):
     """(node, group, source, tree) for the code node an operator acts on: the named group when
     `group_name` is set (buttons in the 3D view), else the Node Editor's active node."""
@@ -390,6 +429,10 @@ class CODENODES_MT_gn_add(bpy.types.Menu):
         layout = self.layout
         layout.operator_context = 'INVOKE_REGION_WIN'
         layout.operator(CODENODES_OT_gn_add_make_real.bl_idname, icon='MESH_DATA')
+        op = layout.operator(CODENODES_OT_gn_add_flow.bl_idname, text="Join Particles", icon='SELECT_EXTEND')
+        op.kind = 'JOIN'
+        op = layout.operator(CODENODES_OT_gn_add_flow.bl_idname, text="GPU Cache", icon='DISK_DRIVE')
+        op.kind = 'CACHE'
         layout.separator()
         for kind, (label, _desc, icon) in gn_link.KINDS.items():
             if kind == 'STAGE':
@@ -597,7 +640,7 @@ def _show_text_beside(win, screen, node_area, text):
             pass
 
 
-classes = (CODENODES_OT_edit_code_popup, CODENODES_OT_gn_add, CODENODES_OT_gn_add_make_real, CODENODES_OT_add_object, CODENODES_OT_show_in_gn,
+classes = (CODENODES_OT_edit_code_popup, CODENODES_OT_gn_add, CODENODES_OT_gn_add_make_real, CODENODES_OT_gn_add_flow, CODENODES_OT_add_object, CODENODES_OT_show_in_gn,
            CODENODES_OT_gn_edit_code, CODENODES_OT_gn_template, CODENODES_OT_gn_rebuild,
            CODENODES_OT_gn_make_native, CODENODES_OT_open_graph, CODENODES_MT_gn_add, CODENODES_PT_gn)
 
