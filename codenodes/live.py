@@ -315,6 +315,8 @@ def _poll_text():
 
 @bpy.app.handlers.persistent
 def _on_frame(scene, depsgraph=None):
+    # Runs before Blender evaluates the new frame (frame_change_pre), so the geometry made real here is
+    # what that frame shows, and what Blender's Bake node captures when it bakes a To Geometry result.
     if _rendering():
         return
     try:
@@ -333,7 +335,7 @@ _RENDER_HANDLERS = (("render_init", _render_started), ("render_complete", _rende
 def register():
     for name, fn in _RENDER_HANDLERS:
         getattr(bpy.app.handlers, name).append(fn)
-    bpy.app.handlers.frame_change_post.append(_on_frame)
+    bpy.app.handlers.frame_change_pre.append(_on_frame)
     bpy.app.timers.register(_poll_text, first_interval=POLL_S, persistent=True)
 
 
@@ -342,8 +344,8 @@ def unregister():
         lst = getattr(bpy.app.handlers, name)
         if fn in lst:
             lst.remove(fn)
-    if _on_frame in bpy.app.handlers.frame_change_post:
-        bpy.app.handlers.frame_change_post.remove(_on_frame)
+    if _on_frame in bpy.app.handlers.frame_change_pre:
+        bpy.app.handlers.frame_change_pre.remove(_on_frame)
     for fn in (_poll_text, _flush):
         if bpy.app.timers.is_registered(fn):
             bpy.app.timers.unregister(fn)

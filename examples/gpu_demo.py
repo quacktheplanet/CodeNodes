@@ -2,8 +2,8 @@
 
     blender --factory-startup --window-geometry 0 0 1600 960 --python examples/gpu_demo.py -- <out folder>
 
-Needs a window (the GPU isn't available with -b). Writes codenodes_demo_v3.blend, renders and
-screenshots, then quits. Two scenes:
+Needs a window (the GPU isn't available with -b). Writes codenodes_demo_v4.blend, renders and
+screenshots, then quits. Four scenes:
 
 Fireflies (night falls on the Aerie castle):
   * Plateau: a flat grid -> GPU Mesh "Mesa" (code lifts, roughens and colours it) -> To Geometry
@@ -18,6 +18,17 @@ Fireflies (night falls on the Aerie castle):
 Bend (the same node on particles and on a mesh):
   * Bent Galaxy:  GPU Particles "Galaxy" -> Bend (curled and twisted along X), live
   * Bent Column:  a Geometry Nodes cylinder -> Bend -> To Geometry
+
+Graph (code nodes as a graph, not a line):
+  * Heads and Trails: Firefly Swarm -> Wander -> Push by Field -> Blink, then split into Firefly Look
+    and Streak Look: two looks, one GPU simulation. The same Wind Field also feeds Sway by Field on the
+    object's own grass (a mesh chain -> To Mesh).
+  * Merged Streams: Spark Ball and Swirl -> Join Particles -> Vortex -> Glow Look.
+
+Lit (Blender's lights on GPU nodes):
+  * GPU Surface (lit): a GPU Surface whose Lights come from Scene Lights and whose Material comes from a
+    Material Look (a Blender material's Principled BSDF values), drawn live.
+  * Real Mesh (EEVEE): the same surface made real with the same material, lit by EEVEE.
 """
 import math
 import os
@@ -36,7 +47,7 @@ from codenodes import gn_link, gpu_live, live  # noqa: E402
 args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = os.path.abspath(args[0] if args else os.path.join(ROOT, "examples", "gpu_demo_out"))
 os.makedirs(OUT, exist_ok=True)
-BLEND = os.path.join(OUT, "codenodes_demo_v3.blend")
+BLEND = os.path.join(OUT, "codenodes_demo_v4.blend")
 print("CodeNodes demo: building (this window closes by itself)", flush=True)
 FIREFLY_SIZE = 0.03
 
@@ -474,6 +485,7 @@ def build_bend():
     gn_link.sync()
     gal.inputs["Count"].default_value = 600_000
     gal.inputs["size"].default_value = 1.2
+    gal.inputs["Brightness"].default_value = 0.22   # bent, the galaxy folds onto itself: less per star
     bend.inputs["axis"].default_value = 0
     bend.inputs["angle"].default_value = 1.6
     bend.inputs["span"].default_value = 2.5
@@ -500,6 +512,188 @@ def build_bend():
     scene.frame_start, scene.frame_end = 1, 120
     scene.frame_set(40)
     return scene
+
+
+# ---- the graph scene: branches, a merge, one function feeding two chains -------------------------------------------
+
+def frame(tree, label, nodes, color=(0.18, 0.2, 0.26)):
+    """A labelled frame around `nodes` in the node editor."""
+    fr = tree.nodes.new("NodeFrame")
+    fr.label = label
+    fr.use_custom_color = True
+    fr.color = color
+    fr.label_size = 22
+    fr.shrink = True
+    for n in nodes:
+        n.parent = fr
+    return fr
+
+
+def grass_mesh(name, n=1400, half=2.6, seed=7):
+    """Thin blades on a patch of ground (one triangle-pair per blade)."""
+    import random
+    rnd = random.Random(seed)
+    me = bpy.data.meshes.new(name)
+    bm = bmesh.new()
+    for _ in range(n):
+        x, y = rnd.uniform(-half, half), rnd.uniform(-half, half)
+        h = rnd.uniform(0.25, 0.55)
+        a = rnd.uniform(0, math.pi)
+        w = 0.018
+        dx, dy = math.cos(a) * w, math.sin(a) * w
+        v0 = bm.verts.new((x - dx, y - dy, 0.0))
+        v1 = bm.verts.new((x + dx, y + dy, 0.0))
+        v2 = bm.verts.new((x + dx * 0.4, y + dy * 0.4, h * 0.6))
+        v3 = bm.verts.new((x - dx * 0.4, y - dy * 0.4, h * 0.6))
+        v4 = bm.verts.new((x + rnd.uniform(-0.03, 0.03), y + rnd.uniform(-0.03, 0.03), h))
+        bm.faces.new((v0, v1, v2, v3))
+        bm.faces.new((v3, v2, v4))
+    bm.to_mesh(me)
+    bm.free()
+    return me
+
+
+def build_graph():
+    scene = bpy.data.scenes.new("Graph")
+    win = bpy.context.window_manager.windows[0]
+    win.scene = scene
+    # left: one simulation, two looks (heads and trails); one Wind Field pushing the swarm and swaying grass
+    host, tree, gin, gout = gn_object("Heads and Trails", grass_mesh("Grass"), scene=scene)
+    host.location = (-3.2, 0.0, 0.0)
+    wind = code_node(tree, 'STAGE', "Wind Field", -500, 520)
+    swarm = code_node(tree, 'PARTICLES', "Firefly Swarm", -500, 180)
+    wander = code_node(tree, 'STAGE', "Wander", -200, 180)
+    push = code_node(tree, 'STAGE', "Push by Field", 100, 180)
+    blink = code_node(tree, 'STAGE', "Blink", 400, 180)
+    heads = code_node(tree, 'STAGE', "Firefly Look", 750, 380)
+    trails = code_node(tree, 'STAGE', "Streak Look", 750, 0)
+    sway = code_node(tree, 'STAGE', "Sway by Field", 100, -420)
+    real = gn_link.insert(tree, gn_link.build_make_real(), (420, -420))
+    real.width = 170
+    setm = tree.nodes.new("GeometryNodeSetMaterial")
+    setm.location = (700, -420)
+    setm.inputs["Material"].default_value = material("Grass", color=(0.2, 0.42, 0.12), rough=0.8,
+                                                     color_attr=None)
+    tree.links.new(swarm.outputs["Particles"], wander.inputs["Particles"])
+    tree.links.new(wander.outputs["Particles"], push.inputs["Particles"])
+    tree.links.new(push.outputs["Particles"], blink.inputs["Particles"])
+    tree.links.new(blink.outputs["Particles"], heads.inputs["Particles"])
+    tree.links.new(blink.outputs["Particles"], trails.inputs["Particles"])
+    tree.links.new(wind.outputs["wind"], push.inputs["field"])
+    tree.links.new(wind.outputs["wind"], sway.inputs["field"])
+    tree.links.new(gin.outputs[0], sway.inputs["Mesh"])
+    tree.links.new(sway.outputs["Mesh"], real.inputs[0])
+    tree.links.new(real.outputs[0], setm.inputs["Geometry"])
+    link_out(tree, setm.outputs["Geometry"], gout)
+    gin.location, gout.location = (-500, -420), (1000, -420)
+    frame(tree, "Branch: one simulation, two looks (heads and trails)", [swarm, wander, push, blink, heads, trails],
+          (0.16, 0.2, 0.3))
+    frame(tree, "One function feeding two chains", [wind], (0.28, 0.22, 0.12))
+    frame(tree, "Mesh chain: grass swayed by the same wind", [sway, real, setm], (0.14, 0.24, 0.14))
+    # right: two sources merged into one stream
+    mhost, mtree, _mgin, mgout = gn_object("Merged Streams", scene=scene)
+    mhost.location = (3.2, 0.0, 1.2)
+    sparks = code_node(mtree, 'PARTICLES', "Spark Ball", -500, 200)
+    swirl = code_node(mtree, 'PARTICLES', "Swirl", -500, -200)
+    join = gn_link.insert(mtree, gn_link.build_join(), (-150, 0))
+    vortex = code_node(mtree, 'STAGE', "Vortex", 150, 0)
+    glow = code_node(mtree, 'STAGE', "Glow Look", 450, 0)
+    mtree.links.new(sparks.outputs["Particles"], join.inputs["Particles A"])
+    mtree.links.new(swirl.outputs["Particles"], join.inputs["Particles B"])
+    mtree.links.new(join.outputs["Particles"], vortex.inputs["Particles"])
+    mtree.links.new(vortex.outputs["Particles"], glow.inputs["Particles"])
+    frame(mtree, "Merge: two sources, one set of stages", [sparks, swirl, join, vortex, glow], (0.26, 0.16, 0.24))
+    gn_link.sync()
+    swarm.inputs["Count"].default_value = 1500
+    swarm.inputs["radius"].default_value = 1.8
+    swarm.inputs["height"].default_value = 0.6
+    push.inputs["amount"].default_value = 0.6
+    trails.inputs["trail"].default_value = 0.35
+    heads.inputs["size"].default_value = 0.03
+    heads.inputs["intensity"].default_value = 5.0
+    sway.inputs["amount"].default_value = 0.25
+    sparks.inputs["Count"].default_value = 3000
+    swirl.inputs["Count"].default_value = 30000
+    glow.inputs["size"].default_value = 0.02
+    for _ in range(5):
+        gn_link.sync()
+        live._flush()
+    night(scene)
+    scene.camera = camera(scene, "Graph Camera", (0.0, -10.5, 3.6), (0.0, 0.0, 0.8), lens=32)
+    scene.render.engine = 'BLENDER_EEVEE'
+    scene.render.resolution_x, scene.render.resolution_y = 1280, 720
+    scene.frame_start, scene.frame_end = 1, 120
+    scene.frame_set(48)
+    return scene
+
+
+# ---- the lit scene: Scene Lights + Material Look on a GPU Surface, next to a real mesh ------------------------------
+
+def build_lit():
+    scene = bpy.data.scenes.new("Lit")
+    win = bpy.context.window_manager.windows[0]
+    win.scene = scene
+    mat = material("Glazed Blue", color=(0.12, 0.3, 0.75), rough=0.3)
+    # the GPU Surface, lit by Scene Lights with the Material Look's values
+    live_host, ltree, _lg, _lgo = gn_object("GPU Surface (lit)", scene=scene)
+    live_host.location = (-1.6, 0.0, 0.0)
+    lights_node = code_node(ltree, 'STAGE', "Scene Lights", -700, 250)
+    mlook = code_node(ltree, 'STAGE', "Material Look", -700, -150)
+    surf = code_node(ltree, 'MESH', "Donut", -250, 0)
+    ltree.links.new(lights_node.outputs["light"], surf.inputs["Lights"])
+    ltree.links.new(lights_node.outputs["light"], mlook.inputs["light"])
+    ltree.links.new(mlook.outputs["material"], surf.inputs["Material"])
+    mlook.inputs["mat"].default_value = mat
+    frame(ltree, "Scene Lights and a Blender material on a live GPU surface", [lights_node, mlook, surf],
+          (0.2, 0.2, 0.28))
+    # the same surface as a real mesh, with the same material, lit by EEVEE
+    mesh_host, mtree, _mg, mgout = gn_object("Real Mesh (EEVEE)", scene=scene)
+    mesh_host.location = (1.6, 0.0, 0.0)
+    surf2 = code_node(mtree, 'MESH', "Donut", -400, 0)
+    real = gn_link.insert_make_real(mtree, surf2)
+    setm = mtree.nodes.new("GeometryNodeSetMaterial")
+    setm.inputs["Material"].default_value = mat
+    setm.location = (200, 0)
+    mtree.links.new(real.outputs["Geometry"], setm.inputs["Geometry"])
+    link_out(mtree, setm.outputs["Geometry"], mgout)
+    gn_link.sync()
+    real.inputs["Resolution"].default_value = 160
+    for _ in range(5):
+        gn_link.sync()
+        live._flush()
+    key = bpy.data.objects.new("Key", bpy.data.lights.new("Key", 'POINT'))
+    key.data.energy = 600.0
+    key.data.color = (1.0, 0.92, 0.82)
+    key.location = (-2.5, -3.0, 3.2)
+    fill = bpy.data.objects.new("Fill", bpy.data.lights.new("Fill", 'AREA'))
+    fill.data.energy = 250.0
+    fill.data.size = 2.0
+    fill.data.color = (0.75, 0.85, 1.0)
+    fill.location = (3.5, -2.0, 1.5)
+    fill.rotation_euler = (Vector((0.0, 0.0, 0.3)) - fill.location).to_track_quat('-Z', 'Y').to_euler()
+    for o in (key, fill):
+        scene.collection.objects.link(o)
+    world = bpy.data.worlds.new("Lit World")
+    scene.world = world
+    if world.node_tree is None:
+        world.use_nodes = True
+    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.05, 0.055, 0.07, 1.0)
+    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 1.0
+    scene.camera = camera(scene, "Lit Camera", (0.0, -6.2, 2.2), (0.0, 0.0, 0.2), lens=45)
+    scene.render.engine = 'BLENDER_EEVEE'
+    scene.render.resolution_x, scene.render.resolution_y = 1280, 720
+    return scene
+
+
+def arrange_rendered(win, focus_obj, view):
+    """Like arrange(), but the 3D view in Rendered mode, so real meshes are lit by the scene's lamps."""
+    arrange(win, focus_obj, view)
+    for area in win.screen.areas:
+        if area.type == 'VIEW_3D':
+            sp = area.spaces.active
+            sp.shading.type = 'RENDERED'
+            sp.shading.use_scene_lights_render = True
+            sp.shading.use_scene_world_render = True
 
 
 # ---- layout ----------------------------------------------------------------------------------------------------
@@ -573,6 +767,16 @@ def render(scene, name, cam=None):
 FF_VIEW = (Vector((0.0, 0.0, 1.4)), 10.5, (math.radians(66), 0, math.radians(38)))
 FF_CLOSE = (Vector((2.2, -2.6, 0.6)), 1.4, (math.radians(80), 0, math.radians(40)))
 BEND_VIEW = (Vector((-2.0, 0.0, 1.2)), 9.5, (math.radians(72), 0, math.radians(8)))
+GRAPH_VIEW = (Vector((0.0, 0.0, 0.6)), 9.5, (math.radians(64), 0, math.radians(12)))
+LIT_VIEW = (Vector((0.0, 0.0, 0.25)), 5.2, (math.radians(62), 0, math.radians(6)))
+
+
+def hide_extras(win):
+    """No cameras or lamps drawn over a screenshot (the scene camera would sit right in front of it)."""
+    for area in win.screen.areas:
+        if area.type == 'VIEW_3D':
+            area.spaces.active.overlay.show_extras = False
+            area.spaces.active.overlay.show_outline_selected = False
 STEP = {"n": 0}
 
 
@@ -590,6 +794,8 @@ def tick():
             STEP["ff"] = build_fireflies(bpy.context.scene)
             STEP["ff_scene"] = bpy.context.scene.name
             STEP["bend"] = build_bend().name
+            STEP["graph"] = build_graph().name
+            STEP["lit"] = build_lit().name
             win.scene = bpy.data.scenes[STEP["ff_scene"]]
             return 1.0
         if n == 3:
@@ -601,13 +807,13 @@ def tick():
             arrange(win, STEP["ff"]["flies"], FF_CLOSE)
             return 1.5
         if n == 5:
-            screenshot(win, "fireflies_live_close.png", 'VIEW_3D')
+            screenshot(win, "v4_fireflies_live_close.png", 'VIEW_3D')
             arrange(win, STEP["ff"]["flies"], FF_VIEW)
             return 1.0
         if n == 6:
             fit_nodes(win)
-            screenshot(win, "demo_workspace.png")
-            screenshot(win, "fireflies_live.png", 'VIEW_3D')
+            screenshot(win, "v4_demo_workspace.png")
+            screenshot(win, "v4_fireflies_live.png", 'VIEW_3D')
             win.scene = bpy.data.scenes[STEP["bend"]]
             return 1.0
         if n == 7:
@@ -615,20 +821,61 @@ def tick():
             return 1.5
         if n == 8:
             fit_nodes(win)
-            screenshot(win, "bend_live.png", 'VIEW_3D')
-            screenshot(win, "bend_workspace.png")
-            render(bpy.context.scene, "bend_render.png")
-            win.scene = bpy.data.scenes[STEP["ff_scene"]]
+            screenshot(win, "v4_bend_live.png", 'VIEW_3D')
+            win.scene = bpy.data.scenes[STEP["graph"]]
             return 1.0
         if n == 9:
+            arrange(win, bpy.data.objects["Heads and Trails"], GRAPH_VIEW)
+            hide_extras(win)
+            return 1.5
+        if n == 10:
+            fit_nodes(win)
+            screenshot(win, "v4_graph_live.png", 'VIEW_3D')
+            screenshot(win, "v4_graph_workspace.png")
+            screenshot(win, "v4_graph_nodes.png", 'NODE_EDITOR')
+            for area in win.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.spaces.active.overlay.show_extras = True
+                    area.spaces.active.overlay.show_outline_selected = True
+            for o in bpy.context.view_layer.objects:
+                o.select_set(False)
+            m = bpy.data.objects["Merged Streams"]
+            m.select_set(True)
+            bpy.context.view_layer.objects.active = m
+            return 1.0
+        if n == 11:
+            fit_nodes(win)
+            screenshot(win, "v4_merge_nodes.png", 'NODE_EDITOR')
+            win.scene = bpy.data.scenes[STEP["lit"]]
+            return 1.0
+        if n == 12:
+            arrange_rendered(win, bpy.data.objects["GPU Surface (lit)"], LIT_VIEW)
+            hide_extras(win)
+            return 2.5
+        if n == 13:
+            fit_nodes(win)
+            screenshot(win, "v4_lit_compare.png", 'VIEW_3D')
+            screenshot(win, "v4_lit_workspace.png")
+            for area in win.screen.areas:             # the saved file opens with the usual overlays
+                if area.type == 'VIEW_3D':
+                    area.spaces.active.overlay.show_extras = True
+                    area.spaces.active.overlay.show_outline_selected = True
+                    area.spaces.active.shading.type = 'SOLID'
+            win.scene = bpy.data.scenes[STEP["ff_scene"]]
+            return 1.0
+        if n == 14:
             arrange(win, STEP["ff"]["flies"], FF_VIEW)
             fit_nodes(win)
             bpy.ops.wm.save_as_mainfile(filepath=BLEND, relative_remap=True)
             return 0.5
-        if n == 10:
+        if n == 15:
             scene = bpy.context.scene
-            render(scene, "fireflies_render_close.png", "Close-up")
-            render(scene, "fireflies_render.png", "Camera")
+            render(scene, "v4_fireflies_render_close.png", "Close-up")
+            render(scene, "v4_fireflies_render.png", "Camera")
+            win.scene = bpy.data.scenes[STEP["bend"]]
+            return 0.5
+        if n == 16:
+            render(bpy.context.scene, "v4_bend_render.png")
             print("DEMO DONE", OUT, flush=True)
             bpy.ops.wm.quit_blender()
             return None

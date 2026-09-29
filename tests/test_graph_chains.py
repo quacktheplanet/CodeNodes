@@ -263,6 +263,18 @@ def test_function_fanout():
     comp_p, _ = links.composite(src(ps))
     comp_m, _ = links.composite(src(sway))
     check("wind" in comp_p.source and "wind" in comp_m.source, "each program includes the wind function once")
+    # make the swayed grass real: the mesh program (with the wind's noise) must compile and run
+    real = gn_link.insert(tree, gn_link.build_make_real(), (600, -150))
+    gout = next(n for n in tree.nodes if n.type == 'GROUP_OUTPUT')
+    tree.links.new(sway.outputs["Mesh"], real.inputs[0])
+    tree.links.new(real.outputs[0], gout.inputs[0])
+    settle(4)
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    gs = obj.evaluated_get(dg).evaluated_geometry()
+    nv = len(gs.mesh.vertices) if gs.mesh is not None else 0
+    check(not errors_of(src(sway)) and nv == len(grass_me.vertices),
+          f"the swayed grass is made real by To Mesh ({nv} of {len(grass_me.vertices)} vertices) {errors_of(src(sway))}")
     bpy.data.objects.remove(obj)
 
 
@@ -368,6 +380,99 @@ def test_cache():
     bpy.data.objects.remove(obj)
 
 
+def _positions(obj):
+    obj.update_tag()                # a script's frame_set doesn't refresh relations the way the UI does
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    gs = obj.evaluated_get(dg).evaluated_geometry()
+    pc = gs.pointcloud
+    if pc is None or not len(pc.points):
+        return np.zeros((0, 3), np.float32)
+    co = np.empty(len(pc.points) * 3, np.float32)
+    pc.attributes["position"].data.foreach_get("vector", co)
+    return co.reshape(-1, 3)
+
+
+def test_bake_node():
+    """Blender's own Bake node after To Geometry: bake a range, scrub it, render it."""
+    scene = bpy.context.scene
+    obj, tree = host("BakeNode", (-6.0, 6.0, 0.0))
+    ps = add(tree, 'PARTICLES', "Fountain", 0)
+    set_count(ps, 2000)
+    real = gn_link.insert(tree, gn_link.build_make_real(), (300, 0))
+    bake = tree.nodes.new("GeometryNodeBake")
+    if not any(s.name == "Geometry" for s in bake.inputs):
+        bake.bake_items.new('GEOMETRY', "Geometry")      # a new Bake node has no items yet
+    bake.location = (600, 0)
+    gout = next(n for n in tree.nodes if n.type == 'GROUP_OUTPUT')
+    tree.links.new(ps.outputs["Particles"], real.inputs[0])
+    tree.links.new(real.outputs[0], bake.inputs["Geometry"])
+    tree.links.new(bake.outputs["Geometry"], gout.inputs[0])
+    scene.frame_start, scene.frame_end = 1, 24
+    scene.frame_set(1)
+    settle(4)
+    mod = obj.modifiers["GeometryNodes"]
+    mod.bake_directory = os.path.join(TMP, "bake")
+    try:
+        mod.bake_target = 'DISK'
+    except (TypeError, AttributeError):
+        pass
+    item = next(b for b in mod.bakes if b.node == bake)
+    item.bake_mode = 'ANIMATION'
+    bake_id = item.bake_id
+    for o in bpy.context.view_layer.objects:
+        o.select_set(o == obj)
+    bpy.context.view_layer.objects.active = obj
+    t0 = time.perf_counter()
+    win, area = view3d()
+    with bpy.context.temp_override(window=win, area=area, object=obj, active_object=obj):
+        res = bpy.ops.object.geometry_node_bake_single(session_uid=obj.session_uid, modifier_name=mod.name,
+                                                       bake_id=bake_id)
+    NUMBERS["bake_node_24f_s"] = round(time.perf_counter() - t0, 2)
+    check('FINISHED' in res, f"Blender's Bake node bakes a To Geometry result ({NUMBERS['bake_node_24f_s']} s)")
+    files = []
+    for root, _d, fs in os.walk(os.path.join(TMP, "bake")):
+        files += fs
+    check(len(files) >= 24, f"and writes the frames to disk ({len(files)} files)")
+    s = src(ps)
+    scene.frame_set(6)
+    before = _positions(obj)
+    scene.frame_set(18)
+    before18 = _positions(obj)
+    print(f"  (baked, node still on: {len(before)} points, move 6->18 "
+          f"{float(np.abs(before - before18).max()) if len(before) == len(before18) and len(before) else -1:.3f} m)",
+          flush=True)
+    s.codenodes.enabled = False                 # the GPU node is out of the picture from here on
+    s.data.clear_geometry()                     # and its last result is gone: only the bake remains
+    s.data.update()
+    scene.frame_set(6)
+    a = _positions(obj)
+    scene.frame_set(18)
+    b = _positions(obj)
+    check(len(a) == len(b) == 2000, f"scrubbing plays the baked points (the code node switched off) "
+                                    f"({len(a)}, {len(b)})")
+    check(float(np.abs(a - b).max()) > 0.1, f"and they move from frame to frame "
+                                             f"(largest move {float(np.abs(a - b).max()):.3f} m)")
+    scene.render.engine = 'BLENDER_EEVEE' if 'BLENDER_EEVEE' in {e.identifier for e in
+                                                                 bpy.types.RenderSettings.bl_rna.properties[
+                                                                     'engine'].enum_items} else scene.render.engine
+    scene.render.resolution_x, scene.render.resolution_y, scene.render.resolution_percentage = 320, 180, 100
+    cam = bpy.data.objects.new("BakeCam", bpy.data.cameras.new("BakeCam"))
+    scene.collection.objects.link(cam)
+    cam.location = (obj.location.x + 6.0, obj.location.y - 6.0, 3.0)
+    from mathutils import Vector
+    cam.rotation_euler = (Vector((obj.location.x, obj.location.y, 1.5)) - cam.location).to_track_quat('-Z', 'Y').to_euler()
+    scene.camera = cam
+    scene.render.filepath = os.path.join(TMP, "baked_render.png")
+    gpu_before = __import__("codenodes.gpu_guard", fromlist=["x"]).dispatch_count() \
+        if hasattr(__import__("codenodes.gpu_guard", fromlist=["x"]), "dispatch_count") else None
+    bpy.ops.render.render(write_still=True)
+    check(os.path.exists(scene.render.filepath), "an F12 render of a baked frame works")
+    s.codenodes.enabled = True
+    bpy.data.objects.remove(cam)
+    bpy.data.objects.remove(obj)
+
+
 def test_lights():
     scene = bpy.context.scene
     ldata = bpy.data.lights.new("Key", 'POINT')
@@ -441,6 +546,7 @@ def main():
         test_function_fanout()
         test_mid_chain_geometry()
         test_cache()
+        test_bake_node()
         test_lights()
         print(f"ALL {_checks} CHECKS PASSED", flush=True)
     except Fail as exc:

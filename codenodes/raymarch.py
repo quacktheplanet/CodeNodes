@@ -96,14 +96,17 @@ vec3 cnAces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.
 
 #ifdef CN_SCENE_LIGHTS
 const float CN_PI = 3.14159265;
-vec3 cnBrdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
+// `widen`: a lamp's angular size (radius / distance): its highlight spreads like a rougher surface's,
+// with the energy kept (Karis' normalisation), as EEVEE's soft lamps do
+vec3 cnBrdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal, float widen) {
   float nl = max(dot(n, l), 0.0);
   if (nl <= 0.0) return vec3(0.0);
   vec3 h = normalize(l + v);
   float nv = max(dot(n, v), 1e-4), nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);
-  float a = max(rough * rough, 0.002), a2 = a * a;
+  float a0 = max(rough * rough, 0.002);
+  float a = clamp(a0 + widen * 0.5, 0.002, 1.0), a2 = a * a;
   float dn = nh * nh * (a2 - 1.0) + 1.0;
-  float d = a2 / (CN_PI * dn * dn);
+  float d = a2 / (CN_PI * dn * dn);                       // GGX stays normalised as it widens
   float k = (rough + 1.0) * (rough + 1.0) / 8.0;
   float g = (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
   vec3 f0 = mix(vec3(0.04), albedo, metal);
@@ -120,10 +123,12 @@ vec3 cnSceneLit(vec3 p, vec3 n, vec3 pW, vec3 nW, vec3 vW, vec3 albedo, float ro
     float type = a.w;
     if (type < -0.5) continue;
     vec3 l, rad;
-    if (type < 0.5) { l = -b.xyz; rad = cc.rgb; }
+    float widen = 0.0;
+    if (type < 0.5) { l = -b.xyz; rad = cc.rgb; widen = 0.0047; }     // the sun's 0.27 degree radius
     else {
       vec3 d = a.xyz - pW;
       float r2 = max(dot(d, d), b.w * b.w * 0.25 + 1e-4);
+      widen = b.w * 0.5 * inversesqrt(r2);
       l = d * inversesqrt(dot(d, d) + 1e-12);
       rad = cc.rgb / (4.0 * CN_PI * r2);
       if (type > 1.5 && type < 2.5) rad *= smoothstep(cc.w, e.x, dot(-l, b.xyz));
@@ -134,7 +139,7 @@ vec3 cnSceneLit(vec3 p, vec3 n, vec3 pW, vec3 nW, vec3 vW, vec3 albedo, float ro
       vec3 lL = normalize((cnView.toLocal * vec4(l, 0.0)).xyz);
       sh = cnShadow(p + n * diag * 0.002, lL, diag * 0.004, diag, diag);
     }
-    c += cnBrdf(nW, vW, l, albedo, rough, metal) * rad * sh;
+    c += cnBrdf(nW, vW, l, albedo, rough, metal, widen) * rad * sh;
   }
   return c;
 }

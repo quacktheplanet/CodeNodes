@@ -38,11 +38,8 @@ def row_for(count):
     return ROW if count <= ROW * 8192 else 2048
 
 
-PARTICLE_PRELUDE = """\
-// ---- CodeNodes particle helpers ----
-struct Particle { vec3 position; vec3 velocity; float age; float life; float seed; vec4 cnX; };
-// the viewing camera in the particles' object space (set when drawing live; the origin otherwise)
-#define cnCamera (cnParams.v[63].xyz)
+NOISE_PRELUDE = """\
+// ---- CodeNodes random and noise helpers (particles and mesh stages) ----
 // An integer hash (PCG) of the float's bits: sin()-based hashes lose precision at the seeds of
 // millions of particles, and neighbouring particles then line up in streaks.
 uint cnPcg(uint v) { uint s = v * 747796405u + 2891336453u; uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u; return (w >> 22u) ^ w; }
@@ -57,10 +54,6 @@ vec3 randSphere(float n) {        // evenly on a unit sphere
   float z = h.x * 2.0 - 1.0, a = h.y * 6.2831853, r = sqrt(max(0.0, 1.0 - z * z));
   return vec3(r * cos(a), r * sin(a), z);
 }
-// Emit From: points spread evenly over another object's surface (zero when there's none)
-int cnEmitIndex(float seed) { return int(rand1(seed * 3.91 + 0.37) * float(max(cnEmitCount, 1))) % max(cnEmitCount, 1); }
-vec3 emitPoint(float seed) { if (cnEmitCount == 0) return vec3(0.0); int i = cnEmitIndex(seed); return texelFetch(cnEmitP, ivec2(i % 256, i / 256), 0).xyz; }
-vec3 emitNormal(float seed) { if (cnEmitCount == 0) return vec3(0.0, 0.0, 1.0); int i = cnEmitIndex(seed); return texelFetch(cnEmitN, ivec2(i % 256, i / 256), 0).xyz; }
 // gradient noise and its curl: a flow that never piles up (as in Myriad)
 vec3 cnHash33(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx) * 2.0 - 1.0; }
 float gnoise(vec3 p) {
@@ -78,6 +71,18 @@ vec3 curlNoise(vec3 p) {
   vec3 pz0 = cnPotential(p - dz), pz1 = cnPotential(p + dz);
   return vec3((py1.z - py0.z) - (pz1.y - pz0.y), (pz1.x - pz0.x) - (px1.z - px0.z), (px1.y - px0.y) - (py1.x - py0.x)) / (2.0 * e);
 }
+"""
+
+PARTICLE_PRELUDE = """\
+// ---- CodeNodes particle helpers ----
+struct Particle { vec3 position; vec3 velocity; float age; float life; float seed; vec4 cnX; };
+// the viewing camera in the particles' object space (set when drawing live; the origin otherwise)
+#define cnCamera (cnParams.v[63].xyz)
+""" + NOISE_PRELUDE + """\
+// Emit From: points spread evenly over another object's surface (zero when there's none)
+int cnEmitIndex(float seed) { return int(rand1(seed * 3.91 + 0.37) * float(max(cnEmitCount, 1))) % max(cnEmitCount, 1); }
+vec3 emitPoint(float seed) { if (cnEmitCount == 0) return vec3(0.0); int i = cnEmitIndex(seed); return texelFetch(cnEmitP, ivec2(i % 256, i / 256), 0).xyz; }
+vec3 emitNormal(float seed) { if (cnEmitCount == 0) return vec3(0.0, 0.0, 1.0); int i = cnEmitIndex(seed); return texelFetch(cnEmitN, ivec2(i % 256, i / 256), 0).xyz; }
 // ---- your code ----
 """
 

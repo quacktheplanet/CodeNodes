@@ -281,13 +281,14 @@ def _scene_lights_code(slots=8):
             head.append(f"// @in hidden l{i}_{f} {-1.0 if f == 'type' else 0.0}")
     body = """
 const float PI_L = 3.14159265;
-// GGX specular + Lambert diffuse, the same model as Principled BSDF's main lobes
-vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
+// GGX specular + Lambert diffuse, the same model as Principled BSDF's main lobes. `widen`: the lamp's
+// angular size, which spreads its highlight like a rougher surface (as EEVEE's soft lamps do)
+vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal, float widen) {
   float nl = max(dot(n, l), 0.0);
   if (nl <= 0.0) return vec3(0.0);
   vec3 h = normalize(l + v);
   float nv = max(dot(n, v), 1e-4), nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);
-  float a = max(rough * rough, 0.002), a2 = a * a;
+  float a = clamp(max(rough * rough, 0.002) + widen * 0.5, 0.002, 1.0), a2 = a * a;
   float dn = nh * nh * (a2 - 1.0) + 1.0;
   float d = a2 / (PI_L * dn * dn);
   float k = (rough + 1.0) * (rough + 1.0) / 8.0;
@@ -300,10 +301,11 @@ vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
 }
 // one lamp: the direction towards it (l) and the irradiance it delivers (rad)
 void lamp(vec3 p, float type, vec3 pos, vec3 dir, vec3 col, float size, float c0, float c1,
-          out vec3 l, out vec3 rad) {
-  if (type < 0.5) { l = -dir; rad = col; return; }                 // sun: colour x strength (W/m2)
+          out vec3 l, out vec3 rad, out float widen) {
+  if (type < 0.5) { l = -dir; rad = col; widen = 0.0047; return; }  // sun: colour x strength (W/m2)
   vec3 d = pos - p;
   float r2 = max(dot(d, d), size * size * 0.25 + 1e-4);
+  widen = size * 0.5 * inversesqrt(r2);
   l = d * inversesqrt(dot(d, d) + 1e-12);
   rad = col / (4.0 * PI_L * r2);                                   // point: colour x power (W)
   if (type > 1.5 && type < 2.5) rad *= smoothstep(c0, c1, dot(-l, dir));        // spot cone
@@ -312,11 +314,12 @@ void lamp(vec3 p, float type, vec3 pos, vec3 dir, vec3 col, float size, float c0
 vec3 light(vec3 p, vec3 n, vec3 v, vec3 albedo, float roughness, float metallic) {
   vec3 c = albedo * vec3(w_r, w_g, w_b) * world * (1.0 - 0.5 * metallic);
   vec3 l, rad;
+  float wd;
 """
     for i in range(slots):
         body += (f"  if (l{i}_type > -0.5) {{ lamp(p, l{i}_type, vec3(l{i}_px, l{i}_py, l{i}_pz), "
                  f"vec3(l{i}_dx, l{i}_dy, l{i}_dz), vec3(l{i}_r, l{i}_g, l{i}_b), l{i}_size, l{i}_c0, l{i}_c1, "
-                 f"l, rad); c += brdf(n, v, l, albedo, roughness, metallic) * rad * intensity; }}\n")
+                 f"l, rad, wd); c += brdf(n, v, l, albedo, roughness, metallic, wd) * rad * intensity; }}\n")
     body += "  return c;\n}\n"
     return "\n".join(head) + "\n" + body
 

@@ -126,7 +126,8 @@ def shader_for(source):
         return _shaders[key]
     check_source(source)
     params = parse_params(source)
-    head = PRELUDE + VERTEX_PRELUDE + param_defines(params)
+    from .particles import NOISE_PRELUDE
+    head = PRELUDE + NOISE_PRELUDE + VERTEX_PRELUDE + param_defines(params)
     code = head + source + "\n" + MAIN
     info = gpu.types.GPUShaderCreateInfo()
     info.typedef_source("struct CNParams { vec4 v[64]; };")

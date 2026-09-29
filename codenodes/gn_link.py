@@ -194,9 +194,9 @@ vec4 look(Particle p) {
   float r = length(p.position.xy) / size;
   float rnd = rand1(s * 6.1 + 21.0);
   vec3 old = vec3(1.0, 0.78, 0.5), young = vec3(0.55, 0.7, 1.0), rosy = vec3(1.0, 0.55, 0.75);
-  vec3 c = bulge > 0.5 ? old * 0.3 : mix(mix(old, young, smoothstep(0.15, 0.9, r)), rosy, step(0.985, rnd) * 0.9);
+  vec3 c = bulge > 0.5 ? old * 0.12 : mix(mix(old, young, smoothstep(0.15, 0.9, r)), rosy, step(0.985, rnd) * 0.9);
   // the middle is where most stars are: dim each one there, so their sum glows instead of clipping
-  c *= (0.08 + 0.92 * smoothstep(0.03, 0.75, r)) * (0.6 + 0.8 * rnd);
+  c *= (0.04 + 0.96 * smoothstep(0.02, 0.85, r)) * (0.6 + 0.8 * rnd);
   return vec4(c, 1.0);
 }
 """
@@ -265,7 +265,7 @@ vec4 look(Particle p) {
 
 # Settings a template starts with (anything not listed keeps the defaults)
 TEMPLATE_SETTINGS = {
-    "Galaxy": {"count": 1_000_000, "color_by": 'CODE', "gain": 0.32, "point_px": 1.0},
+    "Galaxy": {"count": 1_000_000, "color_by": 'CODE', "gain": 0.28, "point_px": 1.0},
     "Flow": {"count": 1_000_000, "color_by": 'CODE', "gain": 0.3, "point_px": 1.0, "prewarm": 3.0},
     "Attractor": {"count": 600_000, "color_by": 'CODE', "gain": 0.3, "point_px": 1.0, "prewarm": 4.0},
     "Swirl": {"count": 200_000, "gain": 0.4},
