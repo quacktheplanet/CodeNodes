@@ -140,6 +140,17 @@ real there). Each pipeline is one GPU program.
 
 ## Everything on the node
 
+**Every socket has a tooltip.** Hover over it in the node editor. A code's own sliders take theirs from
+the sentence in quotes at the end of their line, and the node's description is the code's first comment
+line:
+
+```glsl
+// Wander: lazy curl-noise drifting, like insects on a summer evening.
+// @in float calm 0.92 0.0 0.999  "How smoothly they turn: higher = lazier, smoother paths"
+```
+
+![A socket's tooltip](tooltip.png)
+
 - **✎ Edit Code** (the first input) works as a button. Switch it on and the code opens in a pop-up
   Text Editor window; the toggle switches itself back off. Double-clicking a code node, or pressing
   Ctrl+E in the Node Editor, does the same. The node recompiles as you type.
@@ -168,6 +179,20 @@ real there). Each pipeline is one GPU program.
 Its header says what it outputs and what that costs, for example `To Points · 5 ms` or
 `To Mesh · 210 ms`. It used to be called Make Real; older files are renamed when they open.
 
+## Paused, but still moving
+
+Behaviour nodes (Wander, Rise, Vortex, Drag, …) change how particles *move*, so with the timeline
+stopped their sliders would show nothing. While playback is paused, the viewport keeps its own clock
+running: live particle chains (and surfaces or mesh code set to Animate) keep simulating, so a slider
+you drag shows its effect straight away. Dragging Wander's strength from 0.5 to 4 took the particles'
+median speed from 0.53 to 2.0 m/s within 0.6 s (tests/test_live_preview.py).
+
+- The scene frame doesn't change. The preview runs its own copy of each simulation, so renders,
+  To Geometry and the GPU Cache always use the real frame.
+- Playing the timeline takes over from the preview; changing the frame restarts the preview there.
+- It stops when nothing is drawing (Blender minimised) and while rendering.
+- Switch it off in Preferences › Add-ons › CodeNodes › "Keep simulating in the viewport while paused".
+
 ## Live, and converted
 
 | | A GPU chain on its own | With To Geometry after it |
@@ -175,6 +200,12 @@ Its header says what it outputs and what that costs, for example `To Points · 5
 | Shown by | Drawn straight from GPU memory into the 3D viewport, depth-tested against your objects: points, glowing sprites, or fireflies with flapping wings | Real points (`velocity`, `speed`, `age`, `life`, and the chain's attributes) or a real mesh (with `color` and `value` from GPU Mesh) |
 | Speed | 1M particles at about 190 fps; the five-node firefly chain at about 150; a bent galaxy at about 140 (RTX A4500) | What copying into Blender costs: 2,500 fireflies in about 5 ms; the Castle at resolution 192 in about 210 ms |
 | Selectable, visible to later nodes, Blender's F12 | No: a viewport picture | Yes, like after Realize Instances |
+
+**Where live surfaces meet meshes:** a surface is marched at Live Resolution and scaled up, with its
+depth read unfiltered, so it meets Blender's own objects without a dark fringe (left: before 0.4.1,
+right: now).
+
+![The castle's gate before and after](archway_before_after.jpg)
 
 **Where a mesh chain gets its mesh:** Blender can't hand a node's incoming geometry to Python. So
 CodeNodes keeps a hidden "tap": an object whose Geometry Nodes are a trimmed copy of your tree,

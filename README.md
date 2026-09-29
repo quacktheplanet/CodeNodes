@@ -41,10 +41,14 @@ After installing (see [Install](#install)), open the demo (build it with `exampl
    `Firefly Swarm · live · 2.5k`, and each stage says `in chain`.
 3. Everything you can change is **on the nodes**: each node's sliders come from its code (`strength`,
    `climb`, `rate`, `size`, `flap`…), with the Template dropdown and settings panels beside them.
+   **Hover over any socket** for a sentence saying what it does. The timeline doesn't need to play:
+   with it paused the viewport keeps simulating, so dragging Wander's `strength` changes the motion
+   straight away.
 4. Switch on **✎ Edit Code**, a node's first input. Its code pops up in a Text Editor window, and the
    toggle switches itself back off. Double-clicking the node or pressing Ctrl+E does the same. Change
    the code and the fireflies follow as you type. A new `// @in float gust 1 0 5` line becomes a new
-   input on the node; a new `// @out attr heat` line becomes a new output.
+   input on the node; a new `// @out attr heat` line becomes a new output. End a line with a sentence
+   in quotes (`// @in float gust 1 0 5  "How strong the gusts are"`) and that's its tooltip.
 5. **Shift A › CodeNodes › To Geometry** after the last node turns the chain into real points (its
    header reads **To Points**),
    carrying `velocity`, `age` and each attribute the chain declares (Blink's `brightness` and
@@ -555,6 +559,11 @@ api.bake_to_nodes("Ring")   # to nodes: {"ok": True, "sliders": [...]} or {"ok":
 - A new mesh is built on the side and swapped in only when everything succeeded, so a failed build
   leaves the object as it was. Materials and modifiers carry over, and old mesh data is freed.
 - Animate is skipped while a render job runs.
+- Rebuilding a node (a new template, a code edit that changes its sockets) never keeps Python
+  references to Blender data across the rebuild: users are saved and re-found by name. And before any
+  error is printed, Blender structs are taken off it, because Python's "Did you mean …?" suggestion
+  calls dir() on them, which crashes Blender when the struct was just freed (this was a real crash on
+  switching templates).
 
 ## Known limitations
 
@@ -588,6 +597,7 @@ blender -b --factory-startup --python tests/test_farm.py       # the bake render
 blender --factory-startup --python tests/test_volume.py        # density code -> OpenVDB -> Volume object (16)
 blender --factory-startup --python tests/test_particles.py     # GPU particle solver, incl. baking (22)
 blender --factory-startup --python tests/test_agent.py         # the assistant-facing surface (31)
+blender --factory-startup --python tests/test_live_preview.py  # template switching stress, safe errors, the paused preview (11)
 blender --factory-startup --python tests/test_shape_blender.py # shapes as Blender objects (36)
 blender --factory-startup --python tests/test_server.py        # a real socket client against Blender (26)
 blender -b --factory-startup --python tests/test_gn.py         # Geometry Nodes as data, both ways (60)

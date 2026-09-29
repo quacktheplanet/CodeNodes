@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.1 (unreleased, draft): a crash fixed, sliders you can see, tooltips
+
+- **Fixed a crash when switching a node's Template** (reported from the v4 demo). Rebuilding a group's
+  sockets freed the old ones; an error printed afterwards asked Python for "Did you mean …?"
+  suggestions, which call dir() on the (freed) Blender struct. CodeNodes now takes Blender structs off
+  every error before it prints (its own reports and, while enabled, `sys.excepthook`), and never keeps
+  references to nodes or sockets across a rebuild. A stress test switches templates 27 times with
+  undo and redo in between.
+- **The viewport keeps simulating while the timeline is paused**, so behaviour sliders show their
+  effect straight away (a preference turns it off). Renders, To Geometry and the GPU Cache use the real
+  frame.
+- **Tooltips on every socket**: end a declaration line with a sentence in quotes; every shipped node's
+  inputs and outputs are described, and so are the sockets CodeNodes adds (Edit Code, Template, Count,
+  Emit From, the settings panels, To Geometry, GPU Cache, Join Particles). NODE_REFERENCE.md gains
+  "What it does" columns.
+- **No dark jagged line where a live surface meets a mesh** (the castle's archway): the composite pass
+  reads the hit distance unfiltered instead of blending it with "no hit" across the outline.
+- Demo: the firefly render setup is one **Firefly Model** node (Size, Flap Speed, Glow Strength).
+
 ## 0.4.0 (unreleased, draft): code-node graphs, caching and lighting
 
 ### Graphs, not just chains
