@@ -128,6 +128,43 @@ the ExpressNode add-on), so the file no longer needs CodeNodes at all.
 type to *CodeNodes*) combines several distance functions into one GPU program with Combine (union,
 subtract, blend), Transform and Offset nodes. The starter graph makes a small Saturn.
 
+## A bigger example: the Galaxy
+
+The firefly chain is one line of nodes. The Galaxy scene (`examples/galaxy_demo.py` builds it, and
+`examples/galaxy_scene.py` is the code) shows what a *graph* of code nodes adds to Geometry Nodes: a
+solar system in front of a spiral galaxy and a nebula, where the systems share functions and act on
+each other. Select **Solar System** and its node tree shows four labelled frames:
+
+![The Galaxy scene rendered: planets, the Sun, the asteroid belt, a ringed planet, the galaxy and the nebula](docs/galaxy_render.jpg)
+
+1. **Shared Orbit: one node, many consumers.** The **Orbits** node has no stream. It gives out
+   functions: `planetPos(i, t)`, `planetRadius(i)`, `planetMass(i)` and `planetCount()`. The planets'
+   placement, the asteroids' gravity, their collisions and the ring all call those same functions.
+   Pick **Figure Eights** in Orbits' Template dropdown and all of them follow the new paths at once:
+   the planets trace figures of eight, the asteroids feel them in their new places, and the ring
+   goes along.
+2. **Reuse: one node, three planets.** Three **Planet Terrain** nodes (the same starter, a GPU Mesh)
+   with different seeds and sea levels make a rocky world, an ocean world and an ice world. Each is
+   painted by a **Colour by Height** node. It's the Mesa idea on a sphere, and yes, it combines with
+   anything, because its input and output are ordinary geometry.
+3. **Native + GPU: they take turns.** Ico Sphere (native) → Planet Terrain (GPU) → Colour by Height
+   (GPU) → To Mesh → Set Material (native) → Geometry to Instance → Instance on Points (native). The
+   points it instances on come from a GPU node, **Points from Function**, which places one point per
+   planet with Orbits' `planetPos` and writes `bodySize` for Instance on Points' Scale.
+4. **Interaction: systems act on each other.** An asteroid **Belt** runs through **Gravity to
+   Bodies** (pulled by the star and every planet) and **Collide with Bodies** (bouncing off them; none
+   ever ends up inside one), then To Points and Instance on Points turn it into lumpy rocks. A
+   **Ring** of dust goes round the second planet through **Follow Body**.
+
+Around it: a **Sun** (a GPU Surface lit by its own emission, with a real Point light parented to it,
+so the real planets are lit), a **Galaxy** of a million stars coloured by temperature (**Star
+Colours** writes a `temp` attribute that a Blackbody node uses in renders), and a **Nebula** (GPU
+sprites live; a real volume from ordinary nodes, Volume Cube from noise, switched on for renders
+with Is Viewport).
+
+**Timing:** orbits use `uSceneTime`, the timeline's time. While the viewport previews a paused
+scene, the asteroids keep moving, but the planets they orbit stay where the real planets are.
+
 ## What's in it
 
 | Feature | What it does | Status |

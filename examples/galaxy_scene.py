@@ -50,8 +50,7 @@ BELT = {"inner": 7.2, "outer": 10.8, "thickness": 0.45, "starMass": STAR_MASS}
 
 def planet_radius(i, size=ORBITS["size"]):
     """Orbits' planetRadius(i), in Python (for the ring's size and the tests)."""
-    x = math.sin(i * 12.9898 + 1.3) * 43758.5453
-    return size * (0.7 + 0.6 * (x - math.floor(x)))
+    return size * (0.75 + 0.35 * math.sin(i * 2.3 + 0.7))
 
 
 # ---- helpers -------------------------------------------------------------------------------------------------
@@ -226,7 +225,7 @@ def build_solar_system(scene):
 
     # Reuse: three planets from the same two nodes
     planet_mat = material("Planet Surface", rough=0.75, color_attr="color")
-    geo2inst = node(t, "GeometryNodeGeometryToInstance", (-350, 1250), "Planets as instances")
+    geo2inst = node(t, "GeometryNodeGeometryToInstance", (-350, 900), "Planets as instances")
     reuse = []
     for row, (name, terrain_in, colour_in) in enumerate(PLANETS):
         y = 2700 - row * 560
@@ -245,20 +244,20 @@ def build_solar_system(scene):
         reuse += [ico, ter, col, tg, setm, smooth]
 
     # Native + GPU: a GPU node places the planets, Geometry Nodes instances them
-    pts = code_node(t, 'PARTICLES', "Points from Function", (-1850, 900), "Planet positions")
-    ptg = to_geometry(t, pts, (-1550, 900))
-    index = node(t, "GeometryNodeInputIndex", (-980, 780))
-    size = node(t, "GeometryNodeInputNamedAttribute", (-980, 680), "bodySize (from the GPU node)")
+    pts = code_node(t, 'PARTICLES', "Points from Function", (-1850, 600), "Planet positions")
+    ptg = to_geometry(t, pts, (-1550, 600))
+    index = node(t, "GeometryNodeInputIndex", (-980, 480))
+    size = node(t, "GeometryNodeInputNamedAttribute", (-980, 380), "bodySize (from the GPU node)")
     size.data_type = 'FLOAT'
     size.inputs["Name"].default_value = "bodySize"
-    clock = node(t, "GeometryNodeInputSceneTime", (-980, 500), "Spin with time")
-    spin = node(t, "ShaderNodeMath", (-760, 500), "Spin rate")
+    clock = node(t, "GeometryNodeInputSceneTime", (-980, 200), "Spin with time")
+    spin = node(t, "ShaderNodeMath", (-760, 200), "Spin rate")
     spin.operation = 'MULTIPLY'
     spin.inputs[1].default_value = 0.35
-    rot = node(t, "ShaderNodeCombineXYZ", (-560, 500))
+    rot = node(t, "ShaderNodeCombineXYZ", (-560, 200))
     t.links.new(clock.outputs["Seconds"], spin.inputs[0])
     t.links.new(spin.outputs[0], rot.inputs["Z"])
-    iop = node(t, "GeometryNodeInstanceOnPoints", (-120, 1000), "Planets on their orbits")
+    iop = node(t, "GeometryNodeInstanceOnPoints", (-120, 700), "Planets on their orbits")
     iop.inputs["Pick Instance"].default_value = True
     t.links.new(ptg.outputs["Geometry"], iop.inputs["Points"])
     t.links.new(geo2inst.outputs["Instances"], iop.inputs["Instance"])

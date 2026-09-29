@@ -370,7 +370,8 @@ float orbitAngle(int i, float t) {
   float r = orbitRadius(i);
   return speed * pow(first / r, 1.5) * t + float(i) * 2.39996;     // each starts a golden angle further on
 }
-float planetRadius(int i) { return size * (0.7 + 0.6 * fract(sin(float(i) * 12.9898 + 1.3) * 43758.5453)); }
+// planet sizes vary smoothly with i (no float hash: the same on every GPU, and in Python)
+float planetRadius(int i) { return size * (0.75 + 0.35 * sin(float(i) * 2.3 + 0.7)); }
 float planetMass(int i) { float r = planetRadius(i); return density * r * r * r; }
 int planetCount() { return planets; }
 """

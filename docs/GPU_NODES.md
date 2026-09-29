@@ -24,20 +24,23 @@ You put it where you want geometry.
 | **To Geometry** | Turns the GPU node or chain before it into real geometry | — |
 | **Join Particles** | Merges two particle streams: the stages after it apply to both | — |
 | **GPU Cache** | Bakes the GPU simulation passing through it and plays it back | — |
-| **GPU Particles** | A particle source you write: `spawn(p)`, and optionally `update(p, dt)` | Galaxy, Flow, Attractor, Swirl, Fountain, Firefly Swarm, Spark Ball |
-| **GPU Surface (SDF)** | A shape from a distance function (`float sdf(vec3 p)`), raymarched | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Blob |
-| **GPU Mesh** | Code run on every vertex of the mesh wired into it (`void deform(inout Vertex v)`) | Wave, Noise Displace, Mesa, Twist |
+| **GPU Particles** | A particle source you write: `spawn(p)`, and optionally `update(p, dt)` | Galaxy, Flow, Attractor, Swirl, Fountain, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula |
+| **GPU Surface (SDF)** | A shape from a distance function (`float sdf(vec3 p)`), raymarched | Castle, Planet, Saturn, Sun, Donut, Rounded Box, Gyroid Ball, Blob |
+| **GPU Mesh** | Code run on every vertex of the mesh wired into it (`void deform(inout Vertex v)`) | Wave, Noise Displace, Mesa, Planet Terrain, Twist |
 | **GPU Stage** | One step in a chain: what particles do, how they look, a warp, a mesh deform, or functions for other nodes | see below |
 | **Code Shape** | A model built from a parametric description; real geometry straight away | Desk Lamp, Vase |
 
 The GPU Stage starters, by section:
 - **Particle stages** (what particles do): Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field,
-  Collide with Shape
+  Collide with Shape, Gravity to Bodies, Collide with Bodies
 - **Particle looks** (how they're drawn live): Glow Look, Firefly Look, Streak Look (trails),
-  Material Look (a Blender material, lit by the scene)
-- **Warps** (particles and meshes alike): Bend, Taper
-- **Mesh stages**: Ripple, Sway by Field
-- **Functions** for other nodes: Wind Field
+  Material Look (a Blender material, lit by the scene), Star Colours (a `temp` attribute and its
+  blackbody colour)
+- **Warps** (particles and meshes alike): Bend, Taper, Follow Body (carries things along with a moving
+  body)
+- **Mesh stages**: Ripple, Sway by Field, Colour by Height
+- **Functions** for other nodes: Wind Field, Orbits and Figure Eights (the same four outputs, so either
+  can replace the other)
 - **Lighting**: Scene Lights
 
 3D View › Add › Mesh makes the same nodes on a new object.
@@ -76,6 +79,17 @@ works: it means `@in float`.
 | `vec3 warp(vec3 q)` | Particles **and** Mesh in and out | where things are *shown*: bends particles and meshes alike |
 | `void deform(inout Vertex v)` | Mesh in and out | change each vertex of a mesh |
 | `float sdf(vec3 p)` | an `sdf` function output | a GPU Surface; wire it into Collide with Shape |
+
+**Functions can take anything**: ints, several arguments, or none. Orbits declares
+`vec3 planetPos(int i, float t)`, `float planetRadius(int i)` and `int planetCount()`, and a node that
+wants them writes `// @in func vec3 bodyPos(int i, float t)`. A function wired into another node is
+included in that node's program once, with its own name prefix, however many nodes use it.
+
+**Time:** `uTime` is the simulation's time in seconds; while the viewport previews a paused scene it
+runs ahead of the timeline. `uSceneTime` is the timeline's time: it stays on the timeline's frame
+during the preview. Use it for anything that must line up with real geometry. In the Galaxy scene the
+planets are real meshes placed at `planetPos(i, uSceneTime)`, and the asteroids' gravity uses the same
+time, so while you preview a paused scene the asteroids keep moving round planets that stay put.
 
 **Declarations:**
 - `@in float|int name default [min max]`: a slider or whole number.
@@ -137,6 +151,23 @@ real there). Each pipeline is one GPU program.
 - **Colours on the sockets:** Particles (bundle), Mesh or Geometry (geometry), functions (closure),
   attributes (float field). Blender won't wire a Particles output into a geometry input, so particles
   reach the rest of your tree only through To Geometry.
+
+## A bigger graph: the Galaxy
+
+The Galaxy scene (see the README, and `examples/galaxy_scene.py`) is built to show four things a single
+chain can't:
+
+| Idea | In the Solar System tree |
+|---|---|
+| **Reuse**: one node, several times, different inputs | three Planet Terrain + Colour by Height chains: a rocky, an ocean and an ice planet |
+| **Sharing**: one output, many consumers | Orbits' `planetPos`, `planetRadius`, `planetMass`, `planetCount` feed Points from Function, Gravity to Bodies, Collide with Bodies and Follow Body |
+| **Mixing**: GPU code and native nodes interleaved | Ico Sphere → Planet Terrain → Colour by Height → To Mesh → Set Material → Geometry to Instance → Instance on Points, on points placed by Points from Function |
+| **Interaction**: systems affecting each other | the asteroid belt is pulled by the planets and bounces off them; the ring follows its planet |
+
+Switch Orbits' Template to Figure Eights and the planets, the asteroids' gravity and collisions, and
+the ring all follow the new paths (tests/test_galaxy.py checks each of these).
+
+![The Galaxy's node tree, in labelled frames](galaxy_nodes.jpg)
 
 ## Everything on the node
 

@@ -24,6 +24,7 @@ and the node's sockets follow at once.
 | `// @in color tint 1.0 0.6 0.2` | a colour | `tint` (a `vec3`) |
 | `// @in func vec3 wind(vec3 p)` | a function input: wire another node's function output into it | `wind(p)` |
 | `// @in func float sdf(vec3 p) = 1e9` | the same, with what it returns when nothing is wired | `sdf(p)` |
+| `// @in func vec3 bodyPos(int i, float t)` | any signature: ints, several arguments, or none (`int bodyCount()`) | `bodyPos(i, uSceneTime)` |
 | `// @in material mat` | a Material socket | `mat_base` (vec3), `mat_roughness`, `mat_metallic`, `mat_emit` (vec3, colour × strength), `mat_alpha` |
 | `// @in hidden lightX 0.0` | none: a value the add-on fills in itself (e.g. Scene Lights' light data) | `lightX` |
 
@@ -65,8 +66,10 @@ with any surface.
 
 `Particle` has `position`, `velocity`, `age`, `life` (seconds) and `seed` (fixed per particle), plus
 any declared attributes. `Vertex` has `position`, `normal`, `color` (vec4) and `value` (a float
-written as an attribute). Everywhere: `uTime` (seconds) and `uFrame`; in looks, `cnCamera` (the
-camera in the object's space). Helpers: `rand1`, `rand3`, `randBall`, `randSphere`, `gnoise`,
+written as an attribute). Everywhere: `uTime` (seconds) and `uFrame`, and `uSceneTime`: the
+timeline's time in seconds, which (unlike `uTime`) stays on the timeline's frame while the viewport
+previews a paused scene, so use it for anything that must line up with real geometry (Orbits' planets
+and the asteroids that orbit them). In looks, `cnCamera` (the camera in the object's space). Helpers: `rand1`, `rand3`, `randBall`, `randSphere`, `gnoise`,
 `curlNoise`, `emitPoint(seed)` / `emitNormal(seed)` (points on the Emit From surface), and the SDF
 helpers (`sdSphere`, `sdBox`, `sdRoundBox`, `sdCylinder`, `sdTorus`, `smin`, `aroundZ`, `rotateX`, ...).
 
@@ -93,7 +96,7 @@ into small nodes costs no speed.
 
 Each node's functions, constants and sliders get a per-node prefix inside the program, so two nodes
 can both define `strength` or `hash()`. Attributes are shared by name across a chain (at most four
-per chain). Names starting with `cn` + capital letter, `gl_`, `uTime` and `uFrame`, GLSL words and
+per chain). Names starting with `cn` + capital letter, `gl_`, `uTime`, `uFrame` and `uSceneTime`, GLSL words and
 helper names are reserved. A mistake is reported on the node that has it, with its own line:
 `node 'Wander', line 4: ...`.
 
@@ -133,7 +136,7 @@ Galaxy: a million stars on twisted ellipses (a density wave, as in Myriad). Each
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | Count | int | 1000000 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
 | Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
 | size | float | 2.4 | 0.5 to 10 |  | Radius of the galaxy |
@@ -213,7 +216,7 @@ Flow: particles ride a curl-noise current (as in Myriad): crisp filaments that n
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | Count | int | 1000000 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
 | Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
 | scale | float | 0.55 | 0.1 to 3 |  | Size of the current's swirls |
@@ -280,7 +283,7 @@ Attractor: the Aizawa strange attractor, integrated on the GPU (as in Myriad).
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | Count | int | 600000 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
 | Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
 | size | float | 2.1 | 0.5 to 8 |  | Size of the attractor |
@@ -352,7 +355,7 @@ Particles. spawn() places one; update() moves it, called once per step. Particle
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | Count | int | 200000 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
 | Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
 | speed | float | 1 | 0 to 4 |  | How fast particles swirl |
@@ -419,7 +422,7 @@ Firefly Swarm: fireflies born just above the Emit From surface (or in a ball whe
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | Count | int | 2500 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
 | Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
 | height | float | 0.35 | 0 to 3 |  | How high above the surface they're born, in metres |
@@ -474,7 +477,7 @@ Spark Ball: particles born in a ball, with a small random kick. A plain source f
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | Count | int | 100000 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
 | Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
 | radius | float | 1 | 0.05 to 20 |  | Radius of the ball they're born in |
@@ -512,6 +515,250 @@ void spawn(inout Particle p) {
 ```
 
 
+### Points from Function
+
+*GPU Particles source*
+
+Points from Function: one point per index, placed every step by a function wired into 'place' (e.g. Orbits' planetPos) at the timeline's time. Put To Points after it to instance things on the points.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Count | int | 3 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
+| Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
+| place | function |  |  |  | Where point i is at time t: wire in a function such as Orbits' planetPos |
+| size | function |  |  |  | The size of point i, written as its bodySize attribute (e.g. Orbits' planetRadius) |
+| count | function |  |  |  | How many points to use (e.g. Orbits' planetCount); points past it get size 0 |
+| Colour By | menu |  | Code, Speed, Age | Look | What colours the particles when no Look node is wired: the code's own colour, their speed or their age |
+| Slow / Young | colour | (0.15, 0.3, 1, 1) |  | Look | Colour of slow particles (Colour By: Speed) or young ones (Colour By: Age) |
+| Fast / Old | colour | (1, 0.55, 0.2, 1) |  | Look | Colour of fast particles (Colour By: Speed) or old ones (Colour By: Age) |
+| Glow | toggle | False |  | Look | Draw additively, so overlapping particles add up to a glow. Off draws them solid |
+| Point Size | float | 6 | 0.5 to 32 | Look | Size of each particle on screen, in pixels, when no Look node sets a size |
+| Brightness | float | 1 | 0 to 8 | Look | Overall brightness of the live particles |
+| Speed Range | float | 2 | 0.0001 to 50 | Look | The speed (metres per second) that counts as fully fast for Colour By: Speed |
+| Substeps | int | 1 | 1 to 20 | Simulation | Simulation steps per frame. More is steadier for fast or stiff motion, and costs more |
+| Pre-warm | float | 0 | 0 to 120 | Simulation | Seconds simulated before the first frame, so the particles open already in shape |
+| Stagger | float | 1 | 0 to 1 | Simulation | How spread out the births are: 0 = all at once, 1 = evenly over their lifetime |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Particles | particles | The particle stream after this node: wire it into the next stage, a Look, or To Geometry |
+| bodySize | float | The size 'size' gave each point: use it to scale what you instance there |
+
+**Code**
+
+```glsl
+// Points from Function: one point per index, placed every step by a function wired into 'place' (e.g.
+// Orbits' planetPos) at the timeline's time. Put To Points after it to instance things on the points.
+// @in func vec3 place(int i, float t)  "Where point i is at time t: wire in a function such as Orbits' planetPos"
+// @in func float size(int i) = 1.0  "The size of point i, written as its bodySize attribute (e.g. Orbits' planetRadius)"
+// @in func int count() = 1000000  "How many points to use (e.g. Orbits' planetCount); points past it get size 0"
+// @out attr bodySize 1.0  "The size 'size' gave each point: use it to scale what you instance there"
+void spawn(inout Particle p) { p.life = 1e9; }
+void update(inout Particle p, float dt) {
+  int i = int(p.seed);
+  vec3 q = place(i, uSceneTime);
+  if (dt > 0.0) p.velocity = (q - p.position) / dt;
+  p.position = q;
+  p.bodySize = i < count() ? size(i) : 0.0;
+}
+```
+
+
+### Belt
+
+*GPU Particles source*
+
+Belt: a ring of particles round the origin, each set off on a circular orbit: asteroid belts, debris discs. Add Gravity to Bodies (with the same star mass) to keep them going round.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Count | int | 4000 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
+| Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
+| inner | float | 9.5 | 0.1 to 500 |  | Inner radius of the belt, in metres |
+| outer | float | 12 | 0.1 to 500 |  | Outer radius of the belt, in metres |
+| thickness | float | 0.4 | 0 to 50 |  | How thick the belt is, top to bottom |
+| starMass | float | 30 | 0 to 1000 |  | Pull of the star they orbit: sets their speed (use Gravity to Bodies' star mass) |
+| Colour By | menu |  | Code, Speed, Age | Look | What colours the particles when no Look node is wired: the code's own colour, their speed or their age |
+| Slow / Young | colour | (0.15, 0.3, 1, 1) |  | Look | Colour of slow particles (Colour By: Speed) or young ones (Colour By: Age) |
+| Fast / Old | colour | (1, 0.55, 0.2, 1) |  | Look | Colour of fast particles (Colour By: Speed) or old ones (Colour By: Age) |
+| Glow | toggle | True |  | Look | Draw additively, so overlapping particles add up to a glow. Off draws them solid |
+| Point Size | float | 2.5 | 0.5 to 32 | Look | Size of each particle on screen, in pixels, when no Look node sets a size |
+| Brightness | float | 1 | 0 to 8 | Look | Overall brightness of the live particles |
+| Speed Range | float | 2 | 0.0001 to 50 | Look | The speed (metres per second) that counts as fully fast for Colour By: Speed |
+| Substeps | int | 2 | 1 to 20 | Simulation | Simulation steps per frame. More is steadier for fast or stiff motion, and costs more |
+| Pre-warm | float | 0 | 0 to 120 | Simulation | Seconds simulated before the first frame, so the particles open already in shape |
+| Stagger | float | 1 | 0 to 1 | Simulation | How spread out the births are: 0 = all at once, 1 = evenly over their lifetime |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Particles | particles | The particle stream after this node: wire it into the next stage, a Look, or To Geometry |
+
+**Code**
+
+```glsl
+// Belt: a ring of particles round the origin, each set off on a circular orbit: asteroid belts, debris
+// discs. Add Gravity to Bodies (with the same star mass) to keep them going round.
+// @in float inner 9.5 0.1 500.0  "Inner radius of the belt, in metres"
+// @in float outer 12.0 0.1 500.0  "Outer radius of the belt, in metres"
+// @in float thickness 0.4 0.0 50.0  "How thick the belt is, top to bottom"
+// @in float starMass 30.0 0.0 1000.0  "Pull of the star they orbit: sets their speed (use Gravity to Bodies' star mass)"
+void spawn(inout Particle p) {
+  float s = p.seed;
+  float r = mix(inner, outer, rand1(s * 1.31));
+  float a = rand1(s * 2.17) * 6.2831853;
+  p.position = vec3(cos(a) * r, sin(a) * r, (rand1(s * 3.71) - 0.5) * thickness);
+  float v = sqrt(starMass / max(r, 1e-3)) * (0.97 + 0.06 * rand1(s * 5.31));
+  p.velocity = vec3(-sin(a), cos(a), 0.0) * v;
+  p.life = 1e9;
+}
+```
+
+
+### Ring
+
+*GPU Particles source*
+
+Ring: a flat, thin ring of dust going round its centre, the inner edge faster than the outer (Kepler). Put Follow Body after it to wrap it round a planet.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Count | int | 60000 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
+| Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
+| inner | float | 1.1 | 0.01 to 100 |  | Inner radius of the ring, in metres |
+| outer | float | 1.9 | 0.01 to 100 |  | Outer radius of the ring, in metres |
+| thickness | float | 0.01 | 0 to 5 |  | How thick the ring is |
+| spin | float | 0.8 | 0 to 10 |  | How fast it goes round |
+| gaps | float | 0.5 | 0 to 1 |  | How clear the gaps between bands are (0 = even dust) |
+| Colour By | menu |  | Code, Speed, Age | Look | What colours the particles when no Look node is wired: the code's own colour, their speed or their age |
+| Slow / Young | colour | (0.15, 0.3, 1, 1) |  | Look | Colour of slow particles (Colour By: Speed) or young ones (Colour By: Age) |
+| Fast / Old | colour | (1, 0.55, 0.2, 1) |  | Look | Colour of fast particles (Colour By: Speed) or old ones (Colour By: Age) |
+| Glow | toggle | True |  | Look | Draw additively, so overlapping particles add up to a glow. Off draws them solid |
+| Point Size | float | 1 | 0.5 to 32 | Look | Size of each particle on screen, in pixels, when no Look node sets a size |
+| Brightness | float | 0.5 | 0 to 8 | Look | Overall brightness of the live particles |
+| Speed Range | float | 2 | 0.0001 to 50 | Look | The speed (metres per second) that counts as fully fast for Colour By: Speed |
+| Substeps | int | 1 | 1 to 20 | Simulation | Simulation steps per frame. More is steadier for fast or stiff motion, and costs more |
+| Pre-warm | float | 0 | 0 to 120 | Simulation | Seconds simulated before the first frame, so the particles open already in shape |
+| Stagger | float | 1 | 0 to 1 | Simulation | How spread out the births are: 0 = all at once, 1 = evenly over their lifetime |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Particles | particles | The particle stream after this node: wire it into the next stage, a Look, or To Geometry |
+
+**Code**
+
+```glsl
+// Ring: a flat, thin ring of dust going round its centre, the inner edge faster than the outer (Kepler).
+// Put Follow Body after it to wrap it round a planet.
+// @in float inner 1.1 0.01 100.0  "Inner radius of the ring, in metres"
+// @in float outer 1.9 0.01 100.0  "Outer radius of the ring, in metres"
+// @in float thickness 0.01 0.0 5.0  "How thick the ring is"
+// @in float spin 0.8 0.0 10.0  "How fast it goes round"
+// @in float gaps 0.5 0.0 1.0  "How clear the gaps between bands are (0 = even dust)"
+void spawn(inout Particle p) { p.life = 1e9; }
+void update(inout Particle p, float dt) {
+  float s = p.seed;
+  float u = rand1(s * 1.37);
+  float band = 0.5 + 0.5 * sin(u * 37.0);
+  u = mix(u, u - (band - 0.5) * 0.03, gaps);        // pull dust away from the gaps into the bands
+  float r = mix(inner, outer, clamp(u, 0.0, 1.0));
+  float a = rand1(s * 2.91) * 6.2831853 + spin * uTime / (r * sqrt(r));
+  vec3 q = vec3(cos(a) * r, sin(a) * r, (rand1(s * 4.13) - 0.5) * thickness);
+  if (dt > 0.0) p.velocity = (q - p.position) / dt;
+  p.position = q;
+}
+```
+
+
+### Nebula
+
+*GPU Particles source*
+
+Nebula: glowing clouds of gas made of soft sprites, shaped and coloured by fractal noise.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Count | int | 150000 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
+| Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
+| radius | float | 30 | 1 to 1000 |  | Size of the cloud, in metres |
+| wisps | float | 1.6 | 0.2 to 8 |  | Size of the wisps: higher = more, smaller ones |
+| thickness | float | 0.35 | 0 to 1 |  | How flat the cloud is (0 = a flat sheet, 1 = a ball) |
+| colorA | colour | (0.95, 0.25, 0.55, 1) |  |  | Colour of the thin, outer gas |
+| colorB | colour | (0.25, 0.5, 1, 1) |  |  | Colour of the dense gas |
+| intensity | float | 0.015 | 0 to 5 |  | Brightness of each sprite (many overlap, so keep it low) |
+| size | float | 2 | 0.01 to 50 |  | Size of each sprite, in metres |
+| Colour By | menu |  | Code, Speed, Age | Look | What colours the particles when no Look node is wired: the code's own colour, their speed or their age |
+| Slow / Young | colour | (0.15, 0.3, 1, 1) |  | Look | Colour of slow particles (Colour By: Speed) or young ones (Colour By: Age) |
+| Fast / Old | colour | (1, 0.55, 0.2, 1) |  | Look | Colour of fast particles (Colour By: Speed) or old ones (Colour By: Age) |
+| Glow | toggle | True |  | Look | Draw additively, so overlapping particles add up to a glow. Off draws them solid |
+| Point Size | float | 1 | 0.5 to 32 | Look | Size of each particle on screen, in pixels, when no Look node sets a size |
+| Brightness | float | 1 | 0 to 8 | Look | Overall brightness of the live particles |
+| Speed Range | float | 2 | 0.0001 to 50 | Look | The speed (metres per second) that counts as fully fast for Colour By: Speed |
+| Substeps | int | 1 | 1 to 20 | Simulation | Simulation steps per frame. More is steadier for fast or stiff motion, and costs more |
+| Pre-warm | float | 0 | 0 to 120 | Simulation | Seconds simulated before the first frame, so the particles open already in shape |
+| Stagger | float | 1 | 0 to 1 | Simulation | How spread out the births are: 0 = all at once, 1 = evenly over their lifetime |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Particles | particles | The particle stream after this node: wire it into the next stage, a Look, or To Geometry |
+
+**Code**
+
+```glsl
+// Nebula: glowing clouds of gas made of soft sprites, shaped and coloured by fractal noise.
+// @shape glow
+// @in float radius 30.0 1.0 1000.0  "Size of the cloud, in metres"
+// @in float wisps 1.6 0.2 8.0  "Size of the wisps: higher = more, smaller ones"
+// @in float thickness 0.35 0.0 1.0  "How flat the cloud is (0 = a flat sheet, 1 = a ball)"
+// @in color colorA 0.95 0.25 0.55  "Colour of the thin, outer gas"
+// @in color colorB 0.25 0.5 1.0  "Colour of the dense gas"
+// @in float intensity 0.015 0.0 5.0  "Brightness of each sprite (many overlap, so keep it low)"
+// @in float size 2.0 0.01 50.0  "Size of each sprite, in metres"
+void spawn(inout Particle p) {
+  float s = p.seed;
+  vec3 q = vec3(0.0);
+  for (int k = 0; k < 16; k++) {                    // keep only places where the gas is thick
+    q = randBall(s * (1.0 + float(k) * 0.1731) + float(k) * 0.37) * radius;
+    q.z *= thickness;
+    float g = fbm3(q / radius * wisps * 2.0 + 3.0);
+    if (g > 0.5 + 0.25 * length(q) / radius) break;
+  }
+  p.position = q;
+  p.velocity = vec3(0.0);
+  p.life = 1e9;
+}
+vec4 look(Particle p) {
+  float t = fbm3(p.position / radius * wisps + 9.0);
+  vec3 c = mix(colorA, colorB, smoothstep(0.38, 0.62, t));
+  float fade = 1.0 - smoothstep(0.55, 1.0, length(p.position) / radius);
+  return vec4(c * intensity * fade, 1.0);
+}
+```
+
+
 ### Fountain
 
 *GPU Particles source*
@@ -525,7 +772,7 @@ A fountain: particles shoot up from the origin and fall back under gravity.
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Galaxy, Flow, Attractor, Swirl, Firefly Swarm, Spark Ball, Points from Function, Belt, Ring, Nebula, Fountain, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | Count | int | 100000 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
 | Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
 | power | float | 4 | 0.5 to 10 |  | Launch speed upwards |
@@ -582,7 +829,7 @@ Wander: lazy curl-noise drifting, like insects on a summer evening.
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | strength | float | 0.5 | 0 to 5 |  | How hard the drifting current pushes (0 = no drift) |
 | scale | float | 1.2 | 0.05 to 10 |  | Size of the swirls: low = big lazy loops across the scene, high = small twitchy wiggles |
 | calm | float | 0.92 | 0 to 0.999 |  | How smoothly they turn: higher = lazier, smoother paths; 0 = they snap to the current |
@@ -621,7 +868,7 @@ Rise: a gentle buoyancy; particles climb towards a speed and ease off near their
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | climb | float | 0.12 | 0 to 3 |  | Upward speed they ease towards (metres per second) |
 | ceiling | float | 2.5 | 0.1 to 50 |  | Height where the rise fades out, so they hover instead of flying away |
 
@@ -658,7 +905,7 @@ Gravity: a constant pull (down by default).
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | strength | float | 9.8 | 0 to 50 |  | Pull downwards, in metres per second squared (9.8 = Earth) |
 
 **Outputs**
@@ -692,7 +939,7 @@ Vortex: swirl around the vertical axis through the node's centre.
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | spin | float | 1.5 | -20 to 20 |  | How fast they circle the vertical axis (negative turns the other way) |
 | pull | float | 0.3 | -10 to 10 |  | Draws them in towards the axis (negative pushes them out) |
 
@@ -730,7 +977,7 @@ Drag: slows particles down, like moving through air or water.
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | amount | float | 1 | 0 to 20 |  | How quickly they slow down, like moving through air (low) or water (high) |
 
 **Outputs**
@@ -764,7 +1011,7 @@ Blink: each particle pulses on its own rhythm. Adds two per-particle values late
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | rate | float | 0.6 | 0.05 to 6 |  | Blinks per second |
 | sharpness | float | 6 | 1 to 30 |  | How sudden each blink is: low = gentle pulses, high = quick flashes |
 
@@ -809,7 +1056,7 @@ Push by Field: a force from a function wired into 'field' (e.g. Wind Field).
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | amount | float | 1 | 0 to 10 |  | How strongly the field pushes |
 | field | function |  |  |  | The force to push with: wire in a function such as Wind Field's wind |
 
@@ -845,7 +1092,7 @@ Collide with Shape: bounce off a surface wired into 'sdf' (a GPU Surface node's 
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | bounce | float | 0.4 | 0 to 1 |  | How much speed is kept after a bounce (0 = stop dead, 1 = perfectly bouncy) |
 | radius | float | 0.02 | 0 to 1 |  | Particle radius used for contact, in metres |
 | sdf | function |  |  |  | The surface to bounce off: wire in a GPU Surface node's sdf output |
@@ -879,6 +1126,114 @@ void behave(inout Particle p, float dt) {
 ```
 
 
+### Gravity to Bodies
+
+*GPU Stage*
+
+Gravity to Bodies: Newton's pull towards a star at the centre and towards every body wired in (e.g. the planets from Orbits). Particles orbit, swing past planets and get flung.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| starMass | float | 30 | 0 to 1000 |  | Pull of the star at the centre (0 = no star) |
+| soften | float | 0.25 | 0.01 to 10 |  | Stops the pull growing without limit very close to a body, in metres |
+| bodyPos | function |  |  |  | Where body i is at time t: wire in Orbits' planetPos |
+| bodyMass | function |  |  |  | The mass of body i: wire in Orbits' planetMass |
+| bodyCount | function |  |  |  | How many bodies there are: wire in Orbits' planetCount |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Particles | particles | The particle stream after this node: wire it into the next stage, a Look, or To Geometry |
+
+**Code**
+
+```glsl
+// Gravity to Bodies: Newton's pull towards a star at the centre and towards every body wired in (e.g. the
+// planets from Orbits). Particles orbit, swing past planets and get flung.
+// @in func vec3 bodyPos(int i, float t)  "Where body i is at time t: wire in Orbits' planetPos"
+// @in func float bodyMass(int i) = 0.0  "The mass of body i: wire in Orbits' planetMass"
+// @in func int bodyCount() = 0  "How many bodies there are: wire in Orbits' planetCount"
+// @in float starMass 30.0 0.0 1000.0  "Pull of the star at the centre (0 = no star)"
+// @in float soften 0.25 0.01 10.0  "Stops the pull growing without limit very close to a body, in metres"
+void behave(inout Particle p, float dt) {
+  float r2 = dot(p.position, p.position) + soften * soften;
+  vec3 acc = -p.position * starMass / (r2 * sqrt(r2));
+  int n = bodyCount();
+  for (int i = 0; i < 8; i++) {
+    if (i >= n) break;
+    vec3 d = bodyPos(i, uSceneTime) - p.position;
+    float b2 = dot(d, d) + soften * soften;
+    acc += d * bodyMass(i) / (b2 * sqrt(b2));
+  }
+  p.velocity += acc * dt;
+}
+```
+
+
+### Collide with Bodies
+
+*GPU Stage*
+
+Collide with Bodies: particles bounce off the star at the centre and off every body wired in (spheres at Orbits' planetPos with planetRadius), and never end up inside one. Put it after the other behaviours.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| starRadius | float | 1 | 0 to 100 |  | Radius of the star at the centre (0 = no star) |
+| margin | float | 0.12 | 0 to 1 |  | Extra room for mountains, as a fraction of each body's radius |
+| bounce | float | 0.5 | 0 to 1 |  | Speed kept after a bounce (0 = stop dead, 1 = perfectly bouncy) |
+| bodyPos | function |  |  |  | Where body i is at time t: wire in Orbits' planetPos |
+| bodyRadius | function |  |  |  | The radius of body i: wire in Orbits' planetRadius |
+| bodyCount | function |  |  |  | How many bodies there are: wire in Orbits' planetCount |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Particles | particles | The particle stream after this node: wire it into the next stage, a Look, or To Geometry |
+
+**Code**
+
+```glsl
+// Collide with Bodies: particles bounce off the star at the centre and off every body wired in (spheres at
+// Orbits' planetPos with planetRadius), and never end up inside one. Put it after the other behaviours.
+// @in func vec3 bodyPos(int i, float t)  "Where body i is at time t: wire in Orbits' planetPos"
+// @in func float bodyRadius(int i) = 0.0  "The radius of body i: wire in Orbits' planetRadius"
+// @in func int bodyCount() = 0  "How many bodies there are: wire in Orbits' planetCount"
+// @in float starRadius 1.0 0.0 100.0  "Radius of the star at the centre (0 = no star)"
+// @in float margin 0.12 0.0 1.0  "Extra room for mountains, as a fraction of each body's radius"
+// @in float bounce 0.5 0.0 1.0  "Speed kept after a bounce (0 = stop dead, 1 = perfectly bouncy)"
+void bounceOff(inout Particle p, vec3 c, float R, float dt) {
+  vec3 d = p.position + p.velocity * dt - c;           // where the particle is about to be
+  float dist = length(d);
+  if (dist < R) {
+    vec3 n = dist > 1e-6 ? d / dist : vec3(0.0, 0.0, 1.0);
+    float vn = dot(p.velocity, n);
+    if (vn < 0.0) p.velocity -= (1.0 + bounce) * vn * n;
+    p.position = c + n * R - p.velocity * dt;          // so this step's move lands it on the surface
+  }
+}
+void behave(inout Particle p, float dt) {
+  if (starRadius > 0.0) bounceOff(p, vec3(0.0), starRadius, dt);
+  int n = bodyCount();
+  for (int i = 0; i < 8; i++) {
+    if (i >= n) break;
+    bounceOff(p, bodyPos(i, uSceneTime), bodyRadius(i) * (1.0 + margin), dt);
+  }
+}
+```
+
+
 ## Particle looks
 
 ### Glow Look
@@ -895,7 +1250,7 @@ Glow Look: soft glowing sprites that fade in and out over each particle's life.
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | tint | colour | (1, 0.6, 0.25, 1) |  |  | Colour of the glow |
 | intensity | float | 2 | 0 to 20 |  | Brightness of the glow |
 | size | float | 0.03 | 0.001 to 1 |  | Size of each sprite, in metres |
@@ -936,7 +1291,7 @@ Firefly Look: a glowing abdomen with a soft halo, and two little wings that flap
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | glow | colour | (1, 0.78, 0.22, 1) |  |  | Colour of the glowing abdomen |
 | intensity | float | 3 | 0 to 40 |  | Brightness of the glow |
 | size | float | 0.012 | 0.001 to 0.2 |  | Size of each firefly's body, in metres |
@@ -986,7 +1341,7 @@ Streak Look: each particle drawn as a glowing streak along its motion (a trail).
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | tint | colour | (0.55, 0.75, 1, 1) |  |  | Colour of the streaks |
 | intensity | float | 1.2 | 0 to 20 |  | Brightness of the streaks |
 | size | float | 0.01 | 0.001 to 0.5 |  | Thickness of each streak, in metres |
@@ -1030,7 +1385,7 @@ Material Look: particles in a Blender material's colours (its Principled BSDF: b
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | size | float | 0.03 | 0.001 to 1 |  | Size of each particle, in metres |
 | brightness | float | 1 | 0 to 10 |  | Overall brightness |
 | mat | material |  |  |  | The Blender material whose colours, roughness and metallic the particles take |
@@ -1066,6 +1421,66 @@ vec4 look(Particle p) {
 ```
 
 
+### Star Colours
+
+*GPU Stage*
+
+Star Colours: gives every star a temperature (cool orange in the core, hot blue-white out on the arms) and draws it in its blackbody colour. To Points writes 'temp' (thousands of kelvin) for materials.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| reach | float | 2.4 | 0.1 to 1000 |  | Radius of the galaxy, in metres (the source's size) |
+| core | float | 3.5 | 1 to 40 |  | Temperature of stars in the core, in thousands of kelvin |
+| arms | float | 11 | 1 to 40 |  | Temperature of young stars out on the arms, in thousands of kelvin |
+| spread | float | 0.35 | 0 to 1 |  | How much neighbouring stars differ |
+| brightness | float | 0.9 | 0 to 10 |  | Overall brightness |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Particles | particles | The particle stream after this node: wire it into the next stage, a Look, or To Geometry |
+| temp | float | Each star's temperature in thousands of kelvin (for a Blackbody node in a material) |
+
+**Code**
+
+```glsl
+// Star Colours: gives every star a temperature (cool orange in the core, hot blue-white out on the arms)
+// and draws it in its blackbody colour. To Points writes 'temp' (thousands of kelvin) for materials.
+// @in float reach 2.4 0.1 1000.0  "Radius of the galaxy, in metres (the source's size)"
+// @in float core 3.5 1.0 40.0  "Temperature of stars in the core, in thousands of kelvin"
+// @in float arms 11.0 1.0 40.0  "Temperature of young stars out on the arms, in thousands of kelvin"
+// @in float spread 0.35 0.0 1.0  "How much neighbouring stars differ"
+// @in float brightness 0.9 0.0 10.0  "Overall brightness"
+// @out attr temp 6.0  "Each star's temperature in thousands of kelvin (for a Blackbody node in a material)"
+vec3 blackbody(float kk) {                 // an RGB fit of Planck's law, kk in thousands of kelvin
+  float t = kk * 10.0;
+  float r = t <= 66.0 ? 1.0 : 1.292936 * pow(t - 60.0, -0.1332047);
+  float g = t <= 66.0 ? 0.3900815 * log(t) - 0.6318414 : 1.129890 * pow(t - 60.0, -0.0755148);
+  float b = t >= 66.0 ? 1.0 : (t <= 19.0 ? 0.0 : 0.5432068 * log(t - 10.0) - 1.1962541);
+  return clamp(vec3(r, g, b), 0.0, 1.0);
+}
+void behave(inout Particle p, float dt) {
+  float r = length(p.position.xy) / reach;
+  float rnd = rand1(p.seed * 6.1 + 21.0);
+  p.temp = mix(core, arms, smoothstep(0.1, 0.8, r)) * (1.0 + (rnd - 0.5) * spread * 1.6);
+}
+vec4 look(Particle p) {
+  float r = length(p.position.xy) / reach;
+  float rnd = rand1(p.seed * 6.1 + 21.0);
+  vec3 c = blackbody(p.temp);
+  // the middle is where most stars are: dim each there, so their sum glows instead of clipping
+  c *= (0.05 + 0.95 * smoothstep(0.02, 0.85, r)) * (0.5 + rnd) * brightness;
+  return vec4(c, 1.0);
+}
+```
+
+
 ## Warps (particles and meshes)
 
 ### Bend
@@ -1083,7 +1498,7 @@ Bend: bends, stretches and twists whatever comes in (particles or a mesh) along 
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
 | Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | angle | float | 1.2 | -6.2832 to 6.2832 |  | How far to bend, in radians across the span (0 = straight) |
 | span | float | 3 | 0.1 to 50 |  | Length over which the bend happens, in metres |
 | stretch | float | 1 | 0.1 to 5 |  | Stretch along the axis (1 = unchanged) |
@@ -1140,7 +1555,7 @@ Taper: squeezes or flares whatever comes in along Z.
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
 | Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | amount | float | 0.5 | -2 to 2 |  | Squeeze (positive) or flare (negative) towards the top |
 | span | float | 3 | 0.1 to 50 |  | Height over which the taper happens, in metres |
 
@@ -1164,6 +1579,43 @@ vec3 warp(vec3 q) {
 ```
 
 
+### Follow Body
+
+*GPU Stage*
+
+Follow Body: carries particles or a mesh along with a moving body (e.g. a planet from Orbits), tilted, so rings and moons go where it goes. A warp: it changes where things are shown, not how they move.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Particles | particles |  |  |  | The particle stream to work on: wire in the Particles output of the node before |
+| Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| body | int | 1 | 0 to 7 |  | Which body to follow (0 = the first) |
+| tilt | float | 0.45 | -3.2 to 3.2 |  | Tilt of the ring's plane, in radians |
+| bodyPos | function |  |  |  | Where body i is at time t: wire in Orbits' planetPos |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Particles | particles | The particle stream after this node: wire it into the next stage, a Look, or To Geometry |
+| Mesh | geometry | The mesh after this node's code. Add To Geometry (To Mesh) to use it in regular nodes or renders |
+
+**Code**
+
+```glsl
+// Follow Body: carries particles or a mesh along with a moving body (e.g. a planet from Orbits), tilted,
+// so rings and moons go where it goes. A warp: it changes where things are shown, not how they move.
+// @in func vec3 bodyPos(int i, float t)  "Where body i is at time t: wire in Orbits' planetPos"
+// @in int body 1 0 7  "Which body to follow (0 = the first)"
+// @in float tilt 0.45 -3.2 3.2  "Tilt of the ring's plane, in radians"
+vec3 warp(vec3 q) { return rotateX(q, tilt) + bodyPos(body, uSceneTime); }
+```
+
+
 ## Mesh stages
 
 ### Ripple
@@ -1180,7 +1632,7 @@ Ripple: rings travel out from the centre along the normals; colour follows the h
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | amplitude | float | 0.05 | 0 to 1 |  | Height of the rings, in metres |
 | wavelength | float | 0.4 | 0.02 to 5 |  | Distance between rings, in metres |
 | speed | float | 1 | 0 to 10 |  | How fast the rings travel outwards |
@@ -1221,7 +1673,7 @@ Sway by Field: bends a mesh (grass, cloth, hair cards) with a force function wir
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | amount | float | 0.15 | 0 to 5 |  | How far it sways |
 | height | float | 0.6 | 0.01 to 10 |  | Height at which the sway is full; below it the mesh bends less (roots stay put) |
 | field | function |  |  |  | The force to sway with: wire in a function such as Wind Field's wind |
@@ -1250,6 +1702,62 @@ void deform(inout Vertex v) {
 ```
 
 
+### Colour by Height
+
+*GPU Stage*
+
+Colour by Height: paints a mesh by the height the node before it stored in v.value: deep and shallow sea below 0, then beaches, lowland, highland and snow up to 1 (Planet Terrain stores it this way).
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| deep | colour | (0.01, 0.04, 0.16, 1) |  |  | Colour of deep water |
+| shallow | colour | (0.03, 0.28, 0.46, 1) |  |  | Colour of shallow water |
+| lowland | colour | (0.15, 0.36, 0.1, 1) |  |  | Colour of low ground |
+| highland | colour | (0.42, 0.33, 0.24, 1) |  |  | Colour of high ground |
+| snow | colour | (0.94, 0.95, 1, 1) |  |  | Colour of snow and ice |
+| snowline | float | 0.7 | 0 to 1.5 |  | Height above which the land is white (1 = the highest peaks) |
+| ice | float | 0 | 0 to 1 |  | Polar caps: how far the ice reaches from the poles towards the equator |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Mesh | geometry | The mesh after this node's code. Add To Geometry (To Mesh) to use it in regular nodes or renders |
+
+**Code**
+
+```glsl
+// Colour by Height: paints a mesh by the height the node before it stored in v.value: deep and shallow sea
+// below 0, then beaches, lowland, highland and snow up to 1 (Planet Terrain stores it this way).
+// @in color deep 0.01 0.04 0.16  "Colour of deep water"
+// @in color shallow 0.03 0.28 0.46  "Colour of shallow water"
+// @in color lowland 0.15 0.36 0.1  "Colour of low ground"
+// @in color highland 0.42 0.33 0.24  "Colour of high ground"
+// @in color snow 0.94 0.95 1.0  "Colour of snow and ice"
+// @in float snowline 0.7 0.0 1.5  "Height above which the land is white (1 = the highest peaks)"
+// @in float ice 0.0 0.0 1.0  "Polar caps: how far the ice reaches from the poles towards the equator"
+void deform(inout Vertex v) {
+  float h = v.value;
+  vec3 c;
+  if (h < 0.0) {
+    c = mix(shallow, deep, clamp(-h, 0.0, 1.0));
+  } else {
+    c = mix(lowland, highland, smoothstep(0.1, 0.55, h));
+    c = mix(vec3(0.74, 0.68, 0.5), c, smoothstep(0.0, 0.05, h));      // beaches
+    c = mix(c, snow, smoothstep(snowline - 0.08, snowline + 0.04, h));
+  }
+  float lat = abs(normalize(v.position).z);
+  if (ice > 0.0) c = mix(c, snow, smoothstep(1.0 - ice, 1.0 - ice + 0.06, lat));
+  v.color = vec4(c, 1.0);
+}
+```
+
+
 ## Functions
 
 ### Wind Field
@@ -1265,7 +1773,7 @@ Wind Field: a gusty breeze as a function other nodes can call (wire 'wind' into 
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | strength | float | 0.4 | 0 to 10 |  | Average wind speed |
 | gusts | float | 0.7 | 0 to 5 |  | How much the wind rises and falls over time |
 | turbulence | float | 0.3 | 0 to 5 |  | Small-scale swirling on top of the breeze |
@@ -1291,6 +1799,132 @@ vec3 wind(vec3 q) {
 ```
 
 
+### Orbits
+
+*GPU Stage*
+
+Orbits: where each planet is at any time, as functions any number of nodes can share: planetPos(i, t), planetRadius(i), planetMass(i), planetCount(). Change this node's code and everything using it follows.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| planets | int | 3 | 1 to 8 |  | How many planets |
+| first | float | 3.4 | 0.5 to 100 |  | Radius of the innermost orbit, in metres |
+| gap | float | 2.4 | 0.1 to 100 |  | Distance from one orbit to the next, in metres |
+| speed | float | 0.6 | 0 to 10 |  | How fast the innermost planet goes round (outer ones are slower, by Kepler's third law) |
+| size | float | 0.6 | 0.05 to 10 |  | Radius of an average planet, in metres |
+| incline | float | 0.06 | 0 to 1 |  | How far the orbits tilt out of the plane, in radians |
+| density | float | 4 | 0 to 100 |  | How strongly planets pull (mass per cubic metre) |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| planetPos | function | Where planet i is at time t: planetPos(int i, float t) |
+| planetRadius | function | The radius of planet i: planetRadius(int i) |
+| planetMass | function | The mass of planet i, for gravity: planetMass(int i) |
+| planetCount | function | How many planets there are: planetCount() |
+
+**Code**
+
+```glsl
+// Orbits: where each planet is at any time, as functions any number of nodes can share: planetPos(i, t),
+// planetRadius(i), planetMass(i), planetCount(). Change this node's code and everything using it follows.
+// @in int planets 3 1 8  "How many planets"
+// @in float first 3.4 0.5 100.0  "Radius of the innermost orbit, in metres"
+// @in float gap 2.4 0.1 100.0  "Distance from one orbit to the next, in metres"
+// @in float speed 0.6 0.0 10.0  "How fast the innermost planet goes round (outer ones are slower, by Kepler's third law)"
+// @in float size 0.6 0.05 10.0  "Radius of an average planet, in metres"
+// @in float incline 0.06 0.0 1.0  "How far the orbits tilt out of the plane, in radians"
+// @in float density 4.0 0.0 100.0  "How strongly planets pull (mass per cubic metre)"
+// @out func planetPos  "Where planet i is at time t: planetPos(int i, float t)"
+// @out func planetRadius  "The radius of planet i: planetRadius(int i)"
+// @out func planetMass  "The mass of planet i, for gravity: planetMass(int i)"
+// @out func planetCount  "How many planets there are: planetCount()"
+float orbitRadius(int i) { return first + gap * float(i); }
+float orbitAngle(int i, float t) {
+  float r = orbitRadius(i);
+  return speed * pow(first / r, 1.5) * t + float(i) * 2.39996;     // each starts a golden angle further on
+}
+// planet sizes vary smoothly with i (no float hash: the same on every GPU, and in Python)
+float planetRadius(int i) { return size * (0.75 + 0.35 * sin(float(i) * 2.3 + 0.7)); }
+float planetMass(int i) { float r = planetRadius(i); return density * r * r * r; }
+int planetCount() { return planets; }
+vec3 planetPos(int i, float t) {
+  float r = orbitRadius(i), a = orbitAngle(i, t);
+  float tilt = incline * sin(float(i) * 1.7 + 0.4);
+  return vec3(cos(a) * r, sin(a) * r * cos(tilt), sin(a) * r * sin(tilt));
+}
+```
+
+
+### Figure Eights
+
+*GPU Stage*
+
+Figure Eights: the same functions as Orbits (planetPos, planetRadius, planetMass, planetCount), but the planets trace figures of eight. Pick it on an Orbits node and everything wired to it follows.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| planets | int | 3 | 1 to 8 |  | How many planets |
+| first | float | 3.4 | 0.5 to 100 |  | Radius of the innermost orbit, in metres |
+| gap | float | 2.4 | 0.1 to 100 |  | Distance from one orbit to the next, in metres |
+| speed | float | 0.6 | 0 to 10 |  | How fast the innermost planet goes round (outer ones are slower, by Kepler's third law) |
+| size | float | 0.6 | 0.05 to 10 |  | Radius of an average planet, in metres |
+| incline | float | 0.06 | 0 to 1 |  | How far the orbits tilt out of the plane, in radians |
+| density | float | 4 | 0 to 100 |  | How strongly planets pull (mass per cubic metre) |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| planetPos | function | Where planet i is at time t: planetPos(int i, float t) |
+| planetRadius | function | The radius of planet i: planetRadius(int i) |
+| planetMass | function | The mass of planet i, for gravity: planetMass(int i) |
+| planetCount | function | How many planets there are: planetCount() |
+
+**Code**
+
+```glsl
+// Figure Eights: the same functions as Orbits (planetPos, planetRadius, planetMass, planetCount), but the
+// planets trace figures of eight. Pick it on an Orbits node and everything wired to it follows.
+// @in int planets 3 1 8  "How many planets"
+// @in float first 3.4 0.5 100.0  "Radius of the innermost orbit, in metres"
+// @in float gap 2.4 0.1 100.0  "Distance from one orbit to the next, in metres"
+// @in float speed 0.6 0.0 10.0  "How fast the innermost planet goes round (outer ones are slower, by Kepler's third law)"
+// @in float size 0.6 0.05 10.0  "Radius of an average planet, in metres"
+// @in float incline 0.06 0.0 1.0  "How far the orbits tilt out of the plane, in radians"
+// @in float density 4.0 0.0 100.0  "How strongly planets pull (mass per cubic metre)"
+// @out func planetPos  "Where planet i is at time t: planetPos(int i, float t)"
+// @out func planetRadius  "The radius of planet i: planetRadius(int i)"
+// @out func planetMass  "The mass of planet i, for gravity: planetMass(int i)"
+// @out func planetCount  "How many planets there are: planetCount()"
+float orbitRadius(int i) { return first + gap * float(i); }
+float orbitAngle(int i, float t) {
+  float r = orbitRadius(i);
+  return speed * pow(first / r, 1.5) * t + float(i) * 2.39996;     // each starts a golden angle further on
+}
+// planet sizes vary smoothly with i (no float hash: the same on every GPU, and in Python)
+float planetRadius(int i) { return size * (0.75 + 0.35 * sin(float(i) * 2.3 + 0.7)); }
+float planetMass(int i) { float r = planetRadius(i); return density * r * r * r; }
+int planetCount() { return planets; }
+vec3 planetPos(int i, float t) {
+  float r = orbitRadius(i), a = orbitAngle(i, t);
+  float s = sin(a), c = cos(a);
+  vec2 q = vec2(c, s * c) / (1.0 + s * s) * r * 1.35;          // a lemniscate of Bernoulli
+  vec3 v = vec3(q, sin(a * 2.0) * r * incline);
+  return rotateZ(v, float(i) * 1.9);
+}
+```
+
+
 ## Lighting
 
 ### Scene Lights
@@ -1306,7 +1940,7 @@ Scene Lights: the scene's lamps (sun, point, spot, area) and world colour as a f
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | intensity | float | 1 | 0 to 10 |  | Multiplies the brightness of the scene's lamps |
 | world | float | 1 | 0 to 10 |  | Multiplies the world (sky) light |
 
@@ -1495,7 +2129,7 @@ The Aerie citadel as a GPU surface: a ring wall with towers, a keep and roofs. U
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Sun, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | towers | float | 6 | 3 to 12 |  | Number of towers on the ring wall |
 | radius | float | 10 | 6 to 12.5 |  | Radius of the ring wall |
 | wallHeight | float | 4.5 | 2 to 9 |  | Height of the wall |
@@ -1585,7 +2219,7 @@ A small planet, Tellus-style: continents from fractal noise, shallow seas, snow 
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Sun, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | radius | float | 1 | 0.3 to 3 |  | Radius of the planet, in metres |
 | relief | float | 0.05 | 0 to 0.25 |  | Height of the mountains compared to the radius |
 | sea | float | 0.5 | 0.3 to 0.7 |  | Sea level: higher floods more land |
@@ -1648,7 +2282,7 @@ A ringed planet: a banded sphere and a tilted ring, one surface.
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Sun, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | radius | float | 0.9 | 0.1 to 2 |  | Radius of the planet |
 | ring | float | 1.55 | 0.5 to 3 |  | Radius of the ring |
 | width | float | 0.35 | 0.02 to 1 |  | Width of the ring |
@@ -1709,7 +2343,7 @@ A donut. sdf(p) is the distance to the surface: negative inside, positive outsid
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Sun, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | major | float | 0.8 | 0.2 to 2 |  | Radius from the centre to the middle of the tube |
 | minor | float | 0.3 | 0.05 to 1 |  | Radius of the tube |
 | Lights | function |  |  |  | Wire a Scene Lights node's light output here to light this surface with the scene's lamps and world |
@@ -1754,7 +2388,7 @@ A box with rounded edges.
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Sun, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | size | float | 0.8 | 0.1 to 2 |  | Half the box's width |
 | roundness | float | 0.15 | 0 to 0.5 |  | Radius of the rounded edges |
 | Lights | function |  |  |  | Wire a Scene Lights node's light output here to light this surface with the scene's lamps and world |
@@ -1798,7 +2432,7 @@ A sphere carved into a gyroid lattice.
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Sun, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | radius | float | 1 | 0.2 to 2 |  | Radius of the ball |
 | cells | float | 6 | 1 to 16 |  | Number of lattice cells across it |
 | thickness | float | 0.05 | 0.01 to 0.3 |  | Thickness of the lattice walls |
@@ -1835,6 +2469,55 @@ float sdf(vec3 p) {
 ```
 
 
+### Sun
+
+*GPU Surface (SDF)*
+
+Sun: a star's glowing surface, boiling with granules. Wire a Material Look with emission into the node's Material input to make it shine, and put a Point light at the same place to light real meshes.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Sun, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| radius | float | 1 | 0.05 to 50 |  | Radius of the star, in metres |
+| churn | float | 0.05 | 0 to 0.3 |  | Height of the boiling granules, as a fraction of the radius |
+| speed | float | 0.25 | 0 to 3 |  | How fast the surface boils |
+| Lights | function |  |  |  | Wire a Scene Lights node's light output here to light this surface with the scene's lamps and world |
+| Material | function |  |  |  | Wire a Material Look node's material output here to use a Blender material's colours and roughness |
+| Colour | colour | (0.72, 0.66, 0.58, 1) |  | Look | Base colour of the live surface (when no Material is wired) |
+| Shadows | toggle | True |  | Look | Soft shadows the surface casts on itself in the live view |
+| Ambient Occlusion | toggle | True |  | Look | Darkens creases and corners in the live view |
+| Fog | float | 0 | 0 to 1 | Look | Distance haze in the live view (0 = none) |
+| Sky | toggle | False |  | Look | Draws a sky behind the surface in the live view |
+| Live Resolution | float | 0.6 | 0.15 to 1 | Look | Resolution of the live view (1 = full). Lower is faster while you work |
+| Bounds Min | vector | (-1.2, -1.2, -1.2) |  | Bounds | One corner of the box the surface lives in. To Geometry builds the mesh inside it |
+| Bounds Max | vector | (1.2, 1.2, 1.2) |  | Bounds | The opposite corner of the box the surface lives in |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Geometry | geometry | Stays empty: GPU nodes draw live in the viewport. Add To Geometry after this node to get real geometry |
+| sdf | function | The function 'sdf': wire it into a function input of another node |
+
+**Code**
+
+```glsl
+// Sun: a star's glowing surface, boiling with granules. Wire a Material Look with emission into the
+// node's Material input to make it shine, and put a Point light at the same place to light real meshes.
+// @param radius 1.0 0.05 50.0  "Radius of the star, in metres"
+// @param churn 0.05 0.0 0.3  "Height of the boiling granules, as a fraction of the radius"
+// @param speed 0.25 0.0 3.0  "How fast the surface boils"
+float sdf(vec3 p) {
+  float g = fbm3(p * 3.0 / radius + vec3(0.0, 0.0, uTime * speed));
+  return length(p) - radius - (g - 0.5) * churn * radius;
+}
+vec3 color(vec3 p) { return vec3(1.0, 0.72, 0.35); }
+```
+
+
 ### Blob
 
 *GPU Surface (SDF)*
@@ -1846,7 +2529,7 @@ Code -> Mesh starter: five spheres melting together into a moving blob. Replace 
 | Socket | Type | Default | Range | Panel | What it does |
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
-| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Castle, Planet, Saturn, Donut, Rounded Box, Gyroid Ball, Sun, Blob, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | blend | float | 0.35 | 0 to 1 |  | How smoothly the spheres melt into each other |
 | wobble | float | 0.08 | 0 to 0.3 |  | How much the blob wobbles over time |
 | Lights | function |  |  |  | Wire a Scene Lights node's light output here to light this surface with the scene's lamps and world |
@@ -1905,7 +2588,7 @@ Wave: ripples travel across the incoming mesh along its normals; colour follows 
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
-| Template | menu |  | Wave, Noise Displace, Mesa, Twist, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wave, Noise Displace, Mesa, Planet Terrain, Twist, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | amplitude | float | 0.08 | 0 to 1 |  | Height of the waves, in metres |
 | frequency | float | 6 | 0.5 to 30 |  | Number of waves across the mesh |
 | speed | float | 2 | 0 to 10 |  | How fast the waves travel |
@@ -1944,7 +2627,7 @@ Noise Displace: fractal noise pushes every vertex out along its normal, like wea
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
-| Template | menu |  | Wave, Noise Displace, Mesa, Twist, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wave, Noise Displace, Mesa, Planet Terrain, Twist, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | strength | float | 0.15 | 0 to 1 |  | How far the noise pushes vertices out, in metres |
 | scale | float | 3 | 0.2 to 20 |  | Size of the noise: higher = finer detail |
 | seed | float | 0 | 0 to 100 |  | Changes the noise pattern |
@@ -1983,7 +2666,7 @@ Mesa: a rocky plateau rising out of a flat grid: soft-edged, roughened by noise,
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
-| Template | menu |  | Wave, Noise Displace, Mesa, Twist, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wave, Noise Displace, Mesa, Planet Terrain, Twist, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | height | float | 1.1 | 0 to 4 |  | Height of the plateau, in metres |
 | radius | float | 2.4 | 0.5 to 6 |  | Radius of the plateau top, in metres |
 | rough | float | 0.22 | 0 to 1 |  | How rough and rocky the sides are |
@@ -2018,6 +2701,58 @@ void deform(inout Vertex v) {
 ```
 
 
+### Planet Terrain
+
+*GPU Mesh*
+
+Planet Terrain: continents, mountains and smooth seas on a sphere (wire an Ico Sphere in). Ridged fractal noise lifts the land along each vertex's direction. The height goes into v.value (below 0 under the sea, 0 at the shore, 1 at the highest peaks), so Colour by Height can paint it.
+
+**Inputs**
+
+| Socket | Type | Default | Range | Panel | What it does |
+|---|---|---|---|---|---|
+| ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
+| Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
+| Template | menu |  | Wave, Noise Displace, Mesa, Planet Terrain, Twist, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| seed | float | 0 | 0 to 100 |  | Changes the continents |
+| height | float | 0.08 | 0 to 0.5 |  | Height of the highest peaks, as a fraction of the planet's radius |
+| sea | float | 0.5 | 0 to 1 |  | How much of the surface is under water (0 = none, 1 = all) |
+| scale | float | 1.8 | 0.2 to 8 |  | Size of the continents: higher = more, smaller ones |
+| rough | float | 0.6 | 0 to 1 |  | How mountainous the land is |
+
+**Outputs**
+
+| Socket | Type | What it gives |
+|---|---|---|
+| Geometry | geometry | Stays empty: GPU nodes draw live in the viewport. Add To Geometry after this node to get real geometry |
+
+**Code**
+
+```glsl
+// Planet Terrain: continents, mountains and smooth seas on a sphere (wire an Ico Sphere in). Ridged
+// fractal noise lifts the land along each vertex's direction. The height goes into v.value (below 0 under
+// the sea, 0 at the shore, 1 at the highest peaks), so Colour by Height can paint it.
+// @param seed 0.0 0.0 100.0  "Changes the continents"
+// @param height 0.08 0.0 0.5  "Height of the highest peaks, as a fraction of the planet's radius"
+// @param sea 0.5 0.0 1.0  "How much of the surface is under water (0 = none, 1 = all)"
+// @param scale 1.8 0.2 8.0  "Size of the continents: higher = more, smaller ones"
+// @param rough 0.6 0.0 1.0  "How mountainous the land is"
+void deform(inout Vertex v) {
+  float r0 = length(v.position);
+  vec3 d = v.position / max(r0, 1e-6);
+  vec3 q = d * scale + vec3(seed * 1.37, seed * 0.71, seed * 2.13);
+  float c = fbm3(q);
+  float level = mix(0.26, 0.7, sea);
+  float land = clamp((c - level) / max(1.0 - level, 1e-3) * 3.0, 0.0, 1.0);
+  float ridge = 1.0 - abs(gnoise(q * 3.3 + 5.0) * 2.0);
+  float e = clamp(land * (0.3 + rough * ridge * ridge * 1.1 * smoothstep(0.0, 0.35, land)), 0.0, 1.0);
+  v.position = d * r0 * (1.0 + height * e);
+  v.value = land > 0.0 ? e : -clamp((level - c) / max(level, 1e-3) * 3.0, 0.0, 1.0);
+  v.color = vec4(vec3(0.5 + 0.5 * v.value), 1.0);
+}
+```
+
+
 ### Twist
 
 *GPU Mesh*
@@ -2030,7 +2765,7 @@ Twist: turn the mesh around its Z axis, more the higher it goes.
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Mesh | geometry |  |  |  | The mesh to work on, from anything in Geometry Nodes. This node's code runs on every vertex |
-| Template | menu |  | Wave, Noise Displace, Mesa, Twist, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
+| Template | menu |  | Wave, Noise Displace, Mesa, Planet Terrain, Twist, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | turns | float | 0.5 | -4 to 4 |  | Full turns from bottom to top (negative twists the other way) |
 | height | float | 2 | 0.1 to 20 |  | Height over which the twist happens, in metres |
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0 (unreleased, draft): the Galaxy, and graphs that do more than a line of nodes
+
+- **The Galaxy scene** (`examples/galaxy_demo.py`, `examples/galaxy_scene.py`): a solar system in front
+  of a spiral galaxy and a nebula, built to show reuse (one Planet Terrain node, three planets), sharing
+  (one Orbits node's functions feed the planets, the asteroids' gravity and collisions, and a ring),
+  mixing (GPU code and native nodes taking turns) and interaction (asteroids pulled by and bouncing off
+  the planets). tests/test_galaxy.py checks all of it.
+- New starters:
+  - functions: **Orbits** and **Figure Eights**, with the same outputs, so either can replace the other
+  - sources: **Points from Function**, **Belt**, **Ring**, **Nebula**
+  - stages: **Gravity to Bodies**, **Collide with Bodies**, **Follow Body** (a warp), **Star Colours**,
+    **Colour by Height**
+  - **Planet Terrain** (GPU Mesh) and **Sun** (GPU Surface)
+- **`uSceneTime`**: the timeline's time, which stays on the timeline's frame while the viewport
+  previews a paused scene, so live particles line up with real geometry.
+- Function inputs with any signature (ints, several arguments, none) are documented and used by the
+  new starters.
+
 ## 0.4.1 (unreleased, draft): a crash fixed, sliders you can see, tooltips
 
 - **Fixed a crash when switching a node's Template** (reported from the v4 demo). Rebuilding a group's

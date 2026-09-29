@@ -44,6 +44,7 @@ and the node's sockets follow at once.
 | `// @in color tint 1.0 0.6 0.2` | a colour | `tint` (a `vec3`) |
 | `// @in func vec3 wind(vec3 p)` | a function input: wire another node's function output into it | `wind(p)` |
 | `// @in func float sdf(vec3 p) = 1e9` | the same, with what it returns when nothing is wired | `sdf(p)` |
+| `// @in func vec3 bodyPos(int i, float t)` | any signature: ints, several arguments, or none (`int bodyCount()`) | `bodyPos(i, uSceneTime)` |
 | `// @in material mat` | a Material socket | `mat_base` (vec3), `mat_roughness`, `mat_metallic`, `mat_emit` (vec3, colour × strength), `mat_alpha` |
 | `// @in hidden lightX 0.0` | none: a value the add-on fills in itself (e.g. Scene Lights' light data) | `lightX` |
 
@@ -85,8 +86,10 @@ with any surface.
 
 `Particle` has `position`, `velocity`, `age`, `life` (seconds) and `seed` (fixed per particle), plus
 any declared attributes. `Vertex` has `position`, `normal`, `color` (vec4) and `value` (a float
-written as an attribute). Everywhere: `uTime` (seconds) and `uFrame`; in looks, `cnCamera` (the
-camera in the object's space). Helpers: `rand1`, `rand3`, `randBall`, `randSphere`, `gnoise`,
+written as an attribute). Everywhere: `uTime` (seconds) and `uFrame`, and `uSceneTime`: the
+timeline's time in seconds, which (unlike `uTime`) stays on the timeline's frame while the viewport
+previews a paused scene, so use it for anything that must line up with real geometry (Orbits' planets
+and the asteroids that orbit them). In looks, `cnCamera` (the camera in the object's space). Helpers: `rand1`, `rand3`, `randBall`, `randSphere`, `gnoise`,
 `curlNoise`, `emitPoint(seed)` / `emitNormal(seed)` (points on the Emit From surface), and the SDF
 helpers (`sdSphere`, `sdBox`, `sdRoundBox`, `sdCylinder`, `sdTorus`, `smin`, `aroundZ`, `rotateX`, ...).
 
@@ -113,7 +116,7 @@ into small nodes costs no speed.
 
 Each node's functions, constants and sliders get a per-node prefix inside the program, so two nodes
 can both define `strength` or `hash()`. Attributes are shared by name across a chain (at most four
-per chain). Names starting with `cn` + capital letter, `gl_`, `uTime` and `uFrame`, GLSL words and
+per chain). Names starting with `cn` + capital letter, `gl_`, `uTime`, `uFrame` and `uSceneTime`, GLSL words and
 helper names are reserved. A mistake is reported on the node that has it, with its own line:
 `node 'Wander', line 4: ...`.
 
