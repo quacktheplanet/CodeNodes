@@ -136,6 +136,8 @@ def sample(source, lo, hi, resolution, time_s=0.0, frame=0.0, values=None, budge
     slots = np.zeros(256, np.float32)
     for i, prm in enumerate(params):
         slots[i] = float(values.get(prm.name, prm.default))
+    from .sdf_code import SCENE_TIME_SLOT, scene_seconds
+    slots[SCENE_TIME_SLOT] = scene_seconds()
     ubo = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
     shader.uniform_block("cnParams", ubo)
 

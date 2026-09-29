@@ -17,6 +17,9 @@ MAX_PARAMS = 256          # stored in one uniform buffer: vec4 v[64]
 
 PRELUDE = """\
 // ---- CodeNodes helpers (distance functions from the usual raymarching toolkit) ----
+// uSceneTime: the timeline's time in seconds. Like uTime, except it stays on the timeline's frame while
+// the viewport previews a paused scene: use it for anything that must line up with real geometry.
+#define uSceneTime (cnParams.v[63].w)
 float sdSphere(vec3 p, float r) { return length(p) - r; }
 float sdBox(vec3 p, vec3 b) { vec3 q = abs(p) - b; return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0); }
 float sdRoundBox(vec3 p, vec3 b, float r) { return sdBox(p, b - r) - r; }
@@ -83,7 +86,7 @@ float sdf(vec3 p) {
 _PARAM_RE = re.compile(r"^\s*//\s*@param\s+([A-Za-z_]\w*)\s+([-+0-9.eE]+)(?:\s+([-+0-9.eE]+)\s+([-+0-9.eE]+))?"
                        r'(?:\s+"([^"]*)")?\s*$')
 _PARAM_START = re.compile(r"^\s*//\s*@param\b")
-_RESERVED = re.compile(r"^(cn[A-Z_]|gl_|u(Time|Frame)$)")
+_RESERVED = re.compile(r"^(cn[A-Z_]|gl_|u(Time|Frame|SceneTime)$)")
 # Parameters become #defines, so they can't shadow GLSL words or the helpers.
 _TAKEN = set(re.findall(r"^(?:float|vec3)\s+(\w+)\s*\(", PRELUDE, re.M)) | set("""
     p sdf abs sign floor ceil fract mod min max clamp mix step smoothstep sqrt inversesqrt pow exp log exp2 log2
@@ -143,6 +146,20 @@ def check_source(source, kind=SHAPE):
     for bad in ("imageStore", "imageLoad", "gl_GlobalInvocationID", "barrier("):
         if bad in source:
             raise SdfCodeError(f"'{bad}' isn't allowed here; just return {what}")
+
+
+SCENE_TIME_SLOT = 255          # the last float of the parameter buffer (v[63].w)
+
+
+def scene_seconds():
+    """The timeline's time in seconds (frame 1 = 0), for uSceneTime."""
+    try:
+        import bpy
+        sc = bpy.context.scene
+        fps = sc.render.fps / (sc.render.fps_base or 1.0)
+        return (sc.frame_current - sc.frame_start) / fps
+    except Exception:
+        return 0.0
 
 
 def param_defines(params):

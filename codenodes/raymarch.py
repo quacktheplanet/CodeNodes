@@ -396,6 +396,8 @@ def draw(key, settings, source, values, host_matrix, region, rv3d, scene, time_s
     slots = np.zeros(256, np.float32)
     for i, prm in enumerate(params):
         slots[i] = float((values or {}).get(prm.name, prm.default))
+    from .sdf_code import SCENE_TIME_SLOT, scene_seconds
+    slots[SCENE_TIME_SLOT] = scene_seconds()
     pbuf = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
     vbuf = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', len(view), view))
     lvals = list(lights) if lights is not None else [-1.0, 0, 0, 0] * 32 + [0.05, 0.05, 0.05, 1.0]

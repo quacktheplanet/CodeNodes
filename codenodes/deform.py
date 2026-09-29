@@ -89,6 +89,29 @@ void deform(inout Vertex v) {
   v.color = vec4(mix(vec3(0.20, 0.30, 0.14), rock, smoothstep(0.05, 0.3, t)), 1.0);
 }
 """,
+    "Planet Terrain": """\
+// Planet Terrain: continents, mountains and smooth seas on a sphere (wire an Ico Sphere in). Ridged
+// fractal noise lifts the land along each vertex's direction. The height goes into v.value (below 0 under
+// the sea, 0 at the shore, 1 at the highest peaks), so Colour by Height can paint it.
+// @param seed 0.0 0.0 100.0  "Changes the continents"
+// @param height 0.08 0.0 0.5  "Height of the highest peaks, as a fraction of the planet's radius"
+// @param sea 0.5 0.0 1.0  "How much of the surface is under water (0 = none, 1 = all)"
+// @param scale 1.8 0.2 8.0  "Size of the continents: higher = more, smaller ones"
+// @param rough 0.6 0.0 1.0  "How mountainous the land is"
+void deform(inout Vertex v) {
+  float r0 = length(v.position);
+  vec3 d = v.position / max(r0, 1e-6);
+  vec3 q = d * scale + vec3(seed * 1.37, seed * 0.71, seed * 2.13);
+  float c = fbm3(q);
+  float level = mix(0.26, 0.7, sea);
+  float land = clamp((c - level) / max(1.0 - level, 1e-3) * 3.0, 0.0, 1.0);
+  float ridge = 1.0 - abs(gnoise(q * 3.3 + 5.0) * 2.0);
+  float e = clamp(land * (0.3 + rough * ridge * ridge * 1.1 * smoothstep(0.0, 0.35, land)), 0.0, 1.0);
+  v.position = d * r0 * (1.0 + height * e);
+  v.value = land > 0.0 ? e : -clamp((level - c) / max(level, 1e-3) * 3.0, 0.0, 1.0);
+  v.color = vec4(vec3(0.5 + 0.5 * v.value), 1.0);
+}
+""",
     "Twist": """\
 // Twist: turn the mesh around its Z axis, more the higher it goes.
 // @param turns 0.5 -4.0 4.0  "Full turns from bottom to top (negative twists the other way)"
@@ -184,6 +207,8 @@ class MeshState:
         slots = np.zeros(256, np.float32)
         for i, prm in enumerate(params):
             slots[i] = float((values or {}).get(prm.name, prm.default))
+        from .sdf_code import SCENE_TIME_SLOT, scene_seconds
+        slots[SCENE_TIME_SLOT] = scene_seconds()
         self._ubo = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
         shader.uniform_block("cnParams", self._ubo)
         shader.uniform_sampler("cnInP", self.in_p)

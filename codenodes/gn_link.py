@@ -273,6 +273,11 @@ TEMPLATE_SETTINGS = {
     "Spark Ball": {"count": 100_000, "color_by": 'CODE', "gain": 0.5, "point_px": 1.5},
     "Fountain": {"count": 100_000, "blend": 'SOLID', "point_px": 3.0, "color_by": 'AGE',
                  "color_a": (0.6, 0.85, 1.0), "color_b": (0.1, 0.3, 0.9), "gain": 1.0},
+    "Points from Function": {"count": 3, "color_by": 'CODE', "point_px": 6.0, "gain": 1.0, "blend": 'SOLID'},
+    "Belt": {"count": 4000, "color_by": 'CODE', "point_px": 2.5, "gain": 1.0, "substeps": 2},
+    "Ring": {"count": 60_000, "color_by": 'CODE', "point_px": 1.0, "gain": 0.5},
+    "Nebula": {"count": 150_000, "color_by": 'CODE', "gain": 1.0, "point_px": 1.0},
+    "Sun": {"bounds_min": (-1.2, -1.2, -1.2), "bounds_max": (1.2, 1.2, 1.2), "resolution": 96},
     "Castle": {"bounds_min": (-1.6, -1.6, -0.15), "bounds_max": (1.6, 1.6, 2.35), "resolution": 192},
     "Planet": {"bounds_min": (-1.45, -1.45, -1.45), "bounds_max": (1.45, 1.45, 1.45), "resolution": 160},
     "Saturn": {"bounds_min": (-2.2, -2.2, -1.2), "bounds_max": (2.2, 2.2, 1.2), "resolution": 160},
@@ -313,6 +318,18 @@ float sdf(vec3 p) {
   return max(sdSphere(p, radius), g);
 }
 """,
+        "Sun": """\
+// Sun: a star's glowing surface, boiling with granules. Wire a Material Look with emission into the
+// node's Material input to make it shine, and put a Point light at the same place to light real meshes.
+// @param radius 1.0 0.05 50.0  "Radius of the star, in metres"
+// @param churn 0.05 0.0 0.3  "Height of the boiling granules, as a fraction of the radius"
+// @param speed 0.25 0.0 3.0  "How fast the surface boils"
+float sdf(vec3 p) {
+  float g = fbm3(p * 3.0 / radius + vec3(0.0, 0.0, uTime * speed));
+  return length(p) - radius - (g - 0.5) * churn * radius;
+}
+vec3 color(vec3 p) { return vec3(1.0, 0.72, 0.35); }
+""",
         "Blob": sdf_code.TEMPLATE,
     },
     'SHAPE': {
@@ -340,6 +357,10 @@ part body
         "Swirl": None,              # particles.TEMPLATE
         "Firefly Swarm": None,      # stage_templates.FIREFLY_SWARM
         "Spark Ball": None,         # stage_templates.SPARK_BALL
+        "Points from Function": None,   # stage_templates.POINTS_FROM_FUNCTION
+        "Belt": None,               # stage_templates.BELT
+        "Ring": None,               # stage_templates.RING
+        "Nebula": None,             # stage_templates.NEBULA
         "Fountain": """\
 // A fountain: particles shoot up from the origin and fall back under gravity.
 // @param power 4.0 0.5 10.0  "Launch speed upwards"
@@ -368,6 +389,10 @@ def _fill_deform_templates():
     TEMPLATES['STAGE'].update(stage_templates.STAGES)
     TEMPLATES['PARTICLES']["Firefly Swarm"] = stage_templates.FIREFLY_SWARM
     TEMPLATES['PARTICLES']["Spark Ball"] = stage_templates.SPARK_BALL
+    TEMPLATES['PARTICLES']["Points from Function"] = stage_templates.POINTS_FROM_FUNCTION
+    TEMPLATES['PARTICLES']["Belt"] = stage_templates.BELT
+    TEMPLATES['PARTICLES']["Ring"] = stage_templates.RING
+    TEMPLATES['PARTICLES']["Nebula"] = stage_templates.NEBULA
 
 
 _fill_deform_templates()

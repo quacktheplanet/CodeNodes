@@ -415,6 +415,8 @@ def _ubo(sim, values, cam=None, comp=None):
         slots[i] = float(values.get(prm.name, prm.default))
     if cam is not None:
         slots[252:255] = tuple(cam)
+    from .sdf_code import SCENE_TIME_SLOT, scene_seconds
+    slots[SCENE_TIME_SLOT] = scene_seconds()
     return gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
 
 

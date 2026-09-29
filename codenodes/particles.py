@@ -297,6 +297,8 @@ class Sim:
         slots = np.zeros(256, np.float32)
         for i, prm in enumerate(self.params):
             slots[i] = float((values or {}).get(prm.name, prm.default))
+        from .sdf_code import SCENE_TIME_SLOT, scene_seconds
+        slots[SCENE_TIME_SLOT] = min(float(time_s), scene_seconds())
         # keep a reference: a temporary would be freed before the dispatch runs
         self._ubo = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', 256, slots.tolist()))
         sh.uniform_block("cnParams", self._ubo)

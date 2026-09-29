@@ -263,6 +263,263 @@ vec3 wind(vec3 q) {
 
 
 
+# ---- space: sources ----------------------------------------------------------------------------------
+
+POINTS_FROM_FUNCTION = """\
+// Points from Function: one point per index, placed every step by a function wired into 'place' (e.g.
+// Orbits' planetPos) at the timeline's time. Put To Points after it to instance things on the points.
+// @in func vec3 place(int i, float t)  "Where point i is at time t: wire in a function such as Orbits' planetPos"
+// @in func float size(int i) = 1.0  "The size of point i, written as its bodySize attribute (e.g. Orbits' planetRadius)"
+// @in func int count() = 1000000  "How many points to use (e.g. Orbits' planetCount); points past it get size 0"
+// @out attr bodySize 1.0  "The size 'size' gave each point: use it to scale what you instance there"
+void spawn(inout Particle p) { p.life = 1e9; }
+void update(inout Particle p, float dt) {
+  int i = int(p.seed);
+  vec3 q = place(i, uSceneTime);
+  if (dt > 0.0) p.velocity = (q - p.position) / dt;
+  p.position = q;
+  p.bodySize = i < count() ? size(i) : 0.0;
+}
+"""
+
+BELT = """\
+// Belt: a ring of particles round the origin, each set off on a circular orbit: asteroid belts, debris
+// discs. Add Gravity to Bodies (with the same star mass) to keep them going round.
+// @in float inner 9.5 0.1 500.0  "Inner radius of the belt, in metres"
+// @in float outer 12.0 0.1 500.0  "Outer radius of the belt, in metres"
+// @in float thickness 0.4 0.0 50.0  "How thick the belt is, top to bottom"
+// @in float starMass 30.0 0.0 1000.0  "Pull of the star they orbit: sets their speed (use Gravity to Bodies' star mass)"
+void spawn(inout Particle p) {
+  float s = p.seed;
+  float r = mix(inner, outer, rand1(s * 1.31));
+  float a = rand1(s * 2.17) * 6.2831853;
+  p.position = vec3(cos(a) * r, sin(a) * r, (rand1(s * 3.71) - 0.5) * thickness);
+  float v = sqrt(starMass / max(r, 1e-3)) * (0.97 + 0.06 * rand1(s * 5.31));
+  p.velocity = vec3(-sin(a), cos(a), 0.0) * v;
+  p.life = 1e9;
+}
+"""
+
+RING = """\
+// Ring: a flat, thin ring of dust going round its centre, the inner edge faster than the outer (Kepler).
+// Put Follow Body after it to wrap it round a planet.
+// @in float inner 1.1 0.01 100.0  "Inner radius of the ring, in metres"
+// @in float outer 1.9 0.01 100.0  "Outer radius of the ring, in metres"
+// @in float thickness 0.01 0.0 5.0  "How thick the ring is"
+// @in float spin 0.8 0.0 10.0  "How fast it goes round"
+// @in float gaps 0.5 0.0 1.0  "How clear the gaps between bands are (0 = even dust)"
+void spawn(inout Particle p) { p.life = 1e9; }
+void update(inout Particle p, float dt) {
+  float s = p.seed;
+  float u = rand1(s * 1.37);
+  float band = 0.5 + 0.5 * sin(u * 37.0);
+  u = mix(u, u - (band - 0.5) * 0.03, gaps);        // pull dust away from the gaps into the bands
+  float r = mix(inner, outer, clamp(u, 0.0, 1.0));
+  float a = rand1(s * 2.91) * 6.2831853 + spin * uTime / (r * sqrt(r));
+  vec3 q = vec3(cos(a) * r, sin(a) * r, (rand1(s * 4.13) - 0.5) * thickness);
+  if (dt > 0.0) p.velocity = (q - p.position) / dt;
+  p.position = q;
+}
+"""
+
+NEBULA = """\
+// Nebula: glowing clouds of gas made of soft sprites, shaped and coloured by fractal noise.
+// @shape glow
+// @in float radius 30.0 1.0 1000.0  "Size of the cloud, in metres"
+// @in float wisps 1.6 0.2 8.0  "Size of the wisps: higher = more, smaller ones"
+// @in float thickness 0.35 0.0 1.0  "How flat the cloud is (0 = a flat sheet, 1 = a ball)"
+// @in color colorA 0.95 0.25 0.55  "Colour of the thin, outer gas"
+// @in color colorB 0.25 0.5 1.0  "Colour of the dense gas"
+// @in float intensity 0.015 0.0 5.0  "Brightness of each sprite (many overlap, so keep it low)"
+// @in float size 2.0 0.01 50.0  "Size of each sprite, in metres"
+void spawn(inout Particle p) {
+  float s = p.seed;
+  vec3 q = vec3(0.0);
+  for (int k = 0; k < 16; k++) {                    // keep only places where the gas is thick
+    q = randBall(s * (1.0 + float(k) * 0.1731) + float(k) * 0.37) * radius;
+    q.z *= thickness;
+    float g = fbm3(q / radius * wisps * 2.0 + 3.0);
+    if (g > 0.5 + 0.25 * length(q) / radius) break;
+  }
+  p.position = q;
+  p.velocity = vec3(0.0);
+  p.life = 1e9;
+}
+vec4 look(Particle p) {
+  float t = fbm3(p.position / radius * wisps + 9.0);
+  vec3 c = mix(colorA, colorB, smoothstep(0.38, 0.62, t));
+  float fade = 1.0 - smoothstep(0.55, 1.0, length(p.position) / radius);
+  return vec4(c * intensity * fade, 1.0);
+}
+"""
+
+_ORBIT_HEAD = """\
+// @in int planets 3 1 8  "How many planets"
+// @in float first 3.4 0.5 100.0  "Radius of the innermost orbit, in metres"
+// @in float gap 2.4 0.1 100.0  "Distance from one orbit to the next, in metres"
+// @in float speed 0.6 0.0 10.0  "How fast the innermost planet goes round (outer ones are slower, by Kepler's third law)"
+// @in float size 0.6 0.05 10.0  "Radius of an average planet, in metres"
+// @in float incline 0.06 0.0 1.0  "How far the orbits tilt out of the plane, in radians"
+// @in float density 4.0 0.0 100.0  "How strongly planets pull (mass per cubic metre)"
+// @out func planetPos  "Where planet i is at time t: planetPos(int i, float t)"
+// @out func planetRadius  "The radius of planet i: planetRadius(int i)"
+// @out func planetMass  "The mass of planet i, for gravity: planetMass(int i)"
+// @out func planetCount  "How many planets there are: planetCount()"
+float orbitRadius(int i) { return first + gap * float(i); }
+float orbitAngle(int i, float t) {
+  float r = orbitRadius(i);
+  return speed * pow(first / r, 1.5) * t + float(i) * 2.39996;     // each starts a golden angle further on
+}
+float planetRadius(int i) { return size * (0.7 + 0.6 * fract(sin(float(i) * 12.9898 + 1.3) * 43758.5453)); }
+float planetMass(int i) { float r = planetRadius(i); return density * r * r * r; }
+int planetCount() { return planets; }
+"""
+
+ORBITS = """\
+// Orbits: where each planet is at any time, as functions any number of nodes can share: planetPos(i, t),
+// planetRadius(i), planetMass(i), planetCount(). Change this node's code and everything using it follows.
+""" + _ORBIT_HEAD + """\
+vec3 planetPos(int i, float t) {
+  float r = orbitRadius(i), a = orbitAngle(i, t);
+  float tilt = incline * sin(float(i) * 1.7 + 0.4);
+  return vec3(cos(a) * r, sin(a) * r * cos(tilt), sin(a) * r * sin(tilt));
+}
+"""
+
+FIGURE_EIGHTS = """\
+// Figure Eights: the same functions as Orbits (planetPos, planetRadius, planetMass, planetCount), but the
+// planets trace figures of eight. Pick it on an Orbits node and everything wired to it follows.
+""" + _ORBIT_HEAD + """\
+vec3 planetPos(int i, float t) {
+  float r = orbitRadius(i), a = orbitAngle(i, t);
+  float s = sin(a), c = cos(a);
+  vec2 q = vec2(c, s * c) / (1.0 + s * s) * r * 1.35;          // a lemniscate of Bernoulli
+  vec3 v = vec3(q, sin(a * 2.0) * r * incline);
+  return rotateZ(v, float(i) * 1.9);
+}
+"""
+
+SPACE_STAGES = {
+    "Gravity to Bodies": """\
+// Gravity to Bodies: Newton's pull towards a star at the centre and towards every body wired in (e.g. the
+// planets from Orbits). Particles orbit, swing past planets and get flung.
+// @in func vec3 bodyPos(int i, float t)  "Where body i is at time t: wire in Orbits' planetPos"
+// @in func float bodyMass(int i) = 0.0  "The mass of body i: wire in Orbits' planetMass"
+// @in func int bodyCount() = 0  "How many bodies there are: wire in Orbits' planetCount"
+// @in float starMass 30.0 0.0 1000.0  "Pull of the star at the centre (0 = no star)"
+// @in float soften 0.25 0.01 10.0  "Stops the pull growing without limit very close to a body, in metres"
+void behave(inout Particle p, float dt) {
+  float r2 = dot(p.position, p.position) + soften * soften;
+  vec3 acc = -p.position * starMass / (r2 * sqrt(r2));
+  int n = bodyCount();
+  for (int i = 0; i < 8; i++) {
+    if (i >= n) break;
+    vec3 d = bodyPos(i, uSceneTime) - p.position;
+    float b2 = dot(d, d) + soften * soften;
+    acc += d * bodyMass(i) / (b2 * sqrt(b2));
+  }
+  p.velocity += acc * dt;
+}
+""",
+    "Collide with Bodies": """\
+// Collide with Bodies: particles bounce off the star at the centre and off every body wired in (spheres at
+// Orbits' planetPos with planetRadius), and never end up inside one. Put it after the other behaviours.
+// @in func vec3 bodyPos(int i, float t)  "Where body i is at time t: wire in Orbits' planetPos"
+// @in func float bodyRadius(int i) = 0.0  "The radius of body i: wire in Orbits' planetRadius"
+// @in func int bodyCount() = 0  "How many bodies there are: wire in Orbits' planetCount"
+// @in float starRadius 1.0 0.0 100.0  "Radius of the star at the centre (0 = no star)"
+// @in float margin 0.12 0.0 1.0  "Extra room for mountains, as a fraction of each body's radius"
+// @in float bounce 0.5 0.0 1.0  "Speed kept after a bounce (0 = stop dead, 1 = perfectly bouncy)"
+void bounceOff(inout Particle p, vec3 c, float R, float dt) {
+  vec3 d = p.position + p.velocity * dt - c;           // where the particle is about to be
+  float dist = length(d);
+  if (dist < R) {
+    vec3 n = dist > 1e-6 ? d / dist : vec3(0.0, 0.0, 1.0);
+    float vn = dot(p.velocity, n);
+    if (vn < 0.0) p.velocity -= (1.0 + bounce) * vn * n;
+    p.position = c + n * R - p.velocity * dt;          // so this step's move lands it on the surface
+  }
+}
+void behave(inout Particle p, float dt) {
+  if (starRadius > 0.0) bounceOff(p, vec3(0.0), starRadius, dt);
+  int n = bodyCount();
+  for (int i = 0; i < 8; i++) {
+    if (i >= n) break;
+    bounceOff(p, bodyPos(i, uSceneTime), bodyRadius(i) * (1.0 + margin), dt);
+  }
+}
+""",
+    "Star Colours": """\
+// Star Colours: gives every star a temperature (cool orange in the core, hot blue-white out on the arms)
+// and draws it in its blackbody colour. To Points writes 'temp' (thousands of kelvin) for materials.
+// @in float reach 2.4 0.1 1000.0  "Radius of the galaxy, in metres (the source's size)"
+// @in float core 3.5 1.0 40.0  "Temperature of stars in the core, in thousands of kelvin"
+// @in float arms 11.0 1.0 40.0  "Temperature of young stars out on the arms, in thousands of kelvin"
+// @in float spread 0.35 0.0 1.0  "How much neighbouring stars differ"
+// @in float brightness 0.9 0.0 10.0  "Overall brightness"
+// @out attr temp 6.0  "Each star's temperature in thousands of kelvin (for a Blackbody node in a material)"
+vec3 blackbody(float kk) {                 // an RGB fit of Planck's law, kk in thousands of kelvin
+  float t = kk * 10.0;
+  float r = t <= 66.0 ? 1.0 : 1.292936 * pow(t - 60.0, -0.1332047);
+  float g = t <= 66.0 ? 0.3900815 * log(t) - 0.6318414 : 1.129890 * pow(t - 60.0, -0.0755148);
+  float b = t >= 66.0 ? 1.0 : (t <= 19.0 ? 0.0 : 0.5432068 * log(t - 10.0) - 1.1962541);
+  return clamp(vec3(r, g, b), 0.0, 1.0);
+}
+void behave(inout Particle p, float dt) {
+  float r = length(p.position.xy) / reach;
+  float rnd = rand1(p.seed * 6.1 + 21.0);
+  p.temp = mix(core, arms, smoothstep(0.1, 0.8, r)) * (1.0 + (rnd - 0.5) * spread * 1.6);
+}
+vec4 look(Particle p) {
+  float r = length(p.position.xy) / reach;
+  float rnd = rand1(p.seed * 6.1 + 21.0);
+  vec3 c = blackbody(p.temp);
+  // the middle is where most stars are: dim each there, so their sum glows instead of clipping
+  c *= (0.05 + 0.95 * smoothstep(0.02, 0.85, r)) * (0.5 + rnd) * brightness;
+  return vec4(c, 1.0);
+}
+""",
+    "Follow Body": """\
+// Follow Body: carries particles or a mesh along with a moving body (e.g. a planet from Orbits), tilted,
+// so rings and moons go where it goes. A warp: it changes where things are shown, not how they move.
+// @in func vec3 bodyPos(int i, float t)  "Where body i is at time t: wire in Orbits' planetPos"
+// @in int body 1 0 7  "Which body to follow (0 = the first)"
+// @in float tilt 0.45 -3.2 3.2  "Tilt of the ring's plane, in radians"
+vec3 warp(vec3 q) { return rotateX(q, tilt) + bodyPos(body, uSceneTime); }
+""",
+    "Colour by Height": """\
+// Colour by Height: paints a mesh by the height the node before it stored in v.value: deep and shallow sea
+// below 0, then beaches, lowland, highland and snow up to 1 (Planet Terrain stores it this way).
+// @in color deep 0.01 0.04 0.16  "Colour of deep water"
+// @in color shallow 0.03 0.28 0.46  "Colour of shallow water"
+// @in color lowland 0.15 0.36 0.1  "Colour of low ground"
+// @in color highland 0.42 0.33 0.24  "Colour of high ground"
+// @in color snow 0.94 0.95 1.0  "Colour of snow and ice"
+// @in float snowline 0.7 0.0 1.5  "Height above which the land is white (1 = the highest peaks)"
+// @in float ice 0.0 0.0 1.0  "Polar caps: how far the ice reaches from the poles towards the equator"
+void deform(inout Vertex v) {
+  float h = v.value;
+  vec3 c;
+  if (h < 0.0) {
+    c = mix(shallow, deep, clamp(-h, 0.0, 1.0));
+  } else {
+    c = mix(lowland, highland, smoothstep(0.1, 0.55, h));
+    c = mix(vec3(0.74, 0.68, 0.5), c, smoothstep(0.0, 0.05, h));      // beaches
+    c = mix(c, snow, smoothstep(snowline - 0.08, snowline + 0.04, h));
+  }
+  float lat = abs(normalize(v.position).z);
+  if (ice > 0.0) c = mix(c, snow, smoothstep(1.0 - ice, 1.0 - ice + 0.06, lat));
+  v.color = vec4(c, 1.0);
+}
+""",
+}
+
+SPACE_FUNCTIONS = {"Orbits": ORBITS, "Figure Eights": FIGURE_EIGHTS}
+
+STAGES.update(SPACE_STAGES)
+STAGES.update(SPACE_FUNCTIONS)
+
+
 def _scene_lights_code(slots=8):
     """Scene Lights: the scene's lights and world as a function other nodes call. The light data are
     hidden inputs CodeNodes keeps up to date (move a lamp and the light moves), in the space of the
@@ -330,10 +587,12 @@ LIGHT_SLOTS = 8
 # the order the Add menu shows them in, by section
 SECTIONS = [
     ("Particle Stages", 'FORCE_TURBULENCE', ["Wander", "Rise", "Gravity", "Vortex", "Drag", "Blink",
-                                             "Push by Field", "Collide with Shape"]),
-    ("Particle Looks", 'LIGHT_POINT', ["Glow Look", "Firefly Look", "Streak Look", "Material Look"]),
-    ("Warps (particles and meshes)", 'MOD_SIMPLEDEFORM', ["Bend", "Taper"]),
-    ("Mesh Stages", 'MOD_WAVE', ["Ripple", "Sway by Field"]),
-    ("Functions", 'FORCE_WIND', ["Wind Field"]),
+                                             "Push by Field", "Collide with Shape", "Gravity to Bodies",
+                                             "Collide with Bodies"]),
+    ("Particle Looks", 'LIGHT_POINT', ["Glow Look", "Firefly Look", "Streak Look", "Material Look",
+                                       "Star Colours"]),
+    ("Warps (particles and meshes)", 'MOD_SIMPLEDEFORM', ["Bend", "Taper", "Follow Body"]),
+    ("Mesh Stages", 'MOD_WAVE', ["Ripple", "Sway by Field", "Colour by Height"]),
+    ("Functions", 'FORCE_WIND', ["Wind Field", "Orbits", "Figure Eights"]),
     ("Lighting", 'LIGHT_SUN', ["Scene Lights"]),
 ]
