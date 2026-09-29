@@ -116,6 +116,10 @@ line in the code you wrote (`node 'Wander', line 4: undefined variable "gravty"`
 - **Functions** travel on Closure sockets. One function output can feed any number of nodes, in any
   chains of the same tree; each program includes it once, with its own prefix.
 
+![Heads and trails from one simulation, grass swayed by the same wind, and two merged streams](graph_live.jpg)
+
+![The graph behind it, in labelled frames](graph_nodes.jpg)
+
 **How a graph is evaluated.** CodeNodes turns the graph into *pipelines*: every path from a source to
 where a stream ends (a node nothing continues from, drawn live, or a node wired into To Geometry, made
 real there). Each pipeline is one GPU program.
@@ -236,7 +240,9 @@ farm then renders the bake.
 - **GPU Surfaces** have **Lights** and **Material** inputs. With Scene Lights and a Material Look wired
   in, the raymarched surface is lit by the scene's lamps with that material (soft self-shadows for the
   two brightest lamps) instead of its built-in sun and sky. Side by side with the same surface made
-  real and lit by EEVEE, the two look close (see `docs/lit_compare.jpg`).
+  real and lit by EEVEE, the two look close:
+
+  ![A GPU Surface lit by Scene Lights with a Material Look (left) and the same surface made real in EEVEE (right)](lit_compare.jpg)
 - **Any node can declare** `// @in material mat` (a Material socket; its values arrive as `mat_base`,
   `mat_roughness`, `mat_metallic`, `mat_emit`, `mat_alpha`) and `// @in hidden name` (a value the
   add-on fills in, with no socket).
