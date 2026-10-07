@@ -22,6 +22,16 @@
   previews a paused scene, so live particles line up with real geometry.
 - Function inputs with any signature (ints, several arguments, none) are documented and used by the
   new starters.
+- **Blender 5.2 LTS.** Modifier inputs (5.2 moved them from ID properties to RNA) go through
+  `codenodes/mod_inputs.py`; saved node descriptions with typed socket names (`B_INT`) load on 5.2's
+  typed nodes; the Galaxy finds Random Value's sockets by name.
+- **Command-line and farm renders with GPU nodes (5.2+):** `blender -b scene.blend -a` renders them with
+  no bake and no script. 5.2's `gpu.init()` gives background mode the GPU; CodeNodes steps every frame up
+  front and swaps the meshes in as Blender renders. `bpy.ops.codenodes.render()` works in background too.
+  tests/test_cli_render.py.
+- **Linux and headless testing:** tests/headless.py runs the windowed suites in background Blender 5.2+;
+  tools/testing/run_all_linux.sh runs the whole matrix with no display. A blank socket shape (5.0.0 in
+  background mode) counts as single-value in the catalog.
 
 ## 0.4.1 (unreleased, draft): a crash fixed, sliders you can see, tooltips
 

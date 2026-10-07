@@ -15,6 +15,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from codenodes import mod_inputs  # noqa: E402
 from codenodes.gn import catalog, serialize  # noqa: E402
 
 _checks = 0
@@ -100,6 +101,10 @@ def build_reference():
     return tree
 
 
+def named(sockets, name):
+    return next(s for s in sockets if s.name == name)
+
+
 def build_dynamic():
     """A tree made of nodes whose sockets are added by hand: Capture Attribute (with an
     item removed, so its identifiers no longer start at zero), a Repeat zone with an extra
@@ -117,8 +122,8 @@ def build_dynamic():
     cap.capture_items.new('VECTOR', "Where")
     cap.capture_items.remove(cap.capture_items[0])        # identifiers now start at Value_1
     links.new(grid.outputs["Mesh"], cap.inputs["Geometry"])
-    links.new(noise.outputs["Fac"], cap.inputs[1])
-    links.new(n.new("GeometryNodeInputPosition").outputs[0], cap.inputs[2])
+    links.new(noise.outputs["Fac"], named(cap.inputs, "Height"))      # 5.2 put a Selection socket first
+    links.new(n.new("GeometryNodeInputPosition").outputs[0], named(cap.inputs, "Where"))
 
     rin, rout = n.new("GeometryNodeRepeatInput"), n.new("GeometryNodeRepeatOutput")
     rin.pair_with_output(rout)
@@ -132,7 +137,7 @@ def build_dynamic():
     xyz = n.new("ShaderNodeCombineXYZ")
     links.new(rin.outputs[1], setpos.inputs["Geometry"])
     links.new(rin.outputs[2], mul.inputs[0])
-    links.new(cap.outputs[1], mul.inputs[1])
+    links.new(named(cap.outputs, "Height"), mul.inputs[1])
     links.new(mul.outputs[0], xyz.inputs["Z"])
     links.new(xyz.outputs[0], setpos.inputs["Offset"])
     add = n.new("ShaderNodeMath")
@@ -266,11 +271,11 @@ def dynamic_tests():
     mod.node_group = bpy.data.node_groups["Reference"]
     key = next(i.identifier for i in mod.node_group.interface.items_tree
                if getattr(i, "name", "") == "Density")
-    mod[key] = 40.0
+    mod_inputs.of(mod)[key] = 40.0
     serialize.write(serialize.read(mod.node_group))
     new_key = next(i.identifier for i in mod.node_group.interface.items_tree
                    if getattr(i, "name", "") == "Density")
-    check(abs(mod[new_key] - 40.0) < 1e-6,
+    check(abs(mod_inputs.of(mod)[new_key] - 40.0) < 1e-6,
           f"a value tuned on the modifier survives rebuilding its group ({key} -> {new_key})")
     bpy.data.objects.remove(obj, do_unlink=True)
 
@@ -291,7 +296,7 @@ def review_tests():
     mod.node_group = tree
     density = next(i.identifier for i in tree.interface.items_tree
                    if i.item_type == 'SOCKET' and i.name == "Density")
-    mod[density] = 33.0
+    mod_inputs.of(mod)[density] = 33.0
     before_nodes, before = len(tree.nodes), evaluate(tree)
     broken = serialize.read(tree)
     broken["links"].append({"from": ["Grid", "Nope"], "to": ["Group Output", "Geometry"]})
@@ -300,7 +305,7 @@ def review_tests():
         check(False, "a broken rewrite should be refused")
     except serialize.BuildError:
         check(len(tree.nodes) == before_nodes and evaluate(tree) == before
-              and abs(mod[density] - 33.0) < 1e-6,
+              and abs(mod_inputs.of(mod)[density] - 33.0) < 1e-6,
               "a rewrite with a mistake in it leaves the group, and the values tuned on it, alone")
     bpy.data.objects.remove(obj, do_unlink=True)
 
@@ -357,11 +362,11 @@ def review_tests():
     mod.node_group = twin
     ids = [i.identifier for i in twin.interface.items_tree if i.item_type == 'SOCKET'
            and i.name == "Size"]
-    mod[ids[0]], mod[ids[1]] = 1.5, 7.0
+    mod_inputs.of(mod)[ids[0]], mod_inputs.of(mod)[ids[1]] = 1.5, 7.0
     serialize.write(serialize.read(twin))
     ids = [i.identifier for i in twin.interface.items_tree if i.item_type == 'SOCKET'
            and i.name == "Size"]
-    check([round(mod[i], 3) for i in ids] == [1.5, 7.0],
+    check([round(mod_inputs.of(mod)[i], 3) for i in ids] == [1.5, 7.0],
           "two inputs with the same name keep their own values through a rewrite")
 
     # checking a group on an object that does not have it measures it with the group on

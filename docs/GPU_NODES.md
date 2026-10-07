@@ -265,8 +265,8 @@ The GPU must never run while Blender's renderer works: that crashes Blender. So:
      menu include GPU nodes" switched off, gets Blender's own render.
    - Why not a render handler: Blender runs render_init, and frame_change_pre during an animation render,
      on the render job's thread, where GPU work crashes.
-   - Not covered: `bpy.ops.render.render()` called directly by a script, and command-line renders. They
-     render what is real (To Geometry results, bakes). Use `bpy.ops.codenodes.render()` in a script.
+   - Not covered: `bpy.ops.render.render()` called directly by a script in a window. It renders what is
+     real (To Geometry results, bakes). Use `bpy.ops.codenodes.render()` in a script.
 2. **The Rendered viewport** (EEVEE or Cycles) keeps drawing the live GPU nodes over the render.
    CodeNodes refuses all GPU work while any final render runs.
 
@@ -274,8 +274,15 @@ The live glow is a viewport drawing, so a render gets what your nodes build from
 points. The demo places a small firefly model on each point, flaps its wings from `phase` and the
 time, lights its abdomen from `brightness`, and adds bloom in the compositor.
 
-Background Blender (command line, render farms) has no GPU access for add-ons, so bake first. The
-farm then renders the bake.
+**Command-line and farm renders** (`blender -b scene.blend -a`, or `-f N`) need **Blender 5.2 or later**,
+whose `gpu.init()` gives background mode the GPU, and CodeNodes enabled in that Blender. Nothing else to
+do: when the render starts, CodeNodes steps every frame of the range on the GPU, makes it real and keeps it
+as a mesh, then swaps each frame's meshes in as Blender renders it. (It has to be done up front: once the
+first frame has rendered, Python can't use the GPU again until the render ends; measured on 5.2.2.) A
+script can also call `bpy.ops.codenodes.render(animation=True)`, which takes turns frame by frame as F12
+does. tests/test_cli_render.py renders a scene both ways in separate `blender -b` processes and checks the
+frames are identical. Before 5.2, background Blender has no GPU for add-ons: bake first, and the farm
+renders the bake.
 
 ## Baking
 
@@ -354,8 +361,18 @@ from:
 
 ## Blender versions
 
-Blender 5.0.1 and 5.1.2 both have what this needs: compute shaders, image load/store, Menu, Bundle
-and Closure sockets, and frames that show text. The same tests run on both.
+Blender 5.0.1, 5.1.2 and 5.2.2 all have what this needs: compute shaders, image load/store, Menu, Bundle
+and Closure sockets, and frames that show text. The same tests run on all three.
+
+5.2 changed two things CodeNodes deals with:
+- **Modifier inputs** moved from ID properties (`mod["Socket_2"]`) to RNA
+  (`mod.properties.inputs.Socket_2.value`). `codenodes/mod_inputs.py` takes the old keys on every version.
+- **Typed nodes** (Compare, Random Value, Switch...) show only the current type's sockets, named without
+  the type, so `B_INT` is now `B`. Saved node descriptions still load: a missing typed identifier falls
+  back to the plain one.
+
+5.2 also gives background mode the GPU (`gpu.init()`), so most GPU test suites and command-line renders
+run without a window (`tests/headless.py`, `tools/testing/run_all_linux.sh`).
 
 ## Limits, honestly
 

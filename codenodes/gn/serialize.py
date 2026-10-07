@@ -24,8 +24,11 @@ the recorded ones onto the new ones by position.
 
 from __future__ import annotations
 
+import re
+
 import bpy
 
+from .. import mod_inputs
 from .catalog import _base_props, _plain
 
 FORMAT = 2
@@ -556,6 +559,9 @@ def _node_remap(node, entry, iface_remap):
     return remap
 
 
+_TYPED_SUFFIX = re.compile(r"_(\d{3}|INT|FLOAT|VEC3|VEC2|COL|STR|BOOL|ROT|MATRIX)$")
+
+
 def find_socket(node, key, side, remap=None, used=None, exact=False):
     """A socket by identifier (as read) or by plain name (as a person writes it).
 
@@ -583,6 +589,12 @@ def find_socket(node, key, side, remap=None, used=None, exact=False):
         free = [s for s in named if not s.is_linked and (used is None or s not in used)]
         if free:
             return free[0]
+    if not named:
+        # Blender 5.2 gives typed nodes (Compare, Random Value, Switch...) only the current type's
+        # sockets, named without the type: an older file's "B_INT" or "Value_001" is "B" or "Value"
+        base = _TYPED_SUFFIX.sub("", str(key_mapped))
+        if base != key_mapped:
+            named = [s for s in sockets if s.enabled and s.identifier == base]
     return named[0] if named else None
 
 
@@ -723,11 +735,12 @@ def _snapshot_users(tree):
             if mod.type != 'NODES' or mod.node_group != tree:
                 continue
             values = {}
+            inputs = mod_inputs.of(mod)
             for key, item in _keyed(_group_inputs(tree)):
                 record = {}
                 for suffix in ("", "_use_attribute", "_attribute_name"):
-                    if item.identifier + suffix in mod.keys():
-                        record[suffix] = _copy_idprop(mod[item.identifier + suffix])
+                    if item.identifier + suffix in inputs.keys():
+                        record[suffix] = _copy_idprop(inputs[item.identifier + suffix])
                 if record:
                     values[key] = record
             mods.append((obj.name, mod.name, values))
@@ -764,7 +777,7 @@ def _restore_users(tree, users, warnings):
                 continue
             for suffix, value in record.items():
                 try:
-                    mod[ident + suffix] = value
+                    mod_inputs.of(mod)[ident + suffix] = value
                 except Exception:
                     pass
         obj.update_tag()

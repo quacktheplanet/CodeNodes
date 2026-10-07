@@ -12,7 +12,7 @@ import bpy
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import codenodes  # noqa: E402
-from codenodes import agent  # noqa: E402
+from codenodes import agent, mod_inputs  # noqa: E402
 from codenodes.gn import library, serialize  # noqa: E402
 
 _checks = 0
@@ -347,7 +347,7 @@ def main():
                      if getattr(i, "name", "") == "Height")
     agent.nodes_set_inputs("Courtyard", {"Height": 5.0})
     agent.nodes_edit("CN Wall Along Curve", [{"op": "remove", "node": "Wobble", "bridge": True}])
-    check(abs(tuned[height_id] - 5.0) < 1e-6 and abs(made("Courtyard")["size"][2] - 5.8) < 0.01,
+    check(abs(mod_inputs.of(tuned)[height_id] - 5.0) < 1e-6 and abs(made("Courtyard")["size"][2] - 5.8) < 0.01,
           "editing keeps what was tuned on the modifier, and a removed node's flow is rejoined")
 
     # using a capability again keeps edits made to its group; a foreign group is left alone

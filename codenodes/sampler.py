@@ -3,7 +3,7 @@
 The grid's z-slices are laid out as tiles of one 2D float texture (reading a 3D
 texture back only returns its first slice). Work is dispatched in slabs of
 slices; the first slab is timed so an expensive shader is refused before it can
-stall the GPU for long. Needs Blender with a window: background mode has no GPU.
+stall the GPU for long. Needs the GPU: Blender with a window, or background (-b) mode from 5.2.
 """
 
 from __future__ import annotations
@@ -32,10 +32,10 @@ class GpuUnavailable(SdfCodeError):
 
 
 def _require_gpu():
-    import bpy
-    if bpy.app.background:
-        raise GpuUnavailable("Code -> Mesh needs the GPU, and Blender has no GPU access in background (-b) mode. "
-                             "Run Blender with a window.")
+    from . import gpu_guard
+    if not gpu_guard.available():
+        raise GpuUnavailable("Code -> Mesh needs the GPU, and this Blender has no GPU access in background (-b) "
+                             f"mode ({gpu_guard._init['error']}). Run Blender with a window, or use 5.2 or later.")
 
 
 def grid_dims(lo, hi, resolution):

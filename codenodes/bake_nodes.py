@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-from . import sdf_code
+from . import mod_inputs, sdf_code
 from .sdf_code import SdfCodeError
 
 
@@ -491,11 +491,11 @@ def build(obj):
         if item.item_type != 'SOCKET' or item.in_out != 'INPUT':
             continue
         if item.name == "Resolution":
-            mod[item.identifier] = int(s.resolution)
+            mod_inputs.of(mod)[item.identifier] = int(s.resolution)
         else:
             current = next((prm.value for prm in s.params if prm.name == item.name), None)
             if current is not None:
-                mod[item.identifier] = float(current)
+                mod_inputs.of(mod)[item.identifier] = float(current)
     s.enabled = False                      # the nodes drive it now; the code text stays
     s.animate = False
     obj.data.clear_geometry()

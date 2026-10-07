@@ -22,6 +22,7 @@ import time
 
 import numpy as np
 
+from . import mod_inputs
 from .sdf_code import PRELUDE, SdfCodeError, param_defines, parse_params, user_errors
 
 MAX_COUNT = 16_777_216          # live on the GPU; Real Geometry is capped lower (MAX_REAL)
@@ -539,11 +540,12 @@ def apply_settings(obj, mod, radius):
     """Push the point size and the object's material into the modifier's sockets."""
     tree = mod.node_group
     key = socket_id(tree, "Radius")
+    values = mod_inputs.of(mod)
     if key is not None:
-        mod[key] = float(radius)
+        values[key] = float(radius)
     key = socket_id(tree, "Material")
-    if key is not None and obj.data.materials and mod.get(key) is None:
-        mod[key] = obj.data.materials[0]
+    if key is not None and obj.data.materials and values.get(key) is None:
+        values[key] = obj.data.materials[0]
 
 
 def fill_points(me, state, extra=("velocity", "speed", "age", "life")):

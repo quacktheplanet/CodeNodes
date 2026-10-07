@@ -15,7 +15,7 @@ from mathutils.bvhtree import BVHTree
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import codenodes  # noqa: E402,F401
-from codenodes import agent  # noqa: E402
+from codenodes import agent, mod_inputs  # noqa: E402
 from codenodes.factory import build, equipment as eq, kit, tools  # noqa: E402
 from codenodes.gn import library, serialize  # noqa: E402
 
@@ -141,7 +141,7 @@ def test_factory():
     mod = shell.modifiers[0]
     ident = next(i.identifier for i in mod.node_group.interface.items_tree
                  if i.item_type == 'SOCKET' and i.name == "Openings")
-    mod[ident] = None
+    mod_inputs.of(mod)[ident] = None
     shell.update_tag()
     r = tools.verify("Plant", renders=False)
     check(any(v["code"] == "opening" for v in r["errors"]), "with the shell's openings object taken away, the docks "

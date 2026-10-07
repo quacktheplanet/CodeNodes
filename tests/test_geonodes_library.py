@@ -66,7 +66,10 @@ def main():
     check(faces > 100, f"an appended rack makes geometry in a plain file ({faces} faces)")
     bays = next(i.identifier for i in rack.interface.items_tree if i.item_type == 'SOCKET' and i.name == "Bays")
     before = faces
-    mod[bays] = 6.0
+    if hasattr(mod, "properties"):             # Blender 5.2+: inputs are RNA, not ID properties
+        getattr(mod.properties.inputs, bays).value = 6.0
+    else:
+        mod[bays] = 6.0
     obj.update_tag()
     faces, _ = evaluated(obj)
     check(faces > before, "and its Bays slider adds sections")

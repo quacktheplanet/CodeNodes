@@ -8,6 +8,28 @@ render: `stats()['during_render']` must stay 0.
 from __future__ import annotations
 
 _stats = {"dispatches": 0, "draws": 0, "refused": 0, "during_render": 0}
+_init = {"tried": False, "ok": False, "error": ""}
+
+
+def available():
+    """Can GPU work run at all? Always with a window. In background (-b) mode only from Blender 5.2,
+    whose gpu.init() starts the GPU without a window (the first call does it; a machine without a
+    usable GPU raises SystemError, remembered in `_init["error"]`)."""
+    import bpy
+    if not bpy.app.background:
+        return True
+    if not _init["tried"]:
+        _init["tried"] = True
+        import gpu
+        if hasattr(gpu, "init"):
+            try:
+                gpu.init()
+                _init["ok"] = True
+            except Exception as exc:       # SystemError: no GPU on this machine
+                _init["error"] = str(exc)
+        else:
+            _init["error"] = f"Blender {bpy.app.version_string} has no GPU in background mode (5.2 adds it)"
+    return _init["ok"]
 
 
 def rendering():

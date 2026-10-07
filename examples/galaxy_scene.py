@@ -78,6 +78,12 @@ def code_node(tree, kind, key, loc, label=None):
     return node
 
 
+def live_socket(sockets, name):
+    """The socket called `name` that's in use: up to 5.1 nodes like Random Value keep a hidden copy per
+    data type (so indices differ), 5.2 shows only the current type's."""
+    return next(s for s in sockets if s.name == name and s.enabled)
+
+
 def node(tree, idname, loc, label=None, **inputs):
     n = tree.nodes.new(idname)
     n.location = loc
@@ -310,13 +316,13 @@ def build_solar_system(scene):
     rrot.inputs["Max"].default_value = (6.283, 6.283, 6.283)
     rscale = node(t, "FunctionNodeRandomValue", (-560, -380), "Random size")
     rscale.data_type = 'FLOAT'
-    rscale.inputs[2].default_value = 0.35
-    rscale.inputs[3].default_value = 1.6
+    live_socket(rscale.inputs, "Min").default_value = 0.35
+    live_socket(rscale.inputs, "Max").default_value = 1.6
     iop2 = node(t, "GeometryNodeInstanceOnPoints", (-120, -250), "Rocks on the asteroids")
     t.links.new(atg.outputs["Geometry"], iop2.inputs["Points"])
     t.links.new(rset.outputs["Geometry"], iop2.inputs["Instance"])
     t.links.new(rrot.outputs["Value"], iop2.inputs["Rotation"])
-    t.links.new(rscale.outputs[1], iop2.inputs["Scale"])
+    t.links.new(live_socket(rscale.outputs, "Value"), iop2.inputs["Scale"])
     interaction = [belt, grav, coll, lights, look, atg, rock, lump, lump_off, center, setpos, rcol, rset, rrot, rscale, iop2]
     N["belt"], N["grav"], N["coll"], N["asteroid_tg"], N["look"] = belt, grav, coll, atg, look
 

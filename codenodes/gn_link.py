@@ -24,7 +24,7 @@ import traceback
 
 import bpy
 
-from . import live, props, sdf_code
+from . import live, mod_inputs, props, sdf_code
 
 SOURCES = "CodeNodes Sources"
 TAG = "codenodes_source"         # on the node group: the source object's name
@@ -910,7 +910,7 @@ def _host_trees_value(tree, socket_identifier):
         for mod in obj.modifiers:
             if mod.type == 'NODES' and mod.node_group == tree:
                 try:
-                    return mod[socket_identifier]
+                    return mod_inputs.of(mod)[socket_identifier]
                 except KeyError:
                     return None
     return None
@@ -951,7 +951,7 @@ def read_values(user):
         for item in thing.node_group.interface.items_tree:
             if item.item_type == 'SOCKET' and item.in_out == 'INPUT':
                 try:
-                    values[item.name] = thing[item.identifier]
+                    values[item.name] = mod_inputs.of(thing)[item.identifier]
                 except KeyError:
                     pass
     return values
@@ -1600,8 +1600,9 @@ def _copy_modifier_values(host, tree, tap):
     for item in tree.interface.items_tree:
         if item.item_type == 'SOCKET' and item.in_out == 'INPUT' and item.socket_type != "NodeSocketGeometry":
             try:
-                if tm.get(item.identifier) != hm.get(item.identifier):
-                    tm[item.identifier] = hm[item.identifier]
+                t, h = mod_inputs.of(tm), mod_inputs.of(hm)
+                if t.get(item.identifier) != h.get(item.identifier):
+                    t[item.identifier] = h[item.identifier]
             except (KeyError, TypeError):
                 pass
 
@@ -1780,7 +1781,7 @@ def make_native(group):
             thing.node_group = native
             for item in native.interface.items_tree:
                 if item.item_type == 'SOCKET' and item.in_out == 'INPUT' and item.name in values:
-                    thing[item.identifier] = values[item.name]
+                    mod_inputs.of(thing)[item.identifier] = values[item.name]
     mesh = obj.data
     bpy.data.objects.remove(obj)
     if mesh.users == 0:

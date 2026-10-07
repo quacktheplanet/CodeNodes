@@ -22,7 +22,7 @@ import tempfile
 import bpy
 from mathutils import Vector
 
-from . import api, cache, particles, sdf_code, shapes, volume
+from . import api, cache, mod_inputs, particles, sdf_code, shapes, volume
 from .sdf_code import SdfCodeError
 
 KINDS = ("mesh", "shape", "particles", "volume")
@@ -665,7 +665,7 @@ def _set_modifier_inputs(obj, mod, values):
         elif isinstance(value, (list, tuple)):
             value = list(value)
         try:
-            mod[item.identifier] = value
+            mod_inputs.of(mod)[item.identifier] = value
         except Exception as exc:
             problems.append(f"'{label}' will not take {value!r}: {exc}")
     obj.update_tag()

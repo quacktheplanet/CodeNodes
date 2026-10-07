@@ -22,7 +22,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.environ.get("CODENODES_EXPRESSION_NODES",
                                   os.path.join(os.path.dirname(ROOT), "ExpressNode")))
 import codenodes  # noqa: E402
-from codenodes import gn_link, gn_sockets, gn_ui, live, sampler  # noqa: E402
+from codenodes import gn_link, gn_sockets, gn_ui, live, mod_inputs, sampler  # noqa: E402
 
 _checks = 0
 SAVE = os.path.join(tempfile.gettempdir(), "codenodes_gn_link_test.blend")
@@ -319,7 +319,7 @@ def phase3(state):
     probe = bpy.data.objects.new("Probe", bpy.data.meshes.new("Probe"))
     bpy.context.scene.collection.objects.link(probe)
     probe.modifiers.new("N", 'NODES').node_group = ng
-    probe.modifiers["N"][next(i.identifier for i in ng.interface.items_tree
+    mod_inputs.of(probe.modifiers["N"])[next(i.identifier for i in ng.interface.items_tree
                               if i.item_type == 'SOCKET' and i.name == "major")] = 0.6
     r = radius_xy(probe)
     check(abs(r - 0.9) < 0.06, f"the native nodes make the same donut (outer radius {r:.3f}, expect 0.9)")

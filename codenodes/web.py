@@ -25,6 +25,8 @@ import tempfile
 import bpy
 from mathutils import Vector
 
+from . import mod_inputs
+
 MAX_COMBINATIONS = 64
 MAX_BYTES = 14_000_000
 
@@ -50,7 +52,7 @@ def _signature(obj):
 
 
 def _set(obj, mod, ident, value):
-    mod[ident] = value
+    mod_inputs.of(mod)[ident] = value
     obj.update_tag()
 
 
@@ -58,7 +60,7 @@ def _get(mod, ident):
     """A copy of a modifier input's value: vectors come back as live views that would
     follow later changes (or dangle), which is no use for putting things back."""
     from .gn.serialize import _copy_idprop
-    return _copy_idprop(mod[ident])
+    return _copy_idprop(mod_inputs.of(mod)[ident])
 
 
 def _export(objects, path):
@@ -90,8 +92,9 @@ def _palette(objects):
                 mats.add(slot.material)
         for mod in obj.modifiers:
             if mod.type == 'NODES' and mod.node_group:
-                for key in mod.keys():
-                    value = mod[key]
+                values = mod_inputs.of(mod)
+                for key in values.keys():
+                    value = values[key]
                     if isinstance(value, bpy.types.Material):
                         mats.add(value)
     for mat in bpy.data.materials:        # instanced assets bring their own

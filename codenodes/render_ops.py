@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import threading
 import time
 import types
 
@@ -159,8 +160,10 @@ def _link_for_render(src, on):
 
 
 def prepare_frame(scene, frame, sources):
-    """Step to `frame` and make every GPU node real. Returns the ones made real just for the render."""
-    scene.frame_set(frame)                       # frame handlers step Every Frame nodes (no render running)
+    """Step to `frame` and make every GPU node real. Returns the ones made real just for the render.
+    `frame` None: Blender is already changing to the frame (a frame_change_pre handler)."""
+    if frame is not None:
+        scene.frame_set(frame)                   # frame handlers step Every Frame nodes (no render running)
     temporary = []
     for src in sources:
         s = src.codenodes
@@ -228,8 +231,13 @@ class CODENODES_OT_render(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
-        """Blocking version (scripts and tests): render every frame, then return."""
+        """Blocking version (scripts, tests, and command-line renders on Blender 5.2+): render every
+        frame, then return."""
         scene = context.scene
+        if not gpu_guard.available():
+            self.report({'ERROR'}, "Rendering GPU nodes needs the GPU, and this background Blender has none "
+                                   f"({gpu_guard._init['error']}). Bake them first, or use Blender 5.2 or later")
+            return {'CANCELLED'}
         self._setup(context)
         for frame in self.frames:
             self._render_one(context, frame)
@@ -261,9 +269,11 @@ class CODENODES_OT_render(bpy.types.Operator):
     def _render_one(self, context, frame):
         scene = context.scene
         temporary = prepare_frame(scene, frame, self.sources)
+        _OURS[0] = True
         try:
             bpy.ops.render.render(write_still=False)
         finally:
+            _OURS[0] = False
             finish(self.sources, temporary)
         if self.animation:
             img = bpy.data.images.get("Render Result")
@@ -451,6 +461,89 @@ def _add_keymaps():
         _keymaps.append((km, kmi))
 
 
+# ---- command-line renders: blender -b file.blend -a (or -f N), Blender 5.2+ -----------------------------------
+# In background mode Blender renders on the main thread and, with gpu.init() (5.2), add-ons have the GPU. But
+# once the first frame has rendered, Python's GPU context is gone until the render ends (GPU work between frames
+# crashes, measured on 5.2.2). So at render_init, before anything renders, every frame of the range is stepped
+# and made real on the GPU and kept as a mesh; frame_change_pre then only swaps the frame's meshes in (no GPU).
+# Anywhere else (a render job in a window, whose handlers run on the render thread) these do nothing.
+
+_OURS = [False]                          # the CodeNodes render loop is rendering: it does the stepping itself
+_cli = {"meshes": None, "originals": {}, "temporary": [], "sources": []}
+
+
+def _cli_wanted():
+    return (bpy.app.background and not _OURS[0] and threading.current_thread() is threading.main_thread())
+
+
+def _frames_to_render(scene):
+    frames = list(range(scene.frame_start, scene.frame_end + 1, max(1, scene.frame_step)))
+    if scene.frame_current not in frames:
+        frames.append(scene.frame_current)
+    return frames
+
+
+@bpy.app.handlers.persistent
+def _cli_render_init(*_args):
+    scene = bpy.context.scene
+    if not _cli_wanted() or not scene_has_gpu_nodes(scene):
+        return
+    if not gpu_guard.available():
+        print(f"CodeNodes: GPU nodes are left out of this render: {gpu_guard._init['error']}. Bake them first, "
+              "or use Blender 5.2 or later")
+        return
+    sources = gpu_sources()
+    start, meshes, temporary = scene.frame_current, {}, []
+    t0 = time.perf_counter()
+    live._render_active[0] = False       # nothing renders yet: the GPU may run
+    try:
+        for frame in sorted(_frames_to_render(scene)):
+            temporary = prepare_frame(scene, frame, sources)   # its render links stay on until the end
+            meshes[frame] = {src.name: src.data.copy() for src in sources if src.type == 'MESH'}
+        scene.frame_set(start)
+    finally:
+        live._render_active[0] = True
+    _cli.update(meshes=meshes, temporary=temporary, sources=[s.name for s in sources],
+                originals={s.name: s.data for s in sources if s.type == 'MESH'})
+    print(f"CodeNodes: GPU nodes stepped and made real for {len(meshes)} frame(s) in "
+          f"{time.perf_counter() - t0:.1f} s, before rendering")
+
+
+@bpy.app.handlers.persistent
+def _cli_frame(scene, depsgraph=None):
+    if _cli["meshes"] is None:
+        return
+    frame = _cli["meshes"].get(scene.frame_current)
+    if frame is None:
+        print(f"CodeNodes: frame {scene.frame_current} wasn't prepared; its GPU nodes are left as they are")
+        return
+    for name, mesh in frame.items():
+        obj = bpy.data.objects.get(name)
+        if obj is not None:
+            obj.data = mesh
+
+
+@bpy.app.handlers.persistent
+def _cli_render_end(*_args):
+    if _cli["meshes"] is None:
+        return
+    for name, mesh in _cli["originals"].items():
+        obj = bpy.data.objects.get(name)
+        if obj is not None:
+            obj.data = mesh
+    for frame in _cli["meshes"].values():
+        for mesh in frame.values():
+            if mesh.users == 0:
+                bpy.data.meshes.remove(mesh)
+    finish([o for o in map(bpy.data.objects.get, _cli["sources"]) if o is not None],
+           [o for o in _cli["temporary"] if o.name in bpy.data.objects])
+    _cli.update(meshes=None, originals={}, temporary=[], sources=[])
+
+
+_CLI_HANDLERS = (("render_init", _cli_render_init), ("frame_change_pre", _cli_frame),
+                 ("render_complete", _cli_render_end), ("render_cancel", _cli_render_end))
+
+
 classes = (CODENODES_OT_render, CODENODES_OT_render_auto)
 
 
@@ -462,9 +555,15 @@ def register():
         _menu_orig[0] = funcs[0]
         funcs[0] = _render_menu_draw
     _add_keymaps()
+    for name, fn in _CLI_HANDLERS:
+        getattr(bpy.app.handlers, name).append(fn)
 
 
 def unregister():
+    for name, fn in _CLI_HANDLERS:
+        handlers = getattr(bpy.app.handlers, name)
+        if fn in handlers:
+            handlers.remove(fn)
     for km, kmi in _keymaps:
         try:
             km.keymap_items.remove(kmi)

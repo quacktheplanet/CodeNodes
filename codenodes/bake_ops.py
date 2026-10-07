@@ -7,7 +7,7 @@ import traceback
 import bpy
 from bpy.props import BoolProperty, IntProperty, StringProperty
 
-from . import cache, live, particles
+from . import cache, live, mod_inputs, particles
 from .sdf_code import SdfCodeError
 
 
@@ -106,7 +106,7 @@ class CODENODES_OT_bake(bpy.types.Operator):
         if job.as_points:
             key = particles.socket_id(tree, "Material")
             if key is not None and obj.data.materials:
-                mod[key] = obj.data.materials[0]
+                mod_inputs.of(mod)[key] = obj.data.materials[0]
         obj.data.clear_geometry()      # the cache supplies the geometry now; don't store it twice
         if self.stop_live:
             settings.animate = False

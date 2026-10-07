@@ -20,7 +20,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.environ.get("CODENODES_EXPRESSION_NODES",
                                   os.path.join(os.path.dirname(ROOT), "ExpressNode")))
 import codenodes  # noqa: E402
-from codenodes import api, sdf_code  # noqa: E402
+from codenodes import api, mod_inputs, sdf_code  # noqa: E402
 
 RING = """// @param radius 1.0 0.2 1.6
 // @param thickness 0.3 0.05 0.6
@@ -90,7 +90,7 @@ def run():
     mod = ring.modifiers["Code as Nodes"]
     ident = next(i.identifier for i in mod.node_group.interface.items_tree
                  if i.item_type == 'SOCKET' and i.name == "radius")
-    mod[ident] = 1.4
+    mod_inputs.of(mod)[ident] = 1.4
     ring.update_tag()
     control, _ = apart(ring, bpy.data.objects["RingGPU"])       # the GPU copy is still at 1.0
     check(control > 0.3, f"(and the comparison can tell: at different radii they are {control:.3f} apart)")
