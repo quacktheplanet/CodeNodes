@@ -162,12 +162,24 @@ def starlight_material():
     ramp = nt.nodes.new("ShaderNodeMapRange")
     ramp.interpolation_type = 'SMOOTHSTEP'
     ramp.inputs["From Min"].default_value = 0.05
-    ramp.inputs["From Max"].default_value = 2.0            # the galaxy's size, in its own units
+    ramp.inputs["From Max"].default_value = 1.3            # the galaxy's size, in its own units
     ramp.inputs["To Min"].default_value = 0.06
     ramp.inputs["To Max"].default_value = 0.9
     nt.links.new(tex.outputs["Object"], ln.inputs[0])
     nt.links.new(ln.outputs["Value"], ramp.inputs["Value"])
-    nt.links.new(ramp.outputs["Result"], em.inputs["Strength"])
+    # and thinning out at the edge, so the disc fades into space instead of ending in a bright rim
+    edge = nt.nodes.new("ShaderNodeMapRange")
+    edge.interpolation_type = 'SMOOTHSTEP'
+    edge.inputs["From Min"].default_value = 1.3
+    edge.inputs["From Max"].default_value = 6.0
+    edge.inputs["To Min"].default_value = 1.0
+    edge.inputs["To Max"].default_value = 0.0
+    both = nt.nodes.new("ShaderNodeMath")
+    both.operation = 'MULTIPLY'
+    nt.links.new(ln.outputs["Value"], edge.inputs["Value"])
+    nt.links.new(ramp.outputs["Result"], both.inputs[0])
+    nt.links.new(edge.outputs["Result"], both.inputs[1])
+    nt.links.new(both.outputs[0], em.inputs["Strength"])
     nt.links.new(em.outputs["Emission"], out.inputs["Surface"])
     return m
 
@@ -456,9 +468,13 @@ def nebula_volume_material():
     dens.attribute_name = "density"
     glow = nt.nodes.new("ShaderNodeMath")
     glow.operation = 'MULTIPLY'
-    glow.inputs[1].default_value = 0.35
+    glow.inputs[1].default_value = 0.12
+    dmul = nt.nodes.new("ShaderNodeMath")              # thin gas where it's thin: density follows the field
+    dmul.operation = 'MULTIPLY'
+    dmul.inputs[1].default_value = 0.02
     noise = nt.nodes.new("ShaderNodeTexNoise")
-    noise.inputs["Scale"].default_value = 1.5
+    noise.inputs["Scale"].default_value = 2.5
+    noise.inputs["Detail"].default_value = 8.0
     tex = nt.nodes.new("ShaderNodeTexCoord")
     ramp = nt.nodes.new("ShaderNodeValToRGB")
     ramp.color_ramp.elements[0].color = (0.95, 0.22, 0.5, 1.0)
@@ -469,7 +485,8 @@ def nebula_volume_material():
     nt.links.new(ramp.outputs["Color"], vol.inputs["Color"])
     nt.links.new(dens.outputs["Fac"], glow.inputs[0])
     nt.links.new(glow.outputs[0], vol.inputs["Emission Strength"])
-    vol.inputs["Density"].default_value = 0.015
+    nt.links.new(dens.outputs["Fac"], dmul.inputs[0])
+    nt.links.new(dmul.outputs[0], vol.inputs["Density"])
     nt.links.new(vol.outputs["Volume"], out.inputs["Volume"])
     return m
 
@@ -484,8 +501,10 @@ def build_nebula(scene):
     src = code_node(t, 'PARTICLES', "Nebula", (-900, 300), "Nebula (glowing gas, live)")
     pos = node(t, "GeometryNodeInputPosition", (-1100, -150))
     noise = node(t, "ShaderNodeTexNoise", (-900, -100), "Wisps")
-    noise.inputs["Scale"].default_value = 1.4 / radius
-    noise.inputs["Detail"].default_value = 6.0
+    noise.inputs["Scale"].default_value = 1.8 / radius
+    noise.inputs["Detail"].default_value = 10.0
+    noise.inputs["Roughness"].default_value = 0.62
+    noise.inputs["Distortion"].default_value = 1.6        # stretched into wisps rather than round blobs
     length = node(t, "ShaderNodeVectorMath", (-900, -350))
     length.operation = 'LENGTH'
     fall = node(t, "ShaderNodeMapRange", (-700, -350), "Fade at the edge")
@@ -495,8 +514,8 @@ def build_nebula(scene):
     fall.inputs["To Min"].default_value = 1.0
     fall.inputs["To Max"].default_value = 0.0
     thick = node(t, "ShaderNodeMapRange", (-700, -100), "Only the thick gas")
-    thick.inputs["From Min"].default_value = 0.5
-    thick.inputs["From Max"].default_value = 0.72
+    thick.inputs["From Min"].default_value = 0.55
+    thick.inputs["From Max"].default_value = 0.85
     dens = node(t, "ShaderNodeMath", (-500, -200), "Density")
     dens.operation = 'MULTIPLY'
     t.links.new(pos.outputs["Position"], noise.inputs["Vector"])
@@ -541,10 +560,51 @@ def space_world(scene):
     scene.world = world
     if world.node_tree is None:
         world.use_nodes = True
-    bg = world.node_tree.nodes.get("Background")
+    nt = world.node_tree
+    bg = nt.nodes.get("Background")
     if bg is not None:
         bg.inputs["Color"].default_value = (0.0015, 0.0018, 0.004, 1.0)
         bg.inputs["Strength"].default_value = 1.0
+        # a far star field: tiny Voronoi cells lit where a point sits near the view direction, tinted by
+        # each cell's random colour, a few much brighter than the rest
+        coord = nt.nodes.new("ShaderNodeTexCoord")
+        vor = nt.nodes.new("ShaderNodeTexVoronoi")
+        vor.inputs["Scale"].default_value = 260.0
+        vor.inputs["Randomness"].default_value = 1.0
+        dot = nt.nodes.new("ShaderNodeMapRange")
+        dot.interpolation_type = 'SMOOTHSTEP'
+        dot.inputs["From Min"].default_value = 0.06
+        dot.inputs["From Max"].default_value = 0.0
+        sep = nt.nodes.new("ShaderNodeSeparateColor")
+        bright = nt.nodes.new("ShaderNodeMath")
+        bright.operation = 'POWER'
+        bright.inputs[1].default_value = 6.0
+        lum = nt.nodes.new("ShaderNodeMath")
+        lum.operation = 'MULTIPLY'
+        lum2 = nt.nodes.new("ShaderNodeMath")
+        lum2.operation = 'MULTIPLY'
+        lum2.inputs[1].default_value = 6.0
+        tint = nt.nodes.new("ShaderNodeMix")
+        tint.data_type = 'RGBA'
+        tint.inputs["A"].default_value = (1.0, 0.85, 0.7, 1.0)
+        tint.inputs["B"].default_value = (0.7, 0.8, 1.0, 1.0)
+        star_em = nt.nodes.new("ShaderNodeEmission")
+        add = nt.nodes.new("ShaderNodeAddShader")
+        out = nt.nodes.get("World Output")
+        nt.links.new(coord.outputs["Generated"], vor.inputs["Vector"])
+        nt.links.new(vor.outputs["Distance"], dot.inputs["Value"])
+        nt.links.new(vor.outputs["Color"], sep.inputs["Color"])
+        nt.links.new(sep.outputs["Red"], bright.inputs[0])
+        nt.links.new(sep.outputs["Green"], tint.inputs["Factor"])
+        nt.links.new(dot.outputs["Result"], lum.inputs[0])
+        nt.links.new(bright.outputs[0], lum.inputs[1])
+        nt.links.new(lum.outputs[0], lum2.inputs[0])
+        nt.links.new(tint.outputs["Result"], star_em.inputs["Color"])
+        nt.links.new(lum2.outputs[0], star_em.inputs["Strength"])
+        nt.links.new(bg.outputs[0], add.inputs[0])
+        nt.links.new(star_em.outputs[0], add.inputs[1])
+        if out is not None:
+            nt.links.new(add.outputs[0], out.inputs["Surface"])
 
 
 def compositor_bloom(scene):
