@@ -81,6 +81,121 @@ void main() {
 }
 `;
 
+// glow billboards, firefly wings and streaks: CodeNodes' viewport sprite shader, as is
+const SPRITE_MAIN = `
+out vec4 vColor;
+out vec2 vUV;
+flat out float vKind;
+uniform vec4 cnMisc, cnProj;
+uniform int cnKindV, cnPerV;
+
+// ---- CodeNodes sprites (every local is cn-prefixed: attribute names are macros) ----
+void main() {
+  int cnV = gl_VertexID;
+  int cnPer = cnPerV;                      // vertices per particle: 6 (glow) or 12 (two wings)
+  int cnI = cnV / cnPer, cnK = cnV % cnPer;
+  int cnRowW = cnRow;
+  ivec2 cnIJ = ivec2(cnI % cnRowW, cnI / cnRowW);
+  vec4 cnA = texelFetch(cnPos, cnIJ, 0), cnB = texelFetch(cnVel, cnIJ, 0);
+  Particle p;
+  p.position = cnA.xyz; p.age = cnA.w; p.velocity = cnB.xyz; p.life = cnB.w; p.seed = float(cnI) + 0.5;
+#ifdef CN_HAS_X
+  p.cnX = texelFetch(cnExt, cnIJ, 0);
+#else
+  p.cnX = CN_XDEFAULT;
+#endif
+  vec4 cnCol = look(p);
+  vec3 cnC = cnWarp(p.position);
+  // the six corners of a quad, as two triangles
+  int cnQ = cnK % 6;
+  vec2 cnCorner = vec2((cnQ == 1 || cnQ == 2 || cnQ == 4) ? 1.0 : -1.0, (cnQ == 2 || cnQ == 4 || cnQ == 5) ? 1.0 : -1.0);
+  vUV = cnCorner;
+  float cnSize = cnMisc.x;
+  if (cnKindV == 0) {                       // glow: a billboard facing the camera
+    vec4 cnClip = cnMVP * vec4(cnC, 1.0);
+    // its depth is taken a halo's width towards the camera, so the glow isn't sliced off where it
+    // meets the ground (the camera position in this object's space sits in the last parameter slot)
+    vec3 cnToCam = cnParams.v[63].xyz - cnC;
+    vec4 cnNear = cnMVP * vec4(cnC + normalize(cnToCam + 1e-6) * min(cnSize * 2.5, 0.9 * length(cnToCam)), 1.0);
+    cnClip.xy += cnCorner * cnSize * cnProj.xy * cnProj.z;
+    cnClip.z = cnNear.z / cnNear.w * cnClip.w;
+    gl_Position = cnClip;
+    vColor = cnCol;
+    vKind = 0.0;
+  } else if (cnKindV == 2) {                // streak: a quad from where it was to where it is
+    vec3 cnTail = cnWarp(p.position - p.velocity * cnMisc.z);
+    vec4 cnH = cnMVP * vec4(cnC, 1.0), cnT = cnMVP * vec4(cnTail, 1.0);
+    vec2 cnD = cnH.xy / max(cnH.w, 1e-6) - cnT.xy / max(cnT.w, 1e-6);
+    if (dot(cnD, cnD) < 1e-12) cnD = vec2(1.0, 0.0);
+    vec2 cnN = normalize(vec2(-cnD.y, cnD.x));
+    float cnAlong = cnCorner.y * 0.5 + 0.5;          // 0 at the tail, 1 at the head
+    vec4 cnClip = mix(cnT, cnH, cnAlong);
+    cnClip.xy += cnN * cnCorner.x * cnSize * (0.35 + 0.65 * cnAlong) * cnProj.xy * cnProj.z;
+    gl_Position = cnClip;
+    vUV = vec2(cnCorner.x, cnAlong);
+    vColor = cnCol;
+    vKind = 2.0;
+  } else {                                   // wings: two quads flapping about the direction of travel
+    vec3 cnAhead = cnWarp(p.position + p.velocity * 0.02) - cnC;
+    vec3 cnF = length(cnAhead) > 1e-6 ? normalize(cnAhead) : vec3(1.0, 0.0, 0.0);
+    vec3 cnUp = abs(cnF.z) > 0.95 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
+    vec3 cnR = normalize(cross(cnF, cnUp));
+    cnUp = cross(cnR, cnF);
+    float cnPh = rand1(p.seed * 5.31);
+    // a fast beat with a short pause at the top of each stroke: reads as flapping, not shimmering
+    float cnBeat = fract(uTime * cnMisc.y + cnPh);
+    float cnFlap = 0.95 * (1.0 - pow(abs(sin(cnBeat * 3.14159265)), 0.6)) + 0.1;
+    float cnSide = cnK < 6 ? 1.0 : -1.0;
+    vec3 cnW = cnR * cnSide * cos(cnFlap) + cnUp * sin(cnFlap);
+    float cnSpan = cnSize * cnMisc.z, cnChord = cnSpan * 0.42;
+    // the wing root sits on the thorax, a little ahead of the glowing abdomen
+    vec3 cnRoot = cnC + cnF * cnSize * 0.9 + cnUp * cnSize * 0.25;
+    vec3 cnP = cnRoot + cnW * (0.5 + 0.5 * cnCorner.x) * cnSpan
+             + (-cnF * 0.55 + cnF * cnCorner.y * 0.5) * cnChord;
+    gl_Position = cnMVP * vec4(cnP, 1.0);
+    // lit a little by the insect's own glow near the root
+    vColor = vec4(mix(vec3(0.95, 0.85, 0.55), vec3(0.78, 0.9, 1.0), 0.5 + 0.5 * cnCorner.x), 0.6);
+    vKind = 1.0;
+  }
+}
+`;
+const SPRITE_FRAG = `#version 300 es
+precision highp float;
+in vec4 vColor;
+in vec2 vUV;
+flat in float vKind;
+out vec4 fragColor;
+
+void main() {
+  float r2 = dot(vUV, vUV);
+  if (vKind < 0.5) {
+    if (r2 > 1.0) discard;
+    // a hot core and a wide soft halo: reads as glow even without bloom
+    float core = exp(-r2 * 70.0), halo = exp(-r2 * 9.0) * 0.16;
+    fragColor = vec4(vColor.rgb * (core * 2.0 + halo), 1.0);
+  } else if (vKind < 1.5) {
+    // a wing: a teardrop outline (wide near the tip, narrow at the root), a bright rim, and veins
+    vec2 e = vec2(vUV.x * 0.5 + 0.5, vUV.y);          // e.x: root 0 -> tip 1, e.y: across (-1..1)
+    float width = 0.35 + 0.65 * sin(clamp(e.x, 0.0, 1.0) * 2.6);
+    float d = abs(e.y) / max(width, 1e-3);
+    if (d > 1.0 || e.x > 0.98) discard;
+    float tip = smoothstep(0.98, 0.8, e.x);
+    float rim = smoothstep(0.7, 1.0, d) + smoothstep(0.8, 0.98, e.x) * 0.6;
+    float vein = 0.0;
+    for (int i = 0; i < 3; i++) {
+      float off = (float(i) - 1.0) * 0.45 * e.x;
+      vein = max(vein, smoothstep(0.035, 0.0, abs(e.y - off)) * smoothstep(0.05, 0.25, e.x));
+    }
+    float a = vColor.a * (0.28 + 0.55 * rim + 0.35 * vein) * tip;
+    fragColor = vec4(vColor.rgb * (0.55 + 0.6 * rim + 0.4 * vein), a);
+  } else {
+    // a streak: brightest at the head, fading to nothing at the tail and the edges
+    float a = (1.0 - vUV.x * vUV.x) * vUV.y * vUV.y;
+    fragColor = vec4(vColor.rgb * a, 1.0);
+  }
+}
+`;
+
 const DRAW_FRAG = `#version 300 es
 precision highp float;
 in vec4 vColor;
@@ -197,6 +312,8 @@ const norm = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / 
 function makeSystem(gl, b) {
   const step = program(gl, QUAD_VS, header(b, false) + b.defines + b.prelude + b.source + STEP_MAIN);
   const draw = program(gl, header(b, true) + b.defines + b.prelude + b.source + DRAW_MAIN, DRAW_FRAG);
+  const sp = b.sprite && b.has_look ? b.sprite : null;
+  const sprite = sp ? program(gl, header(b, true) + b.defines + b.prelude + b.source + SPRITE_MAIN, SPRITE_FRAG) : null;
   const W = b.row, H = b.rows;
   const state = [0, 1].map(() => ({
     pos: floatTexture(gl, W, H), vel: floatTexture(gl, W, H), ext: b.has_x ? floatTexture(gl, W, H) : null,
@@ -266,10 +383,11 @@ function makeSystem(gl, b) {
     for (let k = 0; k < b.substeps; k++) { sys.time += dt; stepOnce(dt, false); }
     sys.frame++;
   };
-  sys.draw = (viewProj, eye) => {
+  sys.draw = (viewProj, eye, proj) => {
     const mvp = mul(viewProj, b.object_matrix);
     const inv = invertAffine(b.object_matrix);
     upload([0, 1, 2].map((r) => inv[r] * eye[0] + inv[4 + r] * eye[1] + inv[8 + r] * eye[2] + inv[12 + r]));
+    if (sprite) { drawSprites(mvp, proj); return; }
     gl.useProgram(draw.p);
     bindCommon(draw, state[sys.cur]);
     const u = draw.u, L = b.look;
@@ -288,6 +406,29 @@ function makeSystem(gl, b) {
     gl.drawArrays(gl.POINTS, 0, b.count);
     gl.depthMask(true);
   };
+  function drawSprites(mvp, proj) {
+    const m = b.object_matrix;
+    const scale = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
+    const passes = sp.shape === "streak" ? [[2, 6, "add"]] : sp.shape === "firefly" ? [[0, 6, "add"], [1, 12, "alpha"]] : [[0, 6, "add"]];
+    gl.useProgram(sprite.p);
+    bindCommon(sprite, state[sys.cur]);
+    const u = sprite.u;
+    gl.uniformMatrix4fv(u.cnMVP, false, mvp);
+    gl.uniform4f(u.cnProj, proj[0], proj[5], scale, 0);
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(false);
+    gl.enable(gl.BLEND);
+    gl.bindVertexArray(vao);
+    for (const [kind, per, blend] of passes) {
+      if (blend === "add") gl.blendFunc(gl.ONE, gl.ONE); else gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      const live = (n, d) => { const k = (sp.prefix || "") + n; return k in index ? params[index[k]] : d; };
+      gl.uniform4f(u.cnMisc, live("size", sp.size) * (kind ? 1 : 3), live("flap", sp.flap),
+        kind === 2 ? live("trail", sp.trail) : live("wing", sp.wing), sys.time);
+      gl.uniform1i(u.cnKindV, kind);
+      gl.uniform1i(u.cnPerV, per);
+      gl.drawArrays(gl.TRIANGLES, 0, b.count * per);
+    }
+    gl.depthMask(true);
+  }
   return sys;
 }
 
@@ -490,13 +631,13 @@ export async function runParticles(canvas, bundles, opts = {}) {
     const eye = [cam.target[0] + cam.dist * Math.cos(cam.pitch) * Math.cos(cam.yaw),
       cam.target[1] + cam.dist * Math.cos(cam.pitch) * Math.sin(cam.yaw),
       cam.target[2] + cam.dist * Math.sin(cam.pitch)];
-    const viewProj = mul(perspective(cam.fov, w / Math.max(h, 1), Math.max(0.01, cam.dist * 0.01), cam.dist * 100),
-      lookAt(eye, cam.target, [0, 0, 1]));
+    const proj = perspective(cam.fov, w / Math.max(h, 1), Math.max(0.01, cam.dist * 0.01), cam.dist * 100);
+    const viewProj = mul(proj, lookAt(eye, cam.target, [0, 0, 1]));
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, w, h);
     gl.clearColor(bg[0], bg[1], bg[2], bg[3]);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    for (const s of systems) s.draw(viewProj, eye);
+    for (const s of systems) s.draw(viewProj, eye, proj);
   }
 
   for (const s of systems) s.start();

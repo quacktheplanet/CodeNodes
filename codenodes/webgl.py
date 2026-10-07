@@ -118,12 +118,24 @@ def particle_bundle(head, host=None, scene=None, count=None):
         "look": {"color_mode": mode, "color_a": list(s.color_a), "color_b": list(s.color_b),
                  "point_px": float(s.point_px), "gain": float(s.gain), "speed_range": float(s.speed_range),
                  "additive": s.blend != 'SOLID', "soft": comp.shape in ("glow", "firefly", "streak")},
+        "sprite": _sprite(comp, values),
         "object_matrix": m,
         "view": _view(host, scene, radius) if host is not None else
         {"target": [0, 0, 0], "distance": radius * 3.2, "yaw": -1.05, "pitch": 0.38, "fov": 0.7},
         "background": list(bg),
         "sliders": sliders(head, comp, values),
     }
+
+
+def _sprite(comp, values):
+    """How a Look with a shape draws each particle (glow, firefly, streak), with its size, flap and wing
+    sliders, as the viewport does; None for plain points."""
+    if comp.shape not in ("glow", "firefly", "streak") or not comp.has_look:
+        return None
+    lu = comp.look_unit or ""
+    return {"shape": comp.shape, "prefix": lu, "size": float(values.get(lu + "size", 0.02)),
+            "flap": float(values.get(lu + "flap", 16.0)), "wing": float(values.get(lu + "wing", 1.5)),
+            "trail": float(values.get(lu + "trail", 0.25))}
 
 
 def sliders(head, comp, values):

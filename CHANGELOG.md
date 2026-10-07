@@ -15,6 +15,8 @@
   - **GPU Surfaces too:** the raymarcher runs as one fragment shader at the page's resolution (the SDF, its
     `color(p)`, the sun or the scene's lights and a material when wired in, soft shadows, ambient occlusion,
     fog) and writes depth, so particles pass behind a castle.
+  - **Looks with a shape draw as in the viewport:** glow billboards with a hot core and halo, fireflies with
+    flapping wings, streaks along the motion (the viewport's sprite shader, as is), sized by their sliders live.
   - **Mesh chains too** (GPU Mesh nodes, and warps or deforms heading a chain from plain geometry): the
     mesh the chain receives is shipped once and its `deform` runs in the vertex shader each frame. The
     whole Windy Meadow runs on a page: swaying grass, smoke and fireflies, one Wind Field slider for all.
