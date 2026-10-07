@@ -66,7 +66,8 @@ def _takes(socket):
     shape = socket.display_shape
     if shape in SHAPE_FIELD:
         return "field"
-    if shape == 'LINE' or socket.type in ('GEOMETRY', 'OBJECT', 'COLLECTION', 'MATERIAL',
+    # Blender 5.0.0 in background mode reports single-value sockets with no shape ('') instead of 'LINE'
+    if shape in ('LINE', '') or socket.type in ('GEOMETRY', 'OBJECT', 'COLLECTION', 'MATERIAL',
                                           'IMAGE', 'TEXTURE'):
         return "value"
     return "either"
