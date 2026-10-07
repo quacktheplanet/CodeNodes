@@ -30,7 +30,16 @@ The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
   function and list links, values and To Geometry run through the group's sockets
   (tests/test_groups.py: identical results grouped four ways). Double-click a group of code nodes to
   go into it.
+- **The Windy Meadow** (`examples/meadow_demo.py`, docs/meadow_render.jpg): use lines, a List read by
+  code and native nodes, and an exploded node, built and rendered with no window on Blender 5.2.
 - Fix: duplicating a code node whose menus weren't built yet no longer raises.
+- Fix: a command-line render (`blender -b scene.blend -a`, or bpy.ops.codenodes.render in a script) ran
+  each particle source without its stages, because the node-graph sync is timer-driven and hadn't run
+  in a fresh background Blender. It now runs before the frames are prepared; tests/test_cli_render.py
+  checks a stage's effect is in the picture.
+- Fix: in renders, a live-only particle chain's points are joined in as an instance. Join Geometry
+  merging point clouds keeps only one material list (Blender 5.2), which took the material off the
+  tree's own made-real points.
 
 ## 0.5.0 (unreleased, draft): the Galaxy, and graphs that do more than a line of nodes
 

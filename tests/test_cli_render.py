@@ -39,6 +39,10 @@ print("CNFARM " + json.dumps(dict(last=render_ops.LAST, guard=gpu_guard.stats(),
 """
 
 
+# a stage the render must include: it moves the whole ball to the right of the picture
+SHIFT = "// Shift Right\nvec3 warp(vec3 q) { return q + vec3(1.6, 0.0, 0.0); }\n"
+
+
 class Fail(Exception):
     pass
 
@@ -94,8 +98,11 @@ def build_scene():
     stree.links.new(next(o for o in surf.outputs if o.type == 'GEOMETRY'), gout.inputs[0])
     sparks, ptree = host("Sparks Host")
     src = add(ptree, 'PARTICLES', "Spark Ball", 0)
+    group, err = gn_link.create('STAGE', None, "Shift Right", SHIFT)
+    shift = gn_link.insert(ptree, group, (150, 0))
     look = add(ptree, 'STAGE', "Glow Look", 300)
-    ptree.links.new(src.outputs["Particles"], look.inputs["Particles"])
+    ptree.links.new(src.outputs["Particles"], shift.inputs["Particles"])
+    ptree.links.new(shift.outputs["Particles"], look.inputs["Particles"])
     settle()
     src.inputs["Count"].default_value = 3000
     src.inputs["radius"].default_value = 2.5
@@ -161,6 +168,11 @@ def main():
     h, w = frames[0].shape[:2]
     centre = float(frames[0][h // 2 - 8:h // 2 + 8, w // 2 - 8:w // 2 + 8, :3].mean())
     check(centre > 0.2, f"the live-only surface (the Sun, in the middle) is in the picture (centre {centre:.3f})")
+    third = w // 3
+    right = float(frames[0][:, -third:, :3].mean())
+    left = float(frames[0][:, :third, :3].mean())
+    check(right > left + 0.01, f"the chain's stages are in the render: the Shift Right stage puts the sparks on the "
+                               f"right (right third {right:.3f}, left third {left:.3f})")
     moved = float(np.abs(frames[0] - frames[-1]).mean())
     check(moved > 1e-4, f"the particles move between frames (mean change {moved:.4f})")
     check(info["guard"]["during_render"] == 0 and info["guard"]["dispatches"] > 0,

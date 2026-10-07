@@ -133,6 +133,28 @@ the ExpressNode add-on), so the file no longer needs CodeNodes at all.
 type to *CodeNodes*) combines several distance functions into one GPU program with Combine (union,
 subtract, blend), Transform and Offset nodes. The starter graph makes a small Saturn.
 
+## The modular workflow: the Windy Meadow
+
+Pull a script apart, share the pieces, and let each node use them its own way.
+`examples/meadow_demo.py` builds this scene and renders it with no window (Blender 5.2):
+
+![The Windy Meadow: grass and chimney smoke in one wind, fireflies drifting between lanterns](docs/meadow_render.jpg)
+
+- **Use lines: one wind, three meanings.** One **Wind Field** is wired into three nodes, and its header
+  says `used by 3`. Every function input has a use line under it saying how that node applies what's
+  wired in. The grass's **Sway by Field** uses `vec3(field(p).xy, 0.0) * 1.4` (sideways only). The
+  fireflies' **Push by Field** uses `field(p) * 0.25` (a gentle drift). The smoke's uses
+  `field(p) * 1.2 + vec3(0.0, 0.0, amount * 0.4)` (it bends and rises). Type on the node or in the
+  code: they stay in sync.
+- **Lists: data on the graph.** **Lanterns** is a List node, a table of positions and pulls. The
+  fireflies' **Attract to List** reads it in code (`targets(i).strength`), and native nodes read the
+  same table (Get List Item → Points → Instance on Points) to stand a lantern on every row. Add a row
+  and there's another lantern, with fireflies gathering round it.
+- **Explode: a script's pieces as nodes.** **Drift** is exploded. Double-click (or Tab) into it like
+  any node group: its `CALM` constant is a Value node and its `loop()` helper is a node of its own,
+  both wired into what's left of Drift. Right-click › Collapse Into Code puts them back exactly.
+  Any code nodes can be grouped with Ctrl+G too, and chains run straight through the group.
+
 ## A bigger example: the Galaxy
 
 The firefly chain is one line of nodes. The Galaxy scene (`examples/galaxy_demo.py` builds it, and

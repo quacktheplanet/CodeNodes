@@ -45,6 +45,7 @@ def gpu_sources():
 
 
 RENDER_JOIN = "CodeNodes render join"
+RENDER_INSTANCE = "CodeNodes render instance"
 
 # The last CodeNodes render: frames rendered, whether it finished, where it went (for tests and reports)
 LAST = {"count": 0, "frames": 0, "finished": False, "animation": False, "path": ""}
@@ -82,12 +83,20 @@ def _link_in_host(src, on):
                 info = tree.nodes.new("GeometryNodeObjectInfo")
                 info.name = info.label = RENDER_LINK
                 info.transform_space = 'ORIGINAL'
-                info.location = (join.location.x - 200, join.location.y - 120)
+                info.location = (join.location.x - 400, join.location.y - 120)
+            # joined as an instance: Join Geometry merging two point clouds keeps only one of their
+            # material lists (Blender 5.2), which would take the materials off the tree's own points
+            inst = tree.nodes.get(RENDER_INSTANCE)
+            if inst is None:
+                inst = tree.nodes.new("GeometryNodeGeometryToInstance")
+                inst.name = inst.label = RENDER_INSTANCE
+                inst.location = (join.location.x - 200, join.location.y - 120)
             info.inputs["Object"].default_value = src
-            tree.links.new(info.outputs["Geometry"], join.inputs[0])
+            tree.links.new(info.outputs["Geometry"], inst.inputs[0])
+            tree.links.new(inst.outputs[0], join.inputs[0])
         else:
             prev = join.get("cn_prev") if join is not None else None
-            for n in (info, join):
+            for n in (info, tree.nodes.get(RENDER_INSTANCE), join):
                 if n is not None:
                     tree.nodes.remove(n)
             if prev:
@@ -238,6 +247,8 @@ class CODENODES_OT_render(bpy.types.Operator):
             self.report({'ERROR'}, "Rendering GPU nodes needs the GPU, and this background Blender has none "
                                    f"({gpu_guard._init['error']}). Bake them first, or use Blender 5.2 or later")
             return {'CANCELLED'}
+        if bpy.app.background:
+            sync_graph()
         self._setup(context)
         for frame in self.frames:
             self._render_one(context, frame)
@@ -483,6 +494,19 @@ def _frames_to_render(scene):
     return frames
 
 
+def sync_graph():
+    """Find the chains now. In a fresh `blender -b scene.blend` the node-graph sync (which runs from timers
+    and depsgraph updates) hasn't run yet, so without this every source would run without its stages."""
+    was = live._render_active[0]
+    live._render_active[0] = False
+    try:
+        for _ in range(3):
+            gn_link.sync()
+            live._flush()
+    finally:
+        live._render_active[0] = was
+
+
 @bpy.app.handlers.persistent
 def _cli_render_init(*_args):
     scene = bpy.context.scene
@@ -492,11 +516,12 @@ def _cli_render_init(*_args):
         print(f"CodeNodes: GPU nodes are left out of this render: {gpu_guard._init['error']}. Bake them first, "
               "or use Blender 5.2 or later")
         return
-    sources = gpu_sources()
     start, meshes, temporary = scene.frame_current, {}, []
     t0 = time.perf_counter()
     live._render_active[0] = False       # nothing renders yet: the GPU may run
     try:
+        sync_graph()
+        sources = gpu_sources()
         for frame in sorted(_frames_to_render(scene)):
             temporary = prepare_frame(scene, frame, sources)   # its render links stay on until the end
             meshes[frame] = {src.name: src.data.copy() for src in sources if src.type == 'MESH'}
