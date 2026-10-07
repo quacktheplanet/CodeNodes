@@ -7,6 +7,8 @@ Blender can't put on a node: buttons (Edit Code, Add To Geometry) and the full e
 
 from __future__ import annotations
 
+import os
+
 import bpy
 from bpy.props import BoolProperty, EnumProperty, StringProperty
 
@@ -327,6 +329,38 @@ class CODENODES_OT_gn_rebuild(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class CODENODES_OT_export_web(bpy.types.Operator):
+    bl_idname = "codenodes.export_web"
+    bl_label = "Export Live Web Page"
+    bl_description = ("Write a web page that runs this object's GPU particles live in the browser (WebGL2): the "
+                      "chains' own code, with their sliders as page controls")
+    filepath: StringProperty(subtype='FILE_PATH', default="codenodes_live/index.html")
+
+    @classmethod
+    def poll(cls, context):
+        return _in_geometry_nodes(context) and context.object is not None
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        from . import webgl
+        host = context.object
+        try:
+            bundles = webgl.host_bundles(host)
+        except webgl.NotPackable as exc:
+            self.report({'WARNING'}, str(exc))
+            return {'CANCELLED'}
+        path = bpy.path.abspath(self.filepath)
+        if not path.endswith(".html"):
+            path = os.path.join(path, "index.html")
+        webgl.export_bundles(bundles, path)
+        self.report({'INFO'}, f"{len(bundles)} particle chain{'s' if len(bundles) != 1 else ''} → {path} "
+                              f"(serve the folder, e.g. python -m http.server, and open it)")
+        return {'FINISHED'}
+
+
 class CODENODES_OT_gn_make_native(bpy.types.Operator):
     bl_idname = "codenodes.gn_make_native"
     bl_label = "Make Native"
@@ -512,6 +546,8 @@ class CODENODES_PT_gn(bpy.types.Panel):
             row.operator("codenodes.explode", text="Explode", icon='MOD_EXPLODE')
         if s.kind in gn_link.GPU_KINDS:
             row.operator(CODENODES_OT_gn_add_make_real.bl_idname, text="Add To Geometry", icon='MESH_DATA')
+        if s.kind in ('PARTICLES', 'STAGE'):
+            layout.operator(CODENODES_OT_export_web.bl_idname, icon='WORLD')
         if s.last_error:
             box = layout.box()
             box.alert = True
@@ -674,7 +710,7 @@ def _show_text_beside(win, screen, node_area, text):
 
 classes = (CODENODES_OT_edit_code_popup, CODENODES_OT_gn_add, CODENODES_OT_gn_add_make_real, CODENODES_OT_gn_add_flow, CODENODES_OT_add_object, CODENODES_OT_show_in_gn,
            CODENODES_OT_gn_edit_code, CODENODES_OT_gn_template, CODENODES_OT_gn_rebuild,
-           CODENODES_OT_gn_make_native, CODENODES_OT_open_graph, *_CATEGORY_MENUS, CODENODES_MT_gn_add,
+           CODENODES_OT_gn_make_native, CODENODES_OT_export_web, CODENODES_OT_open_graph, *_CATEGORY_MENUS, CODENODES_MT_gn_add,
            CODENODES_PT_gn)
 
 

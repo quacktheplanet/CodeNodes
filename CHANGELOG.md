@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased (branch `webgl-export`): code nodes on the web
+
+- **Particle chains run live in a browser.** `codenodes/webgl.py` packages every particle chain on an
+  object (its composed GLSL, slider values, look, emitter samples and the object's place) and
+  `webgl_runtime.js` runs it in WebGL2: the chain's own code, unchanged (spawn, born, behave, look, warps,
+  functions wired in, use lines, Lists, exploded pieces), stepped by a fragment shader into float textures.
+  Several chains share one canvas and one camera (the scene camera's view to start, then drag and zoom).
+  The page offers every node's sliders, one per node even when a node is shared by several chains.
+  - In Blender: sidebar › **Export Live Web Page** (with a code node selected).
+  - In WebBlend: the **CodeNodes Live** compile target puts it on a page (WebBlend branch
+    `codenodes-target`).
+  - tests/test_webgl.py checks the packaging; WebBlend's tests/browser_codenodes.mjs runs it in Chrome.
+  - Particles only: GPU Surfaces and GPU Mesh chains don't go to the web yet.
+
 ## 0.6.0 (release candidate): the modular workflow
 
 The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.

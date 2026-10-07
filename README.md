@@ -160,6 +160,13 @@ Pull a script apart, share the pieces, and let each node use them its own way.
 
 ![Inside the exploded Drift: its CALM constant as a Value node and loop() as a node of its own](docs/meadow_exploded.jpg)
 
+## On the web
+
+Select an object with GPU particle chains and click **Export Live Web Page** in the sidebar: you get a
+page that runs those chains in the browser (WebGL2), the same code that runs in your viewport, with each
+node's sliders as page controls. Serve the folder (`python -m http.server`) and open it. For a whole site
+built in Blender, WebBlend's **CodeNodes Live** target places it on a page next to text, images and video.
+
 ## A bigger example: the Galaxy
 
 The firefly chain is one line of nodes. The Galaxy scene (`examples/galaxy_demo.py` builds it, and
