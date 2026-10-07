@@ -141,7 +141,94 @@ def main():
     check("return n0_wind_in(p) * n0_v_scale;" in mesh.source, "use lines work in mesh chains too")
     check(any("takes vec3 wind(vec3 p)" in w for w in mesh.warnings),
           "and a provider with more arguments than the input is flagged")
+    lists()
     print(f"\nAll {_checks} checks passed.")
+
+
+BODIES = """// Bodies: the planets
+// @list
+name    mass  radius  color:3
+Rocky   1.0   0.6     0.55 0.45 0.35
+Ocean   2.4   0.9     0.10 0.30 0.70
+Ice     0.7   0.5     0.90 0.95 1.00
+"""
+
+ORBITS = """// @in list Body bodies  "The planets"
+// @in float speed 1.0
+struct Body { float mass; float radius; vec3 color; };
+vec3 tint(int i) { Body b = bodies(i); return b.color * b.mass; }
+void behave(inout Particle p, float dt) {
+  for (int i = 0; i < bodies_count(); i++) p.velocity += tint(i) * dt * speed;
+}
+"""
+
+
+def lists():
+    # ---- a List node's table -------------------------------------------------------------------
+    d = decl.parse(BODIES)
+    t = d.table
+    check(t is not None and len(t) == 3 and t.label_name == "name" and t.labels == ["Rocky", "Ocean", "Ice"],
+          "a List node's table: three rows, the name column kept as labels")
+    check([(c.name, c.size) for c in t.columns] == [("mass", 1), ("radius", 1), ("color", 3)]
+          and t.column("color").values[1] == (0.1, 0.3, 0.7), "number columns, color:3 taking three numbers")
+    check(decl.strip(BODIES).strip() == "" and not d.roles, "a List has no GPU code of its own")
+    commas = decl.parse("// @list\nx, y\n1, 2\n3, 4\n").table
+    check(commas.column("y").values == [2.0, 4.0], "cells can be separated by commas too")
+    check(raises(lambda: decl.parse("// @list\na b\n1 2 3\n"), "3 cells, but the columns need 2"),
+          "a row with the wrong number of cells names its line")
+    check(raises(lambda: decl.parse("// @list\na b:3\n1 2 x 4\n"), "isn't a number"),
+          "a word in a number column is refused")
+    again = decl.parse(decl.set_table(BODIES, t)).table
+    check(again.labels == t.labels and all(a.values == b.values for a, b in zip(again.columns, t.columns)),
+          "writing a table back and reading it again gives the same data")
+    check(decl.set_table(BODIES, t).startswith("// Bodies: the planets\n// @list\nname"),
+          "and keeps the comment above it")
+
+    # ---- list inputs ---------------------------------------------------------------------------
+    o = decl.parse(ORBITS)
+    check(o.lists[0].name == "bodies" and o.lists[0].type == "Body" and o.lists[0].is_record()
+          and o.descriptions["bodies"] == "The planets", "a list input of records, with its tooltip")
+    check(decl.struct_fields(ORBITS, "Body") == [("float", "mass"), ("float", "radius"), ("vec3", "color")],
+          "the record's fields come from the struct in the code")
+    check(raises(lambda: decl.parse("// @in list Planet ps\n"), "isn't a list type"),
+          "a list of an undefined struct is refused")
+
+    head = chain.Unit("Swarm", SWARM)
+    bodies = chain.Unit("Bodies", BODIES)
+    orb = chain.Unit("Orbits", ORBITS, funcs={"bodies": (bodies, "List")})
+    src = chain.compose_particles(head, [orb]).source
+    check("struct n1_Body { float mass; float radius; vec3 color; };" in src
+          and src.index("struct n1_Body") < src.index("n1_bodies(int i)"),
+          "the struct gets the node's prefix and comes before the list that returns it")
+    check("int n1_bodies_count() { return 3; }" in src, "the list's length is a constant")
+    check("const vec3 n1_bodies_2[3] = vec3[3](vec3(0.55, 0.45, 0.35), vec3(0.1, 0.3, 0.7), vec3(0.9, 0.95, 1.0));"
+          in src, "each column is a constant array")
+    check("n1_Body n1_bodies(int i) { int k = clamp(i, 0, 2); return n1_Body(n1_bodies_0[k], n1_bodies_1[k], "
+          "n1_bodies_2[k]); }" in src, "bodies(i) builds the record from the columns")
+    check("Body b = bodies(i)" not in src and "n1_Body b = n1_bodies(i);" in src
+          and "i < n1_bodies_count()" in src, "the code's own names follow the prefix")
+    lone = chain.compose_particles(head, [chain.Unit("Orbits", ORBITS)]).source
+    check("int n1_bodies_count() { return 0; }" in lone
+          and "n1_Body n1_bodies(int i) { return n1_Body(0.0, 0.0, vec3(0.0)); }" in lone,
+          "unwired, a list is empty (and still compiles)")
+    one = "// @in list vec3 cols\nvoid behave(inout Particle p, float dt) { p.velocity += cols(0); }\n"
+    col = chain.compose_particles(head, [chain.Unit("C", one, funcs={"cols": (bodies, "color")})]).source
+    check("vec3 n1_cols(int i) { int k = clamp(i, 0, 2); return n1_cols_0[k]; }" in col,
+          "a single-type list wired from one column")
+    check(raises(lambda: chain.compose_particles(head, [chain.Unit("C", one, funcs={"cols": (bodies, "List")})]),
+                 "wire one of 'Bodies''s columns (mass, radius, color)"),
+          "a single-type list wired to a whole table asks for a column")
+    check(raises(lambda: chain.compose_particles(head, [chain.Unit("C", one, funcs={"cols": (bodies, "mass")})]),
+                 "has 1 number per row, but cols is a vec3"), "a column of the wrong size is refused")
+    ints = chain.compose_particles(head, [chain.Unit(
+        "I", "// @in list int ns\nvoid behave(inout Particle p, float dt) { p.velocity.x += float(ns(1)); }\n",
+        funcs={"ns": (chain.Unit("N", "// @list\nn\n3\n4.4\n"), "n")})]).source
+    check("const int n1_ns_0[2] = int[2](3, 4);" in ints, "int lists round to whole numbers")
+    short = BODIES.replace("color:3", "tint:3")
+    warn = chain.compose_particles(head, [chain.Unit("Orbits", ORBITS, funcs={
+        "bodies": (chain.Unit("Bodies", short), "List")})])
+    check(any("no column 'color'" in w for w in warn.warnings) and "vec3(0.0))" in warn.source,
+          "a record field with no column is zero, with a warning")
 
 
 main()

@@ -12,6 +12,14 @@ The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
   shared function's header says how many nodes use it (`Wind Field · used by 3`); a function wired in
   with a different signature shows a ⚠ on the node that takes it. tests/test_decl.py (pure Python) and
   tests/test_uses.py (Blender; measures the pushes) cover it.
+- **Lists: data you can see and edit on the graph.** A **List node** is a table (`// @list`, then a
+  header and rows; `position:3` columns hold vectors). A code node takes one with `// @in list vec3 pts`
+  (one column) or `// @in list Attractor targets` (a whole table into a struct the code defines) and reads
+  `targets_count()` and `targets(i).strength`; the data is compiled in as constants. On Blender 5.2 a
+  List node's outputs are real Geometry Nodes lists too, so native nodes read the same table; before 5.2
+  lists travel on bundle sockets. New starters: **Attractors** (a List) and **Attract to List**.
+  tests/test_lists.py (all versions; on 5.2 it measures the pull and reads the lists natively).
+- Fix: duplicating a code node whose menus weren't built yet no longer raises.
 
 ## 0.5.0 (unreleased, draft): the Galaxy, and graphs that do more than a line of nodes
 

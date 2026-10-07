@@ -21,7 +21,7 @@ LOGS="${TMPDIR:-/tmp}/codenodes_tests"; mkdir -p "$LOGS"
 PY="${PYTHON:-python3}"
 
 PLAIN="test_mesher test_graph test_rpc test_shapes test_shape_js test_factory test_decl"
-BACKGROUND="test_gn test_gn_library test_web test_factory_blender test_geonodes_library test_node_reference"
+BACKGROUND="test_gn test_gn_library test_web test_factory_blender test_geonodes_library test_node_reference test_lists"
 # test_bake saves the .blend that test_farm opens, so it runs first
 HEADLESS="test_bake test_blender test_volume test_shape_blender test_particles test_galaxy test_bake_nodes test_gn_link
           test_nodes test_agent test_server test_link"

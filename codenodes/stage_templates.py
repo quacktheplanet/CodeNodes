@@ -585,6 +585,33 @@ vec3 light(vec3 p, vec3 n, vec3 v, vec3 albedo, float roughness, float metallic)
 STAGES["Scene Lights"] = _scene_lights_code()
 LIGHT_SLOTS = 8
 
+# ---- lists: data you edit as a table, and stages that read it -------------------------------------------
+
+STAGES["Attractors"] = """\
+// Attractors: points that pull particles in, as a table (Tab into the node, or ✎ Edit Code, to edit it).
+// Wire the List output into Attract to List. Add a row and there's another attractor.
+// @list
+name    position:3       strength  radius
+Left    -1.5 0.0 0.5     2.0       0.4
+Right    1.5 0.0 0.5     2.0       0.4
+Top      0.0 0.0 2.0     1.0       0.3
+"""
+
+STAGES["Attract to List"] = """\
+// Attract to List: particles are pulled towards every point in a list (e.g. an Attractors List node).
+// @in list Attractor targets  "The points that pull: wire in a List node whose columns are position, strength and radius"
+// @in float amount 1.0 0.0 10.0  "How strongly all of them pull"
+struct Attractor { vec3 position; float strength; float radius; };
+void behave(inout Particle p, float dt) {
+  for (int i = 0; i < targets_count(); i++) {
+    Attractor a = targets(i);
+    vec3 d = a.position - p.position;
+    float r2 = dot(d, d) + a.radius * a.radius;
+    p.velocity += d * (a.strength * amount / (r2 * sqrt(r2))) * dt;
+  }
+}
+"""
+
 # the order the Add menu shows them in, by section
 SECTIONS = [
     ("Particle Stages", 'FORCE_TURBULENCE', ["Wander", "Rise", "Gravity", "Vortex", "Drag", "Blink",
@@ -595,5 +622,6 @@ SECTIONS = [
     ("Warps (particles and meshes)", 'MOD_SIMPLEDEFORM', ["Bend", "Taper", "Follow Body"]),
     ("Mesh Stages", 'MOD_WAVE', ["Ripple", "Sway by Field", "Colour by Height"]),
     ("Functions", 'FORCE_WIND', ["Wind Field", "Orbits", "Figure Eights"]),
+    ("Lists", 'SPREADSHEET', ["Attractors", "Attract to List"]),
     ("Lighting", 'LIGHT_SUN', ["Scene Lights"]),
 ]

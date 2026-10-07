@@ -12,6 +12,12 @@ A code node is a node you write on the fly. The code says which sockets the node
     // @out func  field                  your function `field` becomes an output socket
     // @out attr  brightness 1.0         a per-particle value later nodes (and Geometry Nodes) can read
     // @shape firefly                    how a Look node draws each particle: point, glow or firefly
+    // @in  list  vec3 points            a list: wire a List node (or one of its columns) in; the code reads
+                                         points_count() and points(i). A list of records names a struct
+                                         the code defines: `// @in list Body bodies` with
+                                         `struct Body { float mass; vec3 color; };`, read as bodies(i).mass
+    // @list                             this node is a List: the lines after it are a table (see
+                                         parse_table), and its columns are its outputs
     // @in  hidden lightX 0.0            a value the add-on fills in itself (no socket), e.g. light data
     // @in  material mat                 a Material socket: its Principled BSDF values arrive as
                                          mat_base (vec3), mat_roughness, mat_metallic, mat_emit (vec3,
@@ -33,10 +39,12 @@ import re
 
 from .sdf_code import _PARAM_RE, _RESERVED, _TAKEN, Param, SdfCodeError
 
-DECL_LINE = re.compile(r"^\s*//\s*@(in|out|attr|shape)\b(.*)$")
+DECL_LINE = re.compile(r"^\s*//\s*@(in|out|attr|shape|list)\b(.*)$")
 _NAME = r"[A-Za-z_]\w*"
 _NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
 TYPES = ("float", "int", "vec2", "vec3", "vec4", "bool")
+SIZES = {"float": 1, "int": 1, "vec2": 2, "vec3": 3, "vec4": 4}      # list element types
+MAX_ROWS = 4096
 SHAPES = ("point", "glow", "firefly", "streak")
 # what a Material input brings in (as hidden sliders): base colour, roughness, metallic, emission
 MATERIAL_PARTS = (("base_r", 0.8), ("base_g", 0.8), ("base_b", 0.8), ("roughness", 0.5), ("metallic", 0.0),
@@ -78,6 +86,41 @@ class FuncOut:
         self.name, self.ret, self.args, self.line = name, ret, args, line
 
 
+class ListIn:
+    __slots__ = ("name", "type", "line")
+
+    def __init__(self, name, type_, line):
+        self.name, self.type, self.line = name, type_, line
+
+    def is_record(self):
+        return self.type not in SIZES
+
+
+class Column:
+    __slots__ = ("name", "size", "values")
+
+    def __init__(self, name, size):
+        self.name, self.size, self.values = name, size, []
+
+    def glsl_type(self):
+        return {1: "float", 2: "vec2", 3: "vec3", 4: "vec4"}[self.size]
+
+
+class Table:
+    """A List node's data: named number columns (1 to 4 numbers each) and an optional label column."""
+
+    def __init__(self):
+        self.columns: list[Column] = []
+        self.labels: list[str] = []
+        self.label_name = ""
+
+    def __len__(self):
+        return len(self.columns[0].values) if self.columns else len(self.labels)
+
+    def column(self, name):
+        return next((c for c in self.columns if c.name == name), None)
+
+
 class Attr:
     __slots__ = ("name", "default", "line")
 
@@ -99,6 +142,8 @@ class Decls:
         self.roles: set[str] = set()
         self.hidden: set[str] = set()        # sliders the add-on fills in itself (no socket)
         self.materials: list[str] = []       # Material inputs (their values arrive as hidden sliders)
+        self.lists: list[ListIn] = []        # list inputs
+        self.table: Table | None = None      # set when this node is a List (`// @list`)
         self.descriptions: dict[str, str] = {}   # socket name -> the "…" written at the end of its line
         self.summary = ""                    # the code's first comment line: the node's own description
 
@@ -123,6 +168,132 @@ _ROLE_SIGS = {
     "deform": r"\bvoid\s+deform\s*\(\s*inout\s+Vertex\s+\w+\s*\)",
     "sdf": r"\bfloat\s+sdf\s*\(\s*vec3\s+\w+\s*\)",
 }
+
+
+_STRUCT = re.compile(r"\bstruct\s+([A-Za-z_]\w*)\s*\{([^}]*)\}\s*;", re.S)
+
+
+def struct_fields(source, name):
+    """[(type, field name)] of `struct name { ... };` in the code, or None if it isn't defined."""
+    for m in _STRUCT.finditer(strip_comments(source)):
+        if m.group(1) == name:
+            out = []
+            for part in m.group(2).split(";"):
+                bits = part.replace(",", " , ").split()
+                if not bits:
+                    continue
+                t = bits[0]
+                for f in " ".join(bits[1:]).split(","):
+                    if f.strip():
+                        out.append((t, f.strip()))
+            return out
+    return None
+
+
+def strip_comments(source):
+    return re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", source, flags=re.S))
+
+
+def _number(s):
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_table(source):
+    """A List node's table: the first line after `// @list` (comments skipped) names the columns, each
+    line after it is a row. Separate cells with spaces or commas. A column written `color:3` takes three
+    numbers (2 to 4 make a vector); a column whose cells aren't numbers is the label column (names
+    shown to people, not sent to the GPU).
+
+        // @list
+        name    mass  radius  color:3
+        Rocky   1.0   0.6     0.55 0.45 0.35
+        Ocean   2.4   0.9     0.10 0.30 0.70
+    """
+    lines = source.splitlines()
+    start = next((i for i, l in enumerate(lines) if re.match(r"^\s*//\s*@list\b", l)), None)
+    t = Table()
+    if start is None:
+        return t
+    rows = []
+    for n, line in enumerate(lines[start + 1:], start + 2):
+        body = line.split("//")[0].strip()
+        if body:
+            rows.append((n, [c for c in re.split(r"[\s,]+", body) if c]))
+    if not rows:
+        return t
+    n0, header = rows[0]
+    spec = []
+    for cell in header:
+        m = re.fullmatch(rf"({_NAME})(?::([1-4]))?", cell)
+        if not m:
+            raise SdfCodeError(f"line {n0}: '{cell}' isn't a column name (letters, digits and _; add :3 for "
+                               f"three numbers)")
+        spec.append((m.group(1), int(m.group(2) or 1)))
+    if len({nm for nm, _ in spec}) != len(spec):
+        raise SdfCodeError(f"line {n0}: two columns have the same name")
+    if len(rows) - 1 > MAX_ROWS:
+        raise SdfCodeError(f"a List holds at most {MAX_ROWS} rows (this one has {len(rows) - 1})")
+    # the label column: a single-number column whose cells (in every row) aren't all numbers
+    label = None
+    for k, (nm, size) in enumerate(spec):
+        if size == 1 and any(_number(_cell(r, spec, k)) is None for _n, r in rows[1:]):
+            label = k
+            break
+    for k, (nm, size) in enumerate(spec):
+        if k == label:
+            t.label_name = nm
+        else:
+            t.columns.append(Column(nm, size))
+    width = sum(size for _nm, size in spec)
+    for n, cells in rows[1:]:
+        if len(cells) != width:
+            raise SdfCodeError(f"line {n}: {len(cells)} cells, but the columns need {width}")
+        i = 0
+        for k, (nm, size) in enumerate(spec):
+            got = cells[i:i + size]
+            i += size
+            if k == label:
+                t.labels.append(got[0])
+                continue
+            nums = [_number(c) for c in got]
+            if any(v is None for v in nums):
+                raise SdfCodeError(f"line {n}: '{' '.join(got)}' in column '{nm}' isn't a number")
+            t.column(nm).values.append(nums[0] if size == 1 else tuple(nums))
+    return t
+
+
+def _cell(cells, spec, k):
+    i = sum(size for _nm, size in spec[:k])
+    return cells[i] if i < len(cells) else ""
+
+
+def set_table(source, table):
+    """The code with the lines after `// @list` replaced by `table`, written as aligned columns."""
+    lines = source.splitlines()
+    start = next((i for i, l in enumerate(lines) if re.match(r"^\s*//\s*@list\b", l)), None)
+    head = lines[:start + 1] if start is not None else lines + ["// @list"]
+    header = ([table.label_name] if table.label_name else []) + [
+        c.name if c.size == 1 else f"{c.name}:{c.size}" for c in table.columns]
+    rows = [header]
+    for r in range(len(table)):
+        row = [table.labels[r]] if table.label_name else []
+        for c in table.columns:
+            v = c.values[r]
+            row.append(" ".join(_fmt(x) for x in (v if isinstance(v, tuple) else (v,))))
+        rows.append(row)
+    widths = {}
+    for row in rows:
+        for k, cell in enumerate(row):
+            widths[k] = max(widths.get(k, 0), len(cell))
+    body = ["  ".join(cell.ljust(widths[k]) for k, cell in enumerate(row)).rstrip() for row in rows]
+    return "\n".join(head + body) + "\n"
+
+
+def _fmt(v):
+    return f"{v:.6g}"
 
 
 def arg_names(args):
@@ -247,6 +418,9 @@ def parse(source):
             named = _declared_name(word, bits, rest)
             if named:
                 d.descriptions[named] = desc
+        if word == "list":
+            d.table = parse_table(source)
+            break
         if word == "shape":
             if not bits or bits[0] not in SHAPES:
                 raise SdfCodeError(f"line {n}: @shape takes one of: {', '.join(SHAPES)}")
@@ -273,6 +447,20 @@ def parse(source):
             if not bits:
                 raise SdfCodeError(f"line {n}: write it as  // @in float name default [min max]")
             kind = bits[0]
+            if kind == "list":
+                lm = re.fullmatch(rf"list\s+({_NAME})\s+({_NAME})\s*", rest)
+                if not lm:
+                    raise SdfCodeError(f"line {n}: a list input is  // @in list vec3 name  (float, int, vec2, "
+                                       f"vec3, vec4, or a struct the code defines)")
+                t, name = lm.group(1), lm.group(2)
+                if name in seen:
+                    raise SdfCodeError(f"line {n}: '{name}' is declared twice")
+                seen.add(name)
+                if t not in SIZES and struct_fields(source, t) is None:
+                    raise SdfCodeError(f"line {n}: '{t}' isn't a list type: use float, int, vec2, vec3, vec4 or "
+                                       f"define  struct {t} {{ ... }};  in the code")
+                d.lists.append(ListIn(name, t, n))
+                continue
             if kind == "func":
                 um = _USE.search(rest)
                 use = um.group(1) if um else None
@@ -330,7 +518,7 @@ def parse(source):
                 d.colors[name] = parts
             else:
                 raise SdfCodeError(f"line {n}: unknown input type '{kind}'. Use float, int, color, func, "
-                                   f"material or hidden")
+                                   f"list, material or hidden")
     if len(d.attrs) > MAX_ATTRS:
         raise SdfCodeError(f"at most {MAX_ATTRS} per-particle attributes (found {len(d.attrs)})")
     d.roles = roles(source)
@@ -354,6 +542,8 @@ def _declared_name(word, bits, rest):
     if word == "out":
         return bits[1] if len(bits) > 1 else None
     if word == "in" and bits:
+        if bits[0] == "list":
+            return bits[2] if len(bits) > 2 else None
         if bits[0] == "func":
             fm = re.match(rf"func\s+{_NAME}\s+({_NAME})", rest)
             return fm.group(1) if fm else None
@@ -362,7 +552,9 @@ def _declared_name(word, bits, rest):
 
 
 def strip(source):
-    """The code with every declaration line blanked (line numbers stay the same)."""
+    """The code with every declaration line blanked (line numbers stay the same). A List's table goes too."""
+    if re.search(r"^\s*//\s*@list\b", source, re.M):
+        return "\n" * source.count("\n")
     return "\n".join("" if (_PARAM_RE.match(l) or DECL_LINE.match(l)) else l for l in source.splitlines())
 
 

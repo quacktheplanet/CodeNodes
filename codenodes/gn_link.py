@@ -988,7 +988,10 @@ def split(group, user):
         thing.node_tree = new_group
         for sock in thing.inputs:              # keep what was typed on the copy
             if values.get(sock.identifier) is not None:
-                sock.default_value = values[sock.identifier]
+                try:
+                    sock.default_value = values[sock.identifier]
+                except (TypeError, ValueError, AttributeError):
+                    pass                       # e.g. a menu whose items aren't built yet
     else:
         thing.node_group = new_group
     live.request(new_obj)
@@ -1111,10 +1114,11 @@ def find_pipelines(tree):
     from . import gn_sockets
     nodes = _code_nodes(tree)
     by_node = {n.name: o for n, o in nodes}
-    funcs = {}
+    funcs = {}                 # function inputs and list inputs: (consumer, input) -> (provider, output)
     for node, obj in nodes:
+        list_names = {l.name for l in gn_sockets.decls_of(obj).lists}
         for sock in node.inputs:
-            if sock.bl_idname != "NodeSocketClosure" or not sock.is_linked:
+            if not sock.is_linked or (sock.bl_idname != "NodeSocketClosure" and sock.name not in list_names):
                 continue
             l = _feeding(tree, sock)
             while l is not None and l.from_node.type == 'REROUTE':

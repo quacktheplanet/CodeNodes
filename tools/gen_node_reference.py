@@ -82,6 +82,35 @@ The first comment line of the code (one that isn't a declaration) becomes the no
 A distance function `float sdf(vec3 p)` is always offered as an output too, so particles can collide
 with any surface.
 
+### Lists
+
+A **List node** is a table you edit: its code is `// @list` followed by a header line naming the
+columns and one line per row (cells separated by spaces or commas). A column written `color:3` holds
+three numbers per row (2 to 4 make a vector); a column of words is the row labels, for people only.
+Tab into the node (or ✎ Edit Code) to edit it; the header counts the rows (`Attractors · 3 rows · used
+by 2`). Its outputs are the whole table (**List**) and each column on its own. On Blender 5.2 those are
+real Geometry Nodes lists, so native nodes (Get List Item, List Length, Points) can use the same data;
+before 5.2 they travel on bundle sockets and only code nodes read them.
+
+```glsl
+// @list
+name    position:3       strength  radius
+Left    -1.5 0.0 0.5     2.0       0.4
+Right    1.5 0.0 0.5     2.0       0.4
+```
+
+A code node takes a list with `// @in list`:
+
+| Line | Wire in | In the code |
+|---|---|---|
+| `// @in list vec3 pts` | one column (float, int, vec2, vec3 or vec4 per row) | `pts_count()`, `pts(i)` |
+| `// @in list Attractor targets` with `struct Attractor { vec3 position; float strength; float radius; };` | a whole List: each field is filled from the column of the same name | `targets_count()`, `targets(i).strength` |
+
+The table is compiled into the program as constants, so reading a list costs no more than reading a
+number. Edit a row and the chains using it recompile. A field with no column of its name is zero (the
+node shows a ⚠); unwired, a list is empty. Lists hold up to 4096 rows (up to 1024 also become real
+Geometry Nodes lists).
+
 ### Streams: which functions make which node
 
 | The code defines | The node is | Stream sockets |
@@ -179,6 +208,8 @@ EXAMPLES = {
     "Sway by Field": "Wind Field.wind → field; a grass mesh → **Sway by Field** → (live) or To Mesh",
     "Wind Field": "**Wind Field**.wind → Push by Field.field and Sway by Field.field",
     "Scene Lights": "**Scene Lights**.light → Material Look.light and a GPU Surface's Lights",
+    "Attractors": "**Attractors**.List → Attract to List.targets; or **Attractors**.position → Get List Item (5.2)",
+    "Attract to List": "Attractors.List → targets; Swirl → **Attract to List** → Glow Look",
 }
 
 SECTION_ORDER = [
@@ -189,6 +220,7 @@ SECTION_ORDER = [
     ("Mesh stages", 'STAGE', "Mesh Stages"),
     ("Functions", 'STAGE', "Functions"),
     ("Lighting", 'STAGE', "Lighting"),
+    ("Lists", 'STAGE', "Lists"),
     ("GPU Surfaces", 'MESH', None),
     ("GPU Mesh", 'DEFORM', None),
     ("Code Shapes", 'SHAPE', None),
@@ -211,13 +243,30 @@ TYPE_NAMES = {"NodeSocketFloat": "float", "NodeSocketInt": "int", "NodeSocketBoo
               "NodeSocketObject": "object", "NodeSocketMaterial": "material", "NodeSocketVector": "vector"}
 
 
+def list_types(group):
+    """{socket name: "list of …"} for a code node's list inputs and a List node's outputs (the same on every
+    Blender version, whether the list travels on a list socket or a bundle)."""
+    from codenodes import gn_link, gn_sockets
+    obj = gn_link.source_of(group)
+    if obj is None:
+        return {}
+    d = gn_sockets.decls_of(obj)
+    out = {l.name: f"list of {l.type}" for l in d.lists}
+    if d.table is not None:
+        out[gn_sockets.TABLE_OUT] = "list (the table)"
+        for c in d.table.columns:
+            out[c.name] = f"list of {c.glsl_type()}"
+    return out
+
+
 def sockets(group):
     """([(panel, name, type, default, range)], [(name, type)]) read from a node group's interface."""
     ins, outs = [], []
+    lists = list_types(group)
     for item in group.interface.items_tree:
         if item.item_type != 'SOCKET':
             continue
-        t = TYPE_NAMES.get(item.socket_type, item.socket_type)
+        t = lists.get(item.name) or TYPE_NAMES.get(item.socket_type, item.socket_type)
         if item.in_out == 'INPUT':
             default = getattr(item, "default_value", None)
             try:
@@ -233,8 +282,10 @@ def sockets(group):
                 if abs(lo) < 1e8 and abs(hi) < 1e8:
                     rng = f"{_fmt(round(lo, 4))} to {_fmt(round(hi, 4))}"
             panel = item.parent.name if item.parent is not None and item.parent.name else ""
-            if item.socket_type in ("NodeSocketGeometry", "NodeSocketBundle", "NodeSocketClosure",
-                                    "NodeSocketMaterial", "NodeSocketObject", "NodeSocketMenu"):
+            if item.name in lists:
+                default, rng = None, ""
+            elif item.socket_type in ("NodeSocketGeometry", "NodeSocketBundle", "NodeSocketClosure",
+                                      "NodeSocketMaterial", "NodeSocketObject", "NodeSocketMenu"):
                 default = default if item.socket_type == "NodeSocketMenu" else None
             ins.append((panel, item.name, t, default, rng, _tip(item)))
         else:
@@ -266,6 +317,8 @@ def describe(code):
 
 def node_section(title, kind_label, code, group, example):
     ins, outs = sockets(group)
+    if "@list" in code:
+        kind_label = "List (a GPU Stage holding a table)"
     out = [f"### {title}", "", f"*{kind_label}*", ""]
     d = describe(code) if code else (group.description or "")
     if d:

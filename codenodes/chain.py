@@ -22,7 +22,9 @@ the entry points the GPU runs:
 Function inputs (`// @in func vec3 wind(vec3 p)`) are wired to another node's function output
 (`// @out func field`); the provider's code is included once with its own prefix and the input name
 becomes an alias for it. A use line (`... use: wind(p) * 0.4`) wraps the alias in that expression, so
-each node that shares one function decides what it means to that node. Per-particle attributes (`// @out attr brightness 1.0`) share one vec4 of
+each node that shares one function decides what it means to that node. A list input
+(`// @in list Body bodies`) wired to a List node gets the table written in as constants, read through
+`bodies_count()` and `bodies(i)`. Per-particle attributes (`// @out attr brightness 1.0`) share one vec4 of
 state per particle, so any later node can read or write `p.brightness`.
 
 Pure Python: the composite is plain text, compiled by particles.py / deform.py.
@@ -156,6 +158,8 @@ class _Builder:
         except SdfCodeError as exc:
             raise SdfCodeError(f"node '{u.name}': {exc}") from None
         u.decls = d
+        if d.table is not None:
+            return d                          # a List: its data goes into the nodes it's wired into
         body = decl.strip(u.code)
         renames = {}
         for p in d.params:
@@ -177,6 +181,11 @@ class _Builder:
         self.defines.append(decl.color_defines(d, prefix))
         for f in d.func_ins:
             renames[f.name] = prefix + f.name
+        for l in d.lists:
+            renames[l.name] = prefix + l.name
+            renames[l.name + "_count"] = prefix + l.name + "_count"
+        structs = decl._STRUCT.findall(decl.strip_comments(body))
+        renames.update({name: prefix + name for name, _fields in structs})
         renames.update({x: prefix + x for x in set(_DECL.findall(body))})
         for a in d.attrs:
             renames.pop(a.name, None)                 # attributes are shared by name across the chain
@@ -212,6 +221,14 @@ class _Builder:
                 self.add(f"{f.ret} {raw}({f.args}) {{ return {zero}; }}\n")
             if f.wraps():
                 self.use_line(u, f, prefix, raw, renames)
+        if d.lists:
+            # structs first (the list accessors return them), then each list's data and accessors
+            def hoist(m):
+                self.add(m.group(0) + "\n")
+                return "\n" * m.group(0).count("\n")
+            body = re.sub(r"\bstruct\s+[A-Za-z_]\w*\s*\{[^}]*\}\s*;", hoist, body)
+            for l in d.lists:
+                self.list_data(u, l, prefix)
         for a in d.attrs:
             if a.name not in [x[0] for x in self.out.attrs]:
                 if len(self.out.attrs) >= decl.MAX_ATTRS:
@@ -219,6 +236,65 @@ class _Builder:
                 self.out.attrs.append((a.name, a.default))
         self.add(body + "\n", owner=u.name, code=u.code.splitlines())
         return d
+
+    def list_data(self, u, l, prefix):
+        """`int n1_bodies_count()` and `n1_Body n1_bodies(int i)`, the data written in as constants."""
+        name = prefix + l.name
+        link = u.funcs.get(l.name)
+        rows, fields = 0, []                    # fields: [(type, field name or None, values)]
+        if l.is_record():
+            want = decl.struct_fields(u.code, l.type) or []
+        else:
+            want = [(l.type, None)]
+        if link is not None:
+            provider, export = link
+            pd = provider.decls or decl.parse(provider.code)
+            provider.decls = pd
+            t = pd.table
+            if t is None:
+                raise SdfCodeError(f"node '{u.name}': list '{l.name}' is wired to '{provider.name}', which isn't "
+                                   f"a List")
+            rows = len(t)
+            for ftype, fname in want:
+                size = decl.SIZES.get(ftype)
+                if size is None:
+                    raise SdfCodeError(f"node '{u.name}': the field '{fname}' of {l.type} is a {ftype}; list "
+                                       f"records hold float, int, vec2, vec3 and vec4")
+                if fname is None:                # one value per row: the column wired in, or the only one
+                    col = t.column(export)
+                    if col is None and len(t.columns) == 1:
+                        col = t.columns[0]
+                    if col is None:
+                        raise SdfCodeError(
+                            f"node '{u.name}': list '{l.name}' takes one {ftype} per row: wire one of "
+                            f"'{provider.name}''s columns ({', '.join(c.name for c in t.columns)}) into it")
+                else:
+                    col = t.column(fname)
+                    if col is None:
+                        self.out.warnings.append(f"'{u.name}': '{provider.name}' has no column '{fname}' "
+                                                 f"for {l.type}.{fname}, so it's zero")
+                if col is not None and col.size != size:
+                    raise SdfCodeError(f"node '{u.name}': column '{col.name}' of '{provider.name}' has "
+                                       f"{col.size} number{'s' if col.size > 1 else ''} per row, but "
+                                       f"{l.type if fname else l.name}{'.' + fname if fname else ''} is a {ftype}")
+                fields.append((ftype, fname, col.values if col is not None else None))
+        else:
+            fields = [(ftype, fname, None) for ftype, fname in want]
+        ptype = (prefix + l.type) if l.is_record() else l.type
+        out = [f"int {name}_count() {{ return {rows}; }}\n"]
+        parts = []
+        for k, (ftype, _fname, values) in enumerate(fields):
+            if rows and values is not None:
+                arr = f"{name}_{k}"
+                out.append(f"const {ftype} {arr}[{rows}] = {ftype}[{rows}]("
+                           + ", ".join(_literal(ftype, v) for v in values) + ");\n")
+                parts.append(f"{arr}[k]")
+            else:
+                parts.append(_ZERO.get(ftype, f"{ftype}(0.0)"))
+        value = f"{ptype}({', '.join(parts)})" if l.is_record() else parts[0]
+        guard = f"int k = clamp(i, 0, {max(rows - 1, 0)}); " if rows else ""
+        out.append(f"{ptype} {name}(int i) {{ {guard}return {value}; }}\n")
+        self.add("".join(out))
 
     def use_line(self, u, f, prefix, raw, renames):
         """`vec3 n1_wind(vec3 p) { return <use line>; }`: the node's sliders, the function's arguments
@@ -261,6 +337,20 @@ class _Builder:
             SEGMENTS.clear()
         SEGMENTS[hashlib.sha1(self.out.source.encode()).hexdigest()] = self.out.segments
         return self.out
+
+
+def _num(v):
+    t = f"{float(v):.9g}"
+    return t if any(c in t for c in ".eEn") else t + ".0"
+
+
+def _literal(ftype, v):
+    if ftype == "int":
+        return str(int(round(float(v if not isinstance(v, tuple) else v[0]))))
+    if ftype == "float":
+        return _num(v if not isinstance(v, tuple) else v[0])
+    vals = v if isinstance(v, tuple) else (v,)
+    return f"{ftype}({', '.join(_num(x) for x in vals)})"
 
 
 def compose_particles(head, stages=()):

@@ -15,6 +15,8 @@ To Geometry nodes get the same treatment: When is a Menu, the limits and attribu
 
 from __future__ import annotations
 
+import re
+
 import bpy
 
 PANELS = ("Look", "Simulation", "Bounds", "Output")
@@ -129,6 +131,12 @@ JOIN_TIPS = {"Particles A": "The first particle stream", "Particles B": "The sec
 JOIN_TIPS_OUT = {"Particles": "Both streams together: everything wired after this applies to both"}
 
 
+def decl_struct(obj, name):
+    from . import decl
+    t = obj.codenodes.text
+    return decl.struct_fields(t.as_string() if t is not None else "", name)
+
+
 def code_tips(obj):
     """(input tips, output tips, node description) for a code node."""
     d = decls_of(obj)
@@ -151,6 +159,22 @@ def code_tips(obj):
             f"How this node uses what's wired into '{f.name}': one expression, e.g. {example}. It can "
             f"use {f.name}'s arguments ({args or 'none'}), this node's inputs and the helpers. {f.plain_use()} uses "
             f"it as it is. Kept in the code as  use: …  on the {f.name} line")
+    for l in d.lists:
+        what = (f"records ({', '.join(f for _t, f in (decl_struct(obj, l.type) or []))})" if l.is_record()
+                else f"{l.type} values")
+        if l.name in d.descriptions:
+            if l.is_record():
+                tips_in[l.name] = f"{d.descriptions[l.name]} (each row: {what[len('records ('):-1]})"
+        else:
+            tips_in[l.name] = (f"A list of {what}: wire in a List node"
+                               f"{'' if l.is_record() else ' or one of its columns'}. The code reads "
+                               f"{l.name}_count() and {l.name}(i)")
+    if d.table is not None:
+        rows = len(d.table)
+        tips_out[TABLE_OUT] = (f"The whole table ({rows} row{'s' if rows != 1 else ''}): wire it into a list "
+                               f"input of records")
+        for c in d.table.columns:
+            tips_out[c.name] = f"The column '{c.name}' as a list ({rows} value{'s' if rows != 1 else ''})"
     for m in d.materials:
         tips_in.setdefault(m, "A Blender material: its Principled BSDF colours, roughness, metallic and "
                               "emission come into the code")
@@ -218,6 +242,9 @@ def socket_to_setting(prop, value):
 _decl_cache: dict[str, object] = {}
 
 
+_last_table = {}
+
+
 def decls_of(obj):
     """The code's declarations (decl.Decls), or empty ones while the code has a mistake in it."""
     import hashlib
@@ -229,9 +256,14 @@ def decls_of(obj):
     if got is None:
         try:
             got = decl.parse(code)
+            if got.table is not None:
+                _last_table[obj.name] = got.table
         except Exception:
             got = decl.Decls()
             got.roles = decl.roles(code)
+            if re.search(r"^\s*//\s*@list\b", code, re.M):
+                # a List with a mistake keeps its last good table, so its outputs (and links) stay
+                got.table = _last_table.get(obj.name) or decl.Table()
         if len(_decl_cache) > 256:
             _decl_cache.clear()
         _decl_cache[key] = got
@@ -239,6 +271,42 @@ def decls_of(obj):
 
 
 STREAM_IN = {"Particles": "NodeSocketBundle", "Mesh": "NodeSocketGeometry"}
+LIST = "|LIST"            # appended to a socket type: a list socket (Blender 5.2+), e.g. NodeSocketVector|LIST
+LIST_SOCKET = {"float": "NodeSocketFloat", "int": "NodeSocketInt", "vec2": "NodeSocketVector",
+               "vec3": "NodeSocketVector", "vec4": "NodeSocketColor"}
+TABLE_OUT = "List"        # a List node's output with the whole table (a bundle of its columns)
+
+
+def lists_native():
+    """Blender 5.2 lets a node group have list sockets; before that a list travels on a bundle socket
+    (CodeNodes reads the wiring either way, so lists work on every version)."""
+    return bpy.app.version >= (5, 2, 0)
+
+
+def list_input_type(l):
+    if l.is_record() or not lists_native():
+        return "NodeSocketBundle"
+    return LIST_SOCKET[l.type] + LIST
+
+
+def column_type(c):
+    if not lists_native():
+        return "NodeSocketBundle"
+    return {1: "NodeSocketFloat", 2: "NodeSocketVector", 3: "NodeSocketVector", 4: "NodeSocketColor"}[c.size] + LIST
+
+
+def stype_of(item):
+    """An interface socket's type as the spec writes it (list sockets get |LIST)."""
+    st = item.socket_type
+    if getattr(item, "structure_type", "") == 'LIST':
+        st += LIST
+    return st
+
+
+def _split_type(stype):
+    return (stype[:-len(LIST)], True) if stype.endswith(LIST) else (stype, False)
+
+
 USE = " · use"            # the use line under a function input: "wind · use"
 USES_SEEN = "cn_uses_seen"  # on the source object: the use lines last shown on the node, by input
 
@@ -369,6 +437,8 @@ def spec(obj):
         for f in d.func_ins:
             out.append((None, f.name, "NodeSocketClosure", None, None, None, None))
             out.append((None, use_socket(f.name), "NodeSocketString", f.use_line(), None, None, None))
+        for l in d.lists:
+            out.append((None, l.name, list_input_type(l), None, None, None, None))
     if s.kind == 'MESH':
         # a surface can be lit by the scene's lights and take a Blender material's values
         for name in SURFACE_LINKS:
@@ -386,6 +456,11 @@ def output_spec(obj):
     out = []
     if s.kind == 'PARTICLES':
         out.append(("Particles", "NodeSocketBundle"))
+    elif s.kind == 'STAGE' and d.table is not None:
+        out.append((TABLE_OUT, "NodeSocketBundle"))
+        for c in d.table.columns:
+            out.append((c.name, column_type(c)))
+        return out
     elif s.kind == 'STAGE':
         if d.gives_particles():
             out.append(("Particles", "NodeSocketBundle"))
@@ -411,7 +486,7 @@ def sync_outputs(group, obj):
     Attribute outputs are fields: a Named Attribute node inside reads the value from the geometry it
     is used on, which after To Geometry carries every per-particle attribute."""
     wanted = output_spec(obj)
-    have = [(i.name, i.socket_type) for i in _outputs(group.interface)]
+    have = [(i.name, stype_of(i)) for i in _outputs(group.interface)]
     if have == wanted:
         _wire_attr_outputs(group, obj)
         return False
@@ -427,13 +502,16 @@ def sync_outputs(group, obj):
                                for l in tree.links if l.from_node == node]))
     iface = group.interface
     for item in _outputs(iface):
-        if (item.name, item.socket_type) not in wanted:
+        if (item.name, stype_of(item)) not in wanted:
             iface.remove(item)
     for name, stype in wanted:
-        if not any(i.name == name and i.socket_type == stype for i in _outputs(iface)):
-            iface.new_socket(name, in_out="OUTPUT", socket_type=stype)
+        if not any(i.name == name and stype_of(i) == stype for i in _outputs(iface)):
+            base, is_list = _split_type(stype)
+            item = iface.new_socket(name, in_out="OUTPUT", socket_type=base)
+            if is_list:
+                item.structure_type = 'LIST'
     for pos, (name, stype) in enumerate(wanted):
-        item = next(i for i in _outputs(iface) if i.name == name and i.socket_type == stype)
+        item = next(i for i in _outputs(iface) if i.name == name and stype_of(i) == stype)
         if item.position != pos:
             iface.move(item, pos)
     for tree_name, node_name, links in saved:           # names only: re-found after the rebuild
@@ -491,7 +569,7 @@ def _panel_of(item):
 
 
 def signature(group):
-    return [(_panel_of(i), i.name, i.socket_type) for i in _inputs(group.interface)]
+    return [(_panel_of(i), i.name, stype_of(i)) for i in _inputs(group.interface)]
 
 
 def wanted_signature(obj):
@@ -518,11 +596,88 @@ def ensure_menu_switch(group, socket_name, items):
             group.links.new(out, ms.inputs["Menu"])
 
 
+NATIVE_ROWS = 1024         # a List up to this long also gives real Geometry Nodes lists on its outputs
+TABLE_HASH = "cn_table_hash"
+
+
+def build_table_nodes(group, obj):
+    """Inside a List node's group: real Geometry Nodes lists on its outputs (Blender 5.2+), so native nodes
+    (Get List Item, List Length, ...) can use the table too. Each column is Field to List over an Index
+    Switch holding its values; the List output bundles the columns. Rebuilt only when the table changes."""
+    import hashlib
+    d = decls_of(obj)
+    t = d.table
+    if t is None or not lists_native():
+        return
+    key = hashlib.sha1(repr(([(c.name, c.size, c.values) for c in t.columns], NATIVE_ROWS)).encode()).hexdigest()
+    if group.get(TABLE_HASH) == key:
+        return
+    for n in [n for n in group.nodes if n.name.startswith("List · ")]:
+        group.nodes.remove(n)
+    gout = next((n for n in group.nodes if n.type == 'GROUP_OUTPUT'), None)
+    if gout is None:
+        return
+    rows = len(t)
+    native = 0 < rows <= NATIVE_ROWS
+    bundle = group.nodes.new("NodeCombineBundle")
+    bundle.name = bundle.label = "List · bundle"
+    bundle.location = (gout.location.x - 250, gout.location.y + 200)
+    if native:
+        index = group.nodes.new("GeometryNodeInputIndex")
+        index.name = "List · index"
+        index.location = (gout.location.x - 1100, gout.location.y)
+        index.hide = True
+    for k, c in enumerate(t.columns):
+        dtype = {1: 'FLOAT', 2: 'VECTOR', 3: 'VECTOR', 4: 'RGBA'}[c.size]
+        item = bundle.bundle_items.new(dtype, c.name)
+        out = gout.inputs.get(c.name)
+        if not native:
+            continue
+        y = gout.location.y - 220 * k
+        sw = group.nodes.new("GeometryNodeIndexSwitch")
+        sw.name = f"List · {c.name} values"
+        sw.data_type = dtype
+        sw.location = (gout.location.x - 850, y)
+        sw.hide = True
+        while len(sw.index_switch_items) < rows:
+            sw.index_switch_items.new()
+        while len(sw.index_switch_items) > rows:
+            sw.index_switch_items.remove(sw.index_switch_items[-1])
+        for r, v in enumerate(c.values):
+            vals = v if isinstance(v, tuple) else (v,)
+            sock = sw.inputs[r + 1]
+            if c.size == 1:
+                sock.default_value = float(vals[0])
+            elif c.size == 4:
+                sock.default_value = tuple(float(x) for x in vals)
+            else:
+                sock.default_value = tuple(float(x) for x in vals) + (0.0,) * (3 - len(vals))
+        group.links.new(index.outputs[0], sw.inputs["Index"])
+        ftl = group.nodes.new("GeometryNodeFieldToList")
+        ftl.name = f"List · {c.name}"
+        ftl.location = (gout.location.x - 550, y)
+        ftl.list_items.new(dtype, c.name)
+        ftl.inputs["Count"].default_value = rows
+        group.links.new(sw.outputs[0], ftl.inputs[c.name])
+        if out is not None:
+            group.links.new(ftl.outputs[0], out)
+        group.links.new(ftl.outputs[0], bundle.inputs[c.name])
+    if gout.inputs.get(TABLE_OUT) is not None:
+        group.links.new(bundle.outputs[0], gout.inputs[TABLE_OUT])
+    group[TABLE_HASH] = key
+
+
 def sync_interface(group, obj):
     """Make the group's inputs and outputs match the code and the kind's settings. True if anything
     changed."""
     wanted = spec(obj)
     outs_changed = sync_outputs(group, obj)
+    if outs_changed:
+        group.pop(TABLE_HASH, None)
+    try:
+        build_table_nodes(group, obj)
+    except (AttributeError, TypeError, RuntimeError, KeyError):
+        pass
     if signature(group) == [(w[0], w[1], w[2]) for w in wanted]:
         _sync_menus(group, wanted)
         apply_code_tips(group, obj)
@@ -629,7 +784,11 @@ def _restore_users(group, saved, defaults=None):
 
 def _new_socket(iface, name, stype, default, lo, hi, parent):
     kw = {"parent": parent} if parent is not None else {}
+    stype, is_list = _split_type(stype)
     item = iface.new_socket(name, in_out="INPUT", socket_type=stype, **kw)
+    if is_list:
+        item.structure_type = 'LIST'
+        return item
     if lo is not None:
         item.min_value, item.max_value = lo, hi
     if default is not None and stype not in ("NodeSocketMenu", "NodeSocketGeometry", "NodeSocketBundle",
@@ -854,6 +1013,9 @@ def status_line(obj):
             return "live" if live else "real"
         users = links.users_of(obj.name)
         d = decls_of(obj)
+        if d.table is not None:
+            rows = len(d.table)
+            return f"{rows} row{'s' if rows != 1 else ''}" + (f" · used by {len(users)}" if users else "")
         if users and d.func_outs and not d.roles & {"born", "behave", "look", "warp", "deform"}:
             return f"used by {len(users)}"
         heads = links.heads_of(obj)
