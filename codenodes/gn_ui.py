@@ -332,8 +332,8 @@ class CODENODES_OT_gn_rebuild(bpy.types.Operator):
 class CODENODES_OT_export_web(bpy.types.Operator):
     bl_idname = "codenodes.export_web"
     bl_label = "Export Live Web Page"
-    bl_description = ("Write a web page that runs this object's GPU particles live in the browser (WebGL2): the "
-                      "chains' own code, with their sliders as page controls")
+    bl_description = ("Write a web page that runs this object's GPU particles and surfaces live in the browser (WebGL2): the "
+                      "chains' and surfaces' own code, with their sliders as page controls")
     filepath: StringProperty(subtype='FILE_PATH', default="codenodes_live/index.html")
 
     @classmethod

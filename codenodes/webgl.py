@@ -8,7 +8,8 @@ look, warp, functions, lists, use lines) and the same helpers, with the sliders 
 buffer. Only the stepper differs (webgl_runtime.js). WebBlend's CodeNodes target calls particle_bundle
 and ships webgl_runtime.js with the page.
 
-Particles only for now: GPU Surfaces (raymarched) and GPU Mesh chains aren't packaged yet.
+Particles and GPU Surfaces (raymarched, lit by the scene's lights or a material when they're wired in);
+GPU Mesh chains aren't packaged yet.
 """
 
 from __future__ import annotations
@@ -103,7 +104,7 @@ def particle_bundle(head, host=None, scene=None, count=None):
         c = world.node_tree.nodes["Background"].inputs["Color"].default_value
         bg = tuple(max(0.0, x) ** (1 / 2.2) for x in c[:3]) + (1.0,)         # shown as sRGB on the page
     return {
-        "format": "codenodes-particles", "version": 1,
+        "format": "codenodes-particles", "version": 1, "kind": "particles",
         "name": head.name.replace("CN · ", ""),
         "count": n, "row": row, "rows": max(1, math.ceil(n / row)),
         "prelude": PRELUDE + particles.PARTICLE_PRELUDE + param_defines(params),
@@ -216,6 +217,73 @@ def export_bundles(bundles, path):
     return path
 
 
+SURFACE_MAIN_WRAP = """
+// ---- on the web: one pass at the page's resolution, depth written from the hit ----
+void main() {
+  cnMain();
+  vec2 uv = vUv * 2.0 - 1.0;
+  vec4 wn = cnView.invViewProj * vec4(uv, -1.0, 1.0);
+  vec4 wf = cnView.invViewProj * vec4(uv, 1.0, 1.0);
+  vec3 nearW = wn.xyz / wn.w;
+  vec3 rdW = normalize(wf.xyz / wf.w - nearW);
+  float d = hitDist.x;
+  if (d < -1.5) { gl_FragDepth = 0.999999; }
+  else if (d < 0.0) { discard; }
+  else { vec4 clip = cnViewProj * vec4(nearW + rdW * d, 1.0); gl_FragDepth = clamp(clip.z / clip.w * 0.5 + 0.5, 0.0, 0.999998); }
+  fragColor = vec4(pow(cnAces(fragColor.rgb), vec3(1.0 / 2.2)), 1.0);   // scene-linear to the screen
+}
+"""
+
+
+def surface_bundle(src, host, scene=None):
+    """The JSON-ready bundle for a GPU Surface (an SDF raymarched live)."""
+    import bpy
+    from . import gpu_live, lights, live, raymarch
+    from .sdf_code import PRELUDE, param_defines, parse_params
+    scene = scene or bpy.context.scene
+    s = src.codenodes
+    live._flush()
+    bpy.context.view_layer.update()
+    source = gpu_live._source_text(src) or ""
+    params = parse_params(source)
+    values = gpu_live._values(src)
+    lit, mat = lights.surface_uniforms(src, scene)
+    defines = f"#define CN_STEPS 160\n"
+    if raymarch.has_color(source):
+        defines += "#define CN_HAS_COLOR\n"
+    if lit is not None:
+        defines += "#define CN_SCENE_LIGHTS\n"
+    if mat is not None:
+        defines += "#define CN_MATERIAL\n"
+    main = raymarch.MAIN.replace("void main() {", "void cnMain() {", 1) + SURFACE_MAIN_WRAP
+    sun_d, sun_c, sun_s = raymarch.scene_sun(scene)
+    m = [host.matrix_world[r][c] for c in range(4) for r in range(4)]
+    scale = sum(v.length for v in host.matrix_world.to_3x3().col) / 3.0
+    lo, hi = list(s.bounds_min), list(s.bounds_max)
+    radius = max(max(abs(x) for x in lo), max(abs(x) for x in hi)) * scale
+    lvals = list(lit) if lit is not None else [-1.0, 0, 0, 0] * 32 + [0.05, 0.05, 0.05, 1.0]
+    lvals += list(mat) if mat is not None else [0.8, 0.8, 0.8, 0.5, 0.0, 0.0, 0.0, 0.0]
+    fps = scene.render.fps / (scene.render.fps_base or 1.0)
+    return {
+        "format": "codenodes-surface", "version": 1, "kind": "surface",
+        "name": src.name.replace("CN · ", ""),
+        "head": raymarch.VIEW_STRUCT + defines,
+        "prelude": raymarch.HEAD + PRELUDE + param_defines(params),
+        "source": source, "main": main,
+        "params": [float(values.get(p.name, p.default)) for p in params], "param_names": [p.name for p in params],
+        "object_matrix": m, "scale": scale,
+        "bounds": [lo, hi], "fog": float(s.fog), "surface_color": list(s.surface_color),
+        "shadows": bool(s.shadows), "ao": bool(s.ao), "sky": bool(s.sky),
+        "sun": [*sun_d, sun_s], "sun_color": [*sun_c, 1.0], "lights": [float(v) for v in lvals],
+        "animate": bool(getattr(s, "animate", False)), "fps": float(fps),
+        "view": _view(host, scene, radius),
+        "background": [0.0, 0.0, 0.0, 1.0],
+        "sliders": [{"name": p.name, "label": p.name, "node": src.name.replace("CN · ", ""), "min": p.min,
+                     "max": p.max, "value": float(values.get(p.name, p.default))}
+                    for p in params if p.name in values],
+    }
+
+
 def host_bundles(host, scene=None):
     """Bundles for every particle pipeline drawn on `host` (an object whose Geometry Nodes hold code nodes):
     each chain from a source, branches included. Raises NotPackable when it has none."""
@@ -228,9 +296,16 @@ def host_bundles(host, scene=None):
     out = []
     for name in sorted(names):
         obj = bpy.data.objects.get(name)
+        if obj is None:
+            continue
+        kind = links.ekind(obj)
+        if kind == 'MESH':
+            out.append(surface_bundle(obj, host, scene))          # surfaces first: particles draw over them
+    for name in sorted(names):
+        obj = bpy.data.objects.get(name)
         if obj is not None and links.ekind(obj) == 'PARTICLES':
             out.append(particle_bundle(obj, host, scene))
     if not out:
-        raise NotPackable(f"'{host.name}' shows no CodeNodes particles (GPU Surfaces and GPU Mesh don't run on the "
-                          f"web yet)")
+        raise NotPackable(f"'{host.name}' shows no CodeNodes particles or GPU Surfaces (GPU Mesh chains don't run "
+                          f"on the web yet)")
     return out

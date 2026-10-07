@@ -57,6 +57,7 @@ def main():
         return gn_link.insert(tree, g, (x, y))
 
     add('PARTICLES', "Galaxy", 0)
+    add('MESH', "Castle", 0, 400)
     swirl = add('PARTICLES', "Swirl", 0, -400)
     push = add('STAGE', "Push by Field", 300, -400)
     pull = add('STAGE', "Attract to List", 600, -400)
@@ -77,7 +78,12 @@ def main():
 
     bundles = webgl.host_bundles(host)
     names = sorted(b["name"] for b in bundles)
-    check(names == ["Galaxy", "Swirl"], f"every particle chain on the object is packaged ({names})")
+    check(names == ["Castle", "Galaxy", "Swirl"], f"every particle chain and surface on the object is packaged ({names})")
+    castle = bundles[0]
+    check(castle["kind"] == "surface" and "void cnMain() {" in castle["main"] and "float sdf(vec3 p)" in castle["source"]
+          and "CN_HAS_COLOR" in castle["head"], "surfaces come first (particles draw over them): the raymarcher and the SDF")
+    check(len(castle["lights"]) == 140 and castle["bounds"][0] != castle["bounds"][1] and castle["sky"] in (True, False),
+          "with their bounds, sun and light block")
     sw = next(b for b in bundles if b["name"] == "Swirl")
     check("_field_in(p) * 0.5" in sw["source"] and "_targets_count() { return 3; }" in sw["source"]
           and re.search(r"#define n1_field_in f0_\w*_wind", sw["source"]),
@@ -97,7 +103,7 @@ def main():
     html = open(out, encoding="utf-8").read()
     runtime = os.path.join(os.path.dirname(out), webgl.RUNTIME_NAME)
     check(os.path.exists(runtime) and 'from "./codenodes_webgl.js"' in html and '"Galaxy"' in html,
-          "a page is written: the runtime next to it, both chains inside")
+          "a page is written: the runtime next to it, the chains inside")
     js = open(runtime, encoding="utf-8").read()
     check("export async function runParticles" in js and "STEP_MAIN" in js, "the runtime is the WebGL2 one")
     try:

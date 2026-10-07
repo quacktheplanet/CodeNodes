@@ -12,7 +12,9 @@
   - In WebBlend: the **CodeNodes Live** compile target puts it on a page (WebBlend branch
     `codenodes-target`).
   - tests/test_webgl.py checks the packaging; WebBlend's tests/browser_codenodes.mjs runs it in Chrome.
-  - Particles only: GPU Surfaces and GPU Mesh chains don't go to the web yet.
+  - **GPU Surfaces too:** the raymarcher runs as one fragment shader at the page's resolution (the SDF, its
+    `color(p)`, the sun or the scene's lights and a material when wired in, soft shadows, ambient occlusion,
+    fog) and writes depth, so particles pass behind a castle. GPU Mesh chains don't go to the web yet.
 
 ## 0.6.0 (release candidate): the modular workflow
 

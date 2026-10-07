@@ -250,6 +250,7 @@ function makeSystem(gl, b) {
       : [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
     gl.viewport(0, 0, W, H);
     gl.disable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
     gl.bindVertexArray(vao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     sys.cur = 1 - sys.cur;
@@ -282,21 +283,111 @@ function makeSystem(gl, b) {
     gl.uniform1i(u.cnColorMode, L.color_mode);
     gl.enable(gl.BLEND);
     if (L.additive) gl.blendFunc(gl.SRC_ALPHA, gl.ONE); else gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(false);     // hidden behind surfaces
     gl.bindVertexArray(vao);
     gl.drawArrays(gl.POINTS, 0, b.count);
+    gl.depthMask(true);
   };
   return sys;
 }
 
-// Run one or more particle systems (bundles) in a canvas, with one camera for them all.
+// ---- GPU Surfaces: the raymarcher, one pass, depth written from the hit ----
+const SURFACE_VS = `#version 300 es
+out vec2 vUv;
+void main() {
+  vec2 v = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  vUv = v;
+  gl_Position = vec4(v * 2.0 - 1.0, 0.0, 1.0);
+}
+`;
+
+function surfaceHeader(b) {
+  return `#version 300 es
+precision highp float;
+precision highp int;
+${b.head}
+uniform CNParams { vec4 v[64]; } cnParams;
+layout(std140) uniform CNViewB { CNView cnView; };
+layout(std140) uniform CNLightsB { CNLights cnLights; };
+uniform mat4 cnViewProj;
+in vec2 vUv;
+layout(location = 0) out vec4 fragColor;
+vec4 hitDist;
+`;
+}
+
+function invert4(m) {
+  const inv = new Array(16);
+  inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+  inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+  inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+  inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+  inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+  inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+  inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+  inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+  inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+  inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+  inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+  inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+  inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+  inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+  inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+  inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+  const det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+  return inv.map((x) => x / (det || 1));
+}
+
+function makeSurface(gl, b) {
+  const prog = program(gl, SURFACE_VS, surfaceHeader(b) + b.prelude + b.source + b.main);
+  const blocks = [["CNParams", 0], ["CNViewB", 1], ["CNLightsB", 2]];
+  for (const [name, slot] of blocks) {
+    const i = gl.getUniformBlockIndex(prog.p, name);
+    if (i !== gl.INVALID_INDEX) gl.uniformBlockBinding(prog.p, i, slot);
+  }
+  const params = new Float32Array(256);
+  b.params.forEach((v, i) => { params[i] = v; });
+  const index = Object.fromEntries(b.param_names.map((n, i) => [n, i]));
+  const ubo = [gl.createBuffer(), gl.createBuffer(), gl.createBuffer()];
+  const lights = new Float32Array(b.lights);
+  gl.bindBuffer(gl.UNIFORM_BUFFER, ubo[2]);
+  gl.bufferData(gl.UNIFORM_BUFFER, lights, gl.STATIC_DRAW);
+  const toWorld = b.object_matrix, toLocal = invert4(toWorld);
+  const vao = gl.createVertexArray();
+  const sys = { b, params, index, time: 0, frame: 0, steps: 0 };
+  sys.start = () => {};
+  sys.advance = () => { sys.time += 1 / b.fps; sys.frame++; };
+  sys.draw = (viewProj, eye) => {
+    params[255] = sys.time;                                     // uSceneTime
+    const view = new Float32Array(16 * 3 + 4 * 7);
+    view.set(invert4(viewProj), 0); view.set(toLocal, 16); view.set(toWorld, 32);
+    view.set([...b.sun], 48); view.set(b.sun_color, 52);
+    view.set([...b.bounds[0], b.scale], 56); view.set([...b.bounds[1], b.fog], 60);
+    view.set([...b.surface_color.slice(0, 3), 1], 64);
+    view.set([sys.time, sys.frame, b.shadows ? 1 : 0, b.ao ? 1 : 0], 68);
+    view.set([b.sky ? 1 : 0, 0, 0, 0], 72);
+    gl.bindBuffer(gl.UNIFORM_BUFFER, ubo[0]); gl.bufferData(gl.UNIFORM_BUFFER, params, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.UNIFORM_BUFFER, ubo[1]); gl.bufferData(gl.UNIFORM_BUFFER, view, gl.DYNAMIC_DRAW);
+    ubo.forEach((u, i) => gl.bindBufferBase(gl.UNIFORM_BUFFER, i, u));
+    gl.useProgram(prog.p);
+    gl.uniformMatrix4fv(prog.u.cnViewProj, false, viewProj);
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.depthMask(true);
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+  return sys;
+}
+
+// Run one or more CodeNodes systems (bundles: particles and surfaces) in a canvas, with one camera.
 export async function runParticles(canvas, bundles, opts = {}) {
   const list = Array.isArray(bundles) ? bundles : [bundles];
-  const gl = canvas.getContext("webgl2", { antialias: true, premultipliedAlpha: false, alpha: true });
+  const gl = canvas.getContext("webgl2", { antialias: true, premultipliedAlpha: false, alpha: true, depth: true });
   if (!gl) throw new Error("CodeNodes: this browser has no WebGL2");
   if (!gl.getExtension("EXT_color_buffer_float")) throw new Error("CodeNodes: float render targets unsupported");
-  const systems = list.map((b) => makeSystem(gl, b));
+  const systems = list.map((b) => (b.kind === "surface" ? makeSurface(gl, b) : makeSystem(gl, b)));
   const first = list[0];
-  const fps = first.fps;
+  const fps = (list.find((b) => b.kind !== "surface") || first).fps;
 
   // the camera: Blender's, as exported, orbiting its target (drag to turn, wheel to zoom)
   const v = opts.view || first.view;
@@ -332,7 +423,7 @@ export async function runParticles(canvas, bundles, opts = {}) {
 
   for (const s of systems) s.start();
   let last = performance.now(), acc = 0, running = true;
-  const stats = { frames: 0, get steps() { return systems.reduce((n, s) => n + s.steps, 0); } };
+  const stats = { frames: 0, get steps() { return systems.reduce((n, s) => n + (s.steps || 0), 0); } };
   function tick(now) {
     if (!running) return;
     acc += Math.min(0.1, (now - last) / 1000) * (opts.speed ?? 1);
