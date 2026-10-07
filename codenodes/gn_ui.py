@@ -332,8 +332,8 @@ class CODENODES_OT_gn_rebuild(bpy.types.Operator):
 class CODENODES_OT_export_web(bpy.types.Operator):
     bl_idname = "codenodes.export_web"
     bl_label = "Export Live Web Page"
-    bl_description = ("Write a web page that runs this object's GPU particles and surfaces live in the browser (WebGL2): the "
-                      "chains' and surfaces' own code, with their sliders as page controls")
+    bl_description = ("Write a web page that runs this object's code nodes (particles, surfaces, mesh chains) live in the browser (WebGL2): the "
+                      "nodes' own code, with their sliders as page controls")
     filepath: StringProperty(subtype='FILE_PATH', default="codenodes_live/index.html")
 
     @classmethod
@@ -546,7 +546,7 @@ class CODENODES_PT_gn(bpy.types.Panel):
             row.operator("codenodes.explode", text="Explode", icon='MOD_EXPLODE')
         if s.kind in gn_link.GPU_KINDS:
             row.operator(CODENODES_OT_gn_add_make_real.bl_idname, text="Add To Geometry", icon='MESH_DATA')
-        if s.kind in ('PARTICLES', 'STAGE'):
+        if s.kind in ('PARTICLES', 'STAGE', 'MESH', 'DEFORM'):
             layout.operator(CODENODES_OT_export_web.bl_idname, icon='WORLD')
         if s.last_error:
             box = layout.box()

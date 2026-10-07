@@ -14,7 +14,10 @@
   - tests/test_webgl.py checks the packaging; WebBlend's tests/browser_codenodes.mjs runs it in Chrome.
   - **GPU Surfaces too:** the raymarcher runs as one fragment shader at the page's resolution (the SDF, its
     `color(p)`, the sun or the scene's lights and a material when wired in, soft shadows, ambient occlusion,
-    fog) and writes depth, so particles pass behind a castle. GPU Mesh chains don't go to the web yet.
+    fog) and writes depth, so particles pass behind a castle.
+  - **Mesh chains too** (GPU Mesh nodes, and warps or deforms heading a chain from plain geometry): the
+    mesh the chain receives is shipped once and its `deform` runs in the vertex shader each frame. The
+    whole Windy Meadow runs on a page: swaying grass, smoke and fireflies, one Wind Field slider for all.
 
 ## 0.6.0 (release candidate): the modular workflow
 

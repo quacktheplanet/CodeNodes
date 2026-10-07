@@ -110,7 +110,31 @@ def main():
         webgl.host_bundles(bpy.data.objects.new("Empty", None))
         check(False, "an object with no particles is refused")
     except webgl.NotPackable as exc:
-        check("shows no CodeNodes particles" in str(exc), "an object with no particles is refused, saying why")
+        check("shows no CodeNodes particles" in str(exc), "an object with no code nodes is refused, saying why")
+    # a mesh chain: a grid swayed by the same wind (a stage heading its own chain from plain geometry)
+    import bmesh
+    me = bpy.data.meshes.new("Grid")
+    bm = bmesh.new()
+    bmesh.ops.create_grid(bm, x_segments=20, y_segments=20, size=2.0)
+    bm.to_mesh(me)
+    bm.free()
+    field = bpy.data.objects.new("Field", me)
+    bpy.context.scene.collection.objects.link(field)
+    ftree = bpy.data.node_groups.new("Field Nodes", "GeometryNodeTree")
+    ftree.interface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+    ftree.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    gin, gout = ftree.nodes.new("NodeGroupInput"), ftree.nodes.new("NodeGroupOutput")
+    field.modifiers.new("GeometryNodes", 'NODES').node_group = ftree
+    g, err = gn_link.create('STAGE', "Sway by Field")
+    sway = gn_link.insert(ftree, g, (0, 0))
+    ftree.links.new(gin.outputs[0], sway.inputs["Mesh"])
+    for _ in range(6):
+        gn_link.sync()
+        live._flush()
+    mb = webgl.host_bundles(field)
+    check([b["kind"] for b in mb] == ["mesh"] and mb[0]["vertices"] == 441 and mb[0]["triangles"] == 800
+          and "void deform(inout Vertex v)" in mb[0]["source"],
+          f"a mesh chain is packaged with the mesh it receives ({mb[0]['vertices']} vertices, {mb[0]['triangles']} triangles)")
     print(f"\nALL {_checks} CHECKS PASSED", flush=True)
 
 

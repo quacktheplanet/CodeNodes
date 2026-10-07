@@ -8,8 +8,9 @@ look, warp, functions, lists, use lines) and the same helpers, with the sliders 
 buffer. Only the stepper differs (webgl_runtime.js). WebBlend's CodeNodes target calls particle_bundle
 and ships webgl_runtime.js with the page.
 
-Particles and GPU Surfaces (raymarched, lit by the scene's lights or a material when they're wired in);
-GPU Mesh chains aren't packaged yet.
+Particles, GPU Surfaces (raymarched, lit by the scene's lights or a material when they're wired in) and
+mesh chains (GPU Mesh nodes, and warps or deforms heading a chain: the incoming mesh is shipped once and
+the chain's deform runs in the vertex shader).
 """
 
 from __future__ import annotations
@@ -284,6 +285,54 @@ def surface_bundle(src, host, scene=None):
     }
 
 
+WEB_MAX_VERTICES = 2_000_000
+
+
+def mesh_bundle(src, host, scene=None):
+    """The JSON-ready bundle for a mesh chain (a GPU Mesh node, or a warp or deform heading a chain): the mesh
+    it receives (positions, normals, triangles) and the chain's deform code."""
+    import bpy
+    import numpy as np
+    from . import deform, gpu_live, links, live
+    from .particles import NOISE_PRELUDE
+    from .sdf_code import PRELUDE, param_defines, parse_params
+    scene = scene or bpy.context.scene
+    live._flush()
+    bpy.context.view_layer.update()
+    got = gpu_live.deform_input(src, fresh=True)
+    if got is None or len(got[0]) == 0:
+        raise NotPackable(f"'{src.name}' has no mesh coming in yet")
+    co, nrm, tris, _key = got
+    if len(co) > WEB_MAX_VERTICES:
+        raise NotPackable(f"'{src.name}' deforms {len(co):,} vertices; the web limit is {WEB_MAX_VERTICES:,}")
+    comp, values = links.composite(src)
+    params = parse_params(comp.source)
+    fps = scene.render.fps / (scene.render.fps_base or 1.0)
+    m = [host.matrix_world[r][c] for c in range(4) for r in range(4)]
+    radius = float(np.abs(co).max()) * (sum(v.length for v in host.matrix_world.to_3x3().col) / 3.0)
+    by_slot = {key: (node, name) for node, name, key in comp.slots}
+    sliders = []
+    for p in params:
+        if p.name in by_slot and not p.name.endswith("__i"):
+            node, name = by_slot[p.name]
+            sliders.append({"name": p.name, "label": name, "node": node.replace("CN · ", ""), "min": p.min,
+                            "max": p.max, "value": float(values.get(p.name, p.default))})
+    return {
+        "format": "codenodes-mesh", "version": 1, "kind": "mesh",
+        "name": src.name.replace("CN · ", ""),
+        "prelude": PRELUDE + NOISE_PRELUDE + deform.VERTEX_PRELUDE + param_defines(params),
+        "source": comp.source,
+        "params": [float(values.get(p.name, p.default)) for p in params], "param_names": [p.name for p in params],
+        "vertices": int(len(co)), "triangles": int(len(tris)),
+        "positions": _b64(np.asarray(co, np.float32)), "normals": _b64(np.asarray(nrm, np.float32)),
+        "indices": base64.b64encode(np.ascontiguousarray(tris, dtype=np.uint32).tobytes()).decode("ascii"),
+        "object_matrix": m, "fps": float(fps),
+        "view": _view(host, scene, radius),
+        "background": [0.0, 0.0, 0.0, 1.0],
+        "sliders": sliders,
+    }
+
+
 def host_bundles(host, scene=None):
     """Bundles for every particle pipeline drawn on `host` (an object whose Geometry Nodes hold code nodes):
     each chain from a source, branches included. Raises NotPackable when it has none."""
@@ -300,12 +349,13 @@ def host_bundles(host, scene=None):
             continue
         kind = links.ekind(obj)
         if kind == 'MESH':
-            out.append(surface_bundle(obj, host, scene))          # surfaces first: particles draw over them
+            out.append(surface_bundle(obj, host, scene))          # solid things first: particles draw over them
+        elif kind == 'DEFORM':
+            out.append(mesh_bundle(obj, host, scene))
     for name in sorted(names):
         obj = bpy.data.objects.get(name)
         if obj is not None and links.ekind(obj) == 'PARTICLES':
             out.append(particle_bundle(obj, host, scene))
     if not out:
-        raise NotPackable(f"'{host.name}' shows no CodeNodes particles or GPU Surfaces (GPU Mesh chains don't run "
-                          f"on the web yet)")
+        raise NotPackable(f"'{host.name}' shows no CodeNodes particles, surfaces or mesh chains")
     return out

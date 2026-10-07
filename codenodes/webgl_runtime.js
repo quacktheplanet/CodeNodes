@@ -379,15 +379,93 @@ function makeSurface(gl, b) {
   return sys;
 }
 
-// Run one or more CodeNodes systems (bundles: particles and surfaces) in a canvas, with one camera.
+// ---- Mesh chains: deform(v) in the vertex shader, flat normals from screen derivatives ----
+const MESH_VS_MAIN = `
+in vec3 cnInPos;
+in vec3 cnInNrm;
+uniform mat4 cnViewProj, cnModel;
+out vec3 vWorld;
+out vec4 vColor;
+void main() {
+  Vertex v;
+  v.position = cnInPos; v.normal = cnInNrm; v.color = vec4(1.0); v.value = 0.0; v.index = float(gl_VertexID);
+  deform(v);
+  vec4 w = cnModel * vec4(v.position, 1.0);
+  vWorld = w.xyz;
+  vColor = v.color;
+  gl_Position = cnViewProj * w;
+}
+`;
+const MESH_FS = `#version 300 es
+precision highp float;
+in vec3 vWorld;
+in vec4 vColor;
+out vec4 fragColor;
+void main() {
+  vec3 n = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+  float l = 0.35 + 0.65 * max(dot(n, normalize(vec3(0.4, -0.3, 0.85))), 0.0);
+  fragColor = vec4(pow(vColor.rgb * l, vec3(1.0 / 2.2)), 1.0);
+}
+`;
+
+function makeMesh(gl, b) {
+  const vs = `#version 300 es
+precision highp float;
+precision highp int;
+uniform CNParams { vec4 v[64]; } cnParams;
+uniform float uTime, uFrame;
+` + b.prelude + b.source + MESH_VS_MAIN;
+  const prog = program(gl, vs, MESH_FS);
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  for (const [name, data] of [["cnInPos", b.positions], ["cnInNrm", b.normals]]) {
+    const loc = gl.getAttribLocation(prog.p, name);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, decode(data), gl.STATIC_DRAW);
+    if (loc >= 0) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0); }
+  }
+  const ibuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibuf);
+  const bin = atob(b.indices), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(bytes.buffer), gl.STATIC_DRAW);
+  gl.bindVertexArray(null);
+  const params = new Float32Array(256);
+  b.params.forEach((v, i) => { params[i] = v; });
+  const index = Object.fromEntries(b.param_names.map((n, i) => [n, i]));
+  const ubo = gl.createBuffer();
+  const sys = { b, params, index, time: 0, frame: 0, steps: 0 };
+  sys.start = () => {};
+  sys.advance = () => { sys.time += 1 / b.fps; sys.frame++; };
+  sys.draw = (viewProj) => {
+    params[255] = sys.time;
+    gl.bindBuffer(gl.UNIFORM_BUFFER, ubo); gl.bufferData(gl.UNIFORM_BUFFER, params, gl.DYNAMIC_DRAW);
+    gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, ubo);
+    gl.useProgram(prog.p);
+    gl.uniformMatrix4fv(prog.u.cnViewProj, false, viewProj);
+    gl.uniformMatrix4fv(prog.u.cnModel, false, b.object_matrix);
+    if (prog.u.uTime) gl.uniform1f(prog.u.uTime, sys.time);
+    if (prog.u.uFrame) gl.uniform1f(prog.u.uFrame, sys.frame);
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.depthMask(true);
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(vao);
+    gl.drawElements(gl.TRIANGLES, b.triangles * 3, gl.UNSIGNED_INT, 0);
+    gl.bindVertexArray(null);
+  };
+  return sys;
+}
+
+// Run one or more CodeNodes systems (bundles: particles, surfaces, mesh chains) in a canvas, with one camera.
 export async function runParticles(canvas, bundles, opts = {}) {
   const list = Array.isArray(bundles) ? bundles : [bundles];
   const gl = canvas.getContext("webgl2", { antialias: true, premultipliedAlpha: false, alpha: true, depth: true });
   if (!gl) throw new Error("CodeNodes: this browser has no WebGL2");
   if (!gl.getExtension("EXT_color_buffer_float")) throw new Error("CodeNodes: float render targets unsupported");
-  const systems = list.map((b) => (b.kind === "surface" ? makeSurface(gl, b) : makeSystem(gl, b)));
+  const make = { surface: makeSurface, mesh: makeMesh };
+  const systems = list.map((b) => (make[b.kind] || makeSystem)(gl, b));
   const first = list[0];
-  const fps = (list.find((b) => b.kind !== "surface") || first).fps;
+  const fps = (list.find((b) => b.kind === "particles") || first).fps;
 
   // the camera: Blender's, as exported, orbiting its target (drag to turn, wheel to zoom)
   const v = opts.view || first.view;
