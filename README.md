@@ -156,6 +156,10 @@ Pull a script apart, share the pieces, and let each node use them its own way.
   both wired into what's left of Drift. Right-click › Collapse Into Code puts them back exactly.
   Any code nodes can be grouped with Ctrl+G too, and chains run straight through the group.
 
+![The meadow's node tree: Wind Field used by 3, the Lanterns List, Drift exploded](docs/meadow_nodes.jpg)
+
+![Inside the exploded Drift: its CALM constant as a Value node and loop() as a node of its own](docs/meadow_exploded.jpg)
+
 ## A bigger example: the Galaxy
 
 The firefly chain is one line of nodes. The Galaxy scene (`examples/galaxy_demo.py` builds it, and

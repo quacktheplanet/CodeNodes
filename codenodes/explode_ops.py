@@ -101,9 +101,11 @@ def explode_node(tree, node):
     gn_link.sync()                                       # the node's sockets follow its new code
     core = _core(group)
     made = {}
-    x0 = core.location.x - 420
+    gin = next(n for n in group.nodes if n.type == 'GROUP_INPUT')
+    gin.location = (core.location.x - 760, core.location.y)       # inputs on the left, pieces in a column
+    x0 = core.location.x - 420                                     # between them and the node, going down
     for k, p in enumerate(e.pieces):
-        loc = (x0 - 260 * (k % 2), core.location.y - 40 - 170 * k)
+        loc = (x0, core.location.y - 140 - 190 * k)
         if p.kind == 'value':
             if p.item.type == "int":
                 n = group.nodes.new("FunctionNodeInputInt")
