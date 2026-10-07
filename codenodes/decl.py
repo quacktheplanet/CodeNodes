@@ -6,7 +6,9 @@ A code node is a node you write on the fly. The code says which sockets the node
     // @in  int   count 3 1 10           a whole number
     // @in  color tint 1.0 0.6 0.2       a colour
     // @in  func  vec3 wind(vec3 p)      a function input: wire a function in, call wind(p)
-                                         (`= 1e9` after it: what it returns when nothing is wired)
+                                         (`= 1e9` after it: what it returns when nothing is wired;
+                                         `use: wind(p) * 0.4` after that: how this node uses what's
+                                         wired in, shown and edited on the node as its use line)
     // @out func  field                  your function `field` becomes an output socket
     // @out attr  brightness 1.0         a per-particle value later nodes (and Geometry Nodes) can read
     // @shape firefly                    how a Look node draws each particle: point, glow or firefly
@@ -43,14 +45,30 @@ MAX_ATTRS = 4
 
 
 class FuncIn:
-    __slots__ = ("name", "ret", "args", "line", "default")
+    __slots__ = ("name", "ret", "args", "line", "default", "use")
 
-    def __init__(self, name, ret, args, line, default=None):
+    def __init__(self, name, ret, args, line, default=None, use=None):
         self.name, self.ret, self.args, self.line = name, ret, args, line
         self.default = default        # what it returns when nothing is wired in (None: zero)
+        self.use = use                # how this node uses it: an expression, or None for as it is
 
     def signature(self):
         return f"{self.ret} {self.name}({self.args})"
+
+    def arg_names(self):
+        return arg_names(self.args)
+
+    def plain_use(self):
+        """The use line that changes nothing: `wind(p, t)`."""
+        return f"{self.name}({', '.join(self.arg_names())})"
+
+    def use_line(self):
+        """The use line as shown on the node: the written one, or the plain call."""
+        return self.use or self.plain_use()
+
+    def wraps(self):
+        """True when the use line does more than call the function as it is."""
+        return self.use is not None and _squash(self.use) != _squash(self.plain_use())
 
 
 class FuncOut:
@@ -105,6 +123,81 @@ _ROLE_SIGS = {
     "deform": r"\bvoid\s+deform\s*\(\s*inout\s+Vertex\s+\w+\s*\)",
     "sdf": r"\bfloat\s+sdf\s*\(\s*vec3\s+\w+\s*\)",
 }
+
+
+def arg_names(args):
+    """`vec3 p, float t` -> ["p", "t"] (qualifiers like `in` are skipped)."""
+    names = []
+    for a in args.split(","):
+        bits = a.split()
+        if len(bits) >= 2:
+            names.append(re.sub(r"\[.*$", "", bits[-1]))
+    return names
+
+
+def arg_types(args):
+    """`in vec3 p, float t` -> ["vec3", "float"]."""
+    types = []
+    for a in args.split(","):
+        bits = [b for b in a.split() if b not in ("in", "const", "highp", "mediump", "lowp")]
+        if bits:
+            types.append(bits[0])
+    return types
+
+
+def _squash(expr):
+    return re.sub(r"\s+", "", expr)
+
+
+_USE = re.compile(r"\s+use:\s*(.*?)\s*$")
+
+
+def use_ok(expr):
+    """"" if a use line can go into the code, else why not (it must be one expression on one line)."""
+    if not expr.strip():
+        return "the use line is empty"
+    if "\n" in expr or "//" in expr or ";" in expr or '"' in expr:
+        return "a use line is one expression: no ';', comments or quotes"
+    depth = 0
+    for ch in expr:
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        if depth < 0:
+            break
+    if depth != 0:
+        return "the brackets in the use line don't match"
+    return ""
+
+
+def set_use(source, name, expr):
+    """The code with function input `name`'s use line set to `expr` (None or the plain call removes it).
+    Raises SdfCodeError if there's no such input or the expression can't go on the line."""
+    expr = expr.strip() if expr else None
+    for i, line in enumerate(source.splitlines()):
+        m = DECL_LINE.match(line)
+        if not m or m.group(1) != "in":
+            continue
+        rest, desc = split_description(m.group(2).strip())
+        fm = re.fullmatch(rf"func\s+({_NAME})\s+({_NAME})\s*\(([^)]*)\)(.*)", rest)
+        if not fm or fm.group(2) != name:
+            continue
+        tail = _USE.sub("", fm.group(4))
+        if expr is not None:
+            why = use_ok(expr)
+            if why:
+                raise SdfCodeError(why)
+            f = FuncIn(name, fm.group(1), fm.group(3).strip(), 0, use=expr)
+            if not f.wraps():
+                expr = None
+        indent = line[:len(line) - len(line.lstrip())]
+        new = f"{indent}// @in func {fm.group(1)} {name}({fm.group(3).strip()}){tail.rstrip()}"
+        if expr is not None:
+            new += f" use: {expr}"
+        if desc:
+            new += f'  "{desc}"'
+        lines = source.splitlines()
+        lines[i] = new
+        return "\n".join(lines) + ("\n" if source.endswith("\n") else "")
+    raise SdfCodeError(f"the code has no function input called '{name}'")
 
 
 def roles(source):
@@ -181,11 +274,19 @@ def parse(source):
                 raise SdfCodeError(f"line {n}: write it as  // @in float name default [min max]")
             kind = bits[0]
             if kind == "func":
-                fm = re.fullmatch(rf"func\s+({_NAME})\s+({_NAME})\s*\(([^)]*)\)\s*(?:=\s*(.+?))?\s*", rest)
+                um = _USE.search(rest)
+                use = um.group(1) if um else None
+                head = rest[:um.start()] if um else rest
+                fm = re.fullmatch(rf"func\s+({_NAME})\s+({_NAME})\s*\(([^)]*)\)\s*(?:=\s*(.+?))?\s*", head)
                 if not fm:
                     raise SdfCodeError(f"line {n}: a function input is  // @in func vec3 name(vec3 p)"
-                                       f"  (optionally followed by  = what it returns when unwired)")
-                d.func_ins.append(FuncIn(fm.group(2), fm.group(1), fm.group(3).strip(), n, fm.group(4)))
+                                       f"  (optionally followed by  = what it returns when unwired, then"
+                                       f"  use: how this node uses it)")
+                if use is not None:
+                    why = use_ok(use)
+                    if why:
+                        raise SdfCodeError(f"line {n}: {why}")
+                d.func_ins.append(FuncIn(fm.group(2), fm.group(1), fm.group(3).strip(), n, fm.group(4), use))
             elif kind in ("float", "int"):
                 nm = re.fullmatch(rf"(?:float|int)\s+({_NAME})\s+({_NUM})(?:\s+({_NUM})\s+({_NUM}))?\s*", rest)
                 if not nm:

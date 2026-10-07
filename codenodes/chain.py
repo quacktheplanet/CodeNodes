@@ -21,7 +21,8 @@ the entry points the GPU runs:
 
 Function inputs (`// @in func vec3 wind(vec3 p)`) are wired to another node's function output
 (`// @out func field`); the provider's code is included once with its own prefix and the input name
-becomes an alias for it. Per-particle attributes (`// @out attr brightness 1.0`) share one vec4 of
+becomes an alias for it. A use line (`... use: wind(p) * 0.4`) wraps the alias in that expression, so
+each node that shares one function decides what it means to that node. Per-particle attributes (`// @out attr brightness 1.0`) share one vec4 of
 state per particle, so any later node can read or write `p.brightness`.
 
 Pure Python: the composite is plain text, compiled by particles.py / deform.py.
@@ -187,20 +188,30 @@ class _Builder:
                 code, sep, comment = line.partition("//")       # comments keep the names you wrote
                 lines.append(pat.sub(lambda m: renames[m.group(1)], code) + sep + comment)
             body = "\n".join(lines)
-        # function inputs: an alias for the provider wired in, or a stand-in that returns zero
+        # function inputs: an alias for the provider wired in, or a stand-in that returns zero. A use
+        # line (`use: wind(p) * 0.4`) wraps it: the code keeps calling wind(p) and gets the use line's
+        # value, so each node decides what a shared function means to it.
         for f in d.func_ins:
+            raw = f"{prefix}{f.name}_in" if f.wraps() else prefix + f.name
             link = u.funcs.get(f.name)
             if link is not None:
                 provider, export = link
                 pprefix = self.provider(provider)
                 pd = provider.decls
-                if export not in [o.name for o in pd.func_outs]:
+                out = next((o for o in pd.func_outs if o.name == export), None)
+                if out is None:
                     raise SdfCodeError(f"node '{u.name}': input '{f.name}' is wired to '{provider.name}', "
                                        f"which has no function output called '{export}'")
-                self.add(f"#define {prefix}{f.name} {pprefix}{export}\n")
+                if (out.ret, decl.arg_types(out.args)) != (f.ret, decl.arg_types(f.args)):
+                    self.out.warnings.append(
+                        f"'{u.name}': input '{f.name}' takes {f.ret} {f.name}({f.args}) but "
+                        f"'{provider.name}' gives {out.ret} {export}({out.args})")
+                self.add(f"#define {raw} {pprefix}{export}\n")
             else:
                 zero = f"{f.ret}({f.default})" if f.default else _ZERO.get(f.ret, f"{f.ret}(0.0)")
-                self.add(f"{f.ret} {prefix}{f.name}({f.args}) {{ return {zero}; }}\n")
+                self.add(f"{f.ret} {raw}({f.args}) {{ return {zero}; }}\n")
+            if f.wraps():
+                self.use_line(u, f, prefix, raw, renames)
         for a in d.attrs:
             if a.name not in [x[0] for x in self.out.attrs]:
                 if len(self.out.attrs) >= decl.MAX_ATTRS:
@@ -208,6 +219,22 @@ class _Builder:
                 self.out.attrs.append((a.name, a.default))
         self.add(body + "\n", owner=u.name, code=u.code.splitlines())
         return d
+
+    def use_line(self, u, f, prefix, raw, renames):
+        """`vec3 n1_wind(vec3 p) { return <use line>; }`: the node's sliders, the function's arguments
+        and the helpers can appear in it; `wind` itself is what's wired in."""
+        names = dict(renames)
+        names[f.name] = raw
+        for a in f.arg_names():
+            names.pop(a, None)
+        pat = re.compile(r"(?<![.\w])(" + "|".join(map(re.escape, sorted(names, key=len, reverse=True)))
+                         + r")\b")
+        expr = pat.sub(lambda m: names[m.group(1)], f.use)
+        # its compile errors point at the declaration line in the node's own code
+        code = u.code.splitlines()
+        self.out.segments.append((self.line - f.line + 1, self.line, u.name, code))
+        self.chunks.append(f"{f.ret} {prefix}{f.name}({f.args}) {{ return {expr}; }}\n")
+        self.line += 1
 
     def provider(self, p):
         """Include a function provider's code once; returns its prefix."""

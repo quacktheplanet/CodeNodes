@@ -25,7 +25,7 @@ BACKGROUND="test_gn test_gn_library test_web test_factory_blender test_geonodes_
 # test_bake saves the .blend that test_farm opens, so it runs first
 HEADLESS="test_bake test_blender test_volume test_shape_blender test_particles test_galaxy test_bake_nodes test_gn_link
           test_nodes test_agent test_server test_link"
-GPU_BACKGROUND="test_cli_render"      # plain -b scripts that use the GPU
+GPU_BACKGROUND="test_cli_render test_uses"      # plain -b scripts that use the GPU
 WINDOW_ONLY="test_gpu_nodes test_modular test_graph_chains test_live_preview test_render_f12"
 
 want() { [ ${#ONLY[@]} -eq 0 ] && return 0; for o in "${ONLY[@]}"; do [ "$o" = "$1" ] && return 0; done; return 1; }

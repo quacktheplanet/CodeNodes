@@ -25,6 +25,23 @@ def scene_time(scene=None):
     return (scene.frame_current - scene.frame_start) / fps, scene.frame_current
 
 
+def chain_warnings(obj, heads):
+    """What the chains `obj` is in say about it (e.g. a function wired in with the wrong signature)."""
+    from . import links
+    out = []
+    for h in heads:
+        ho = bpy.data.objects.get(h)
+        if ho is None:
+            continue
+        try:
+            comp, _values = links.composite(ho)
+        except SdfCodeError:
+            continue
+        out += [w.replace(f"'{obj.name}': ", "") for w in comp.warnings
+                if w.startswith(f"'{obj.name}'") and w not in out]
+    return out
+
+
 def compute_object(obj):
     """(MeshResult, stats) for this object at the current frame. Raises SdfCodeError."""
     s = obj.codenodes

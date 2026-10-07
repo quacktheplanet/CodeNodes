@@ -57,6 +57,16 @@ def heads_of(obj):
     return STAGE_HEADS.get(obj.name, [])
 
 
+def users_of(provider):
+    """The nodes a function provider's outputs are wired into (each node once)."""
+    out = []
+    for info in CHAINS.values():
+        for (consumer, _inp), (prov, _exp) in info.get("funcs", {}).items():
+            if prov == provider and consumer not in out:
+                out.append(consumer)
+    return out
+
+
 def base_name(obj_or_name):
     """The head source a pipeline starts from: itself for a head, the head for a branch."""
     name = obj_or_name if isinstance(obj_or_name, str) else obj_or_name.name

@@ -145,6 +145,11 @@ def code_tips(obj):
         tips_out.setdefault(f.name, f"The function '{f.name}': wire it into a function input of another node")
     for f in d.func_ins:
         tips_in.setdefault(f.name, f"Wire a function here (e.g. from a field node); the code calls {f.name}(…)")
+        args = ", ".join(f.arg_names())
+        tips_in[use_socket(f.name)] = (
+            f"How this node uses what's wired into '{f.name}': one expression, e.g. {f.plain_use()} * 0.4. It can "
+            f"use {f.name}'s arguments ({args or 'none'}), this node's inputs and the helpers. {f.plain_use()} uses "
+            f"it as it is. Kept in the code as  use: …  on the {f.name} line")
     for m in d.materials:
         tips_in.setdefault(m, "A Blender material: its Principled BSDF colours, roughness, metallic and "
                               "emission come into the code")
@@ -233,6 +238,73 @@ def decls_of(obj):
 
 
 STREAM_IN = {"Particles": "NodeSocketBundle", "Mesh": "NodeSocketGeometry"}
+USE = " · use"            # the use line under a function input: "wind · use"
+USES_SEEN = "cn_uses_seen"  # on the source object: the use lines last shown on the node, by input
+
+
+def use_socket(name):
+    return name + USE
+
+
+def _sync_uses(obj, values, user):
+    """Keep each function input's use line the same on the node and in the code, whichever changed.
+    True if the code changed."""
+    from . import decl
+    from .sdf_code import SdfCodeError
+    s = obj.codenodes
+    if s.text is None:
+        return False
+    d = decls_of(obj)
+    if not d.func_ins:
+        return False
+    seen = dict(obj.get(USES_SEEN, {}))
+    code = s.text.as_string()
+    changed = False
+    for f in d.func_ins:
+        in_code = f.use_line()
+        typed = values.get(use_socket(f.name))
+        typed = typed.strip() if isinstance(typed, str) else None
+        last = seen.get(f.name)
+        # a new socket starts with the code's use line, so a different value was typed on the node
+        if typed and typed != (last if last is not None else in_code) and typed != in_code:
+            try:                                   # typed on the node: it goes into the code
+                code = decl.set_use(code, f.name, typed)
+                seen[f.name] = typed
+                changed = True
+            except SdfCodeError as exc:
+                s.last_error = f"use line of '{f.name}': {exc}"
+                seen[f.name] = typed               # don't retry until it's edited again
+            continue
+        if in_code != last or (typed is not None and typed != in_code):
+            seen[f.name] = in_code                 # the code changed (or a new node): the node follows
+            _set_input(user, use_socket(f.name), in_code)
+    if changed:
+        s.text.from_string(code)
+    if seen != dict(obj.get(USES_SEEN, {})):
+        obj[USES_SEEN] = seen
+    return changed
+
+
+def _set_input(user, name, value):
+    """Set an unlinked input's value on a group node or a modifier."""
+    if user is None:
+        return
+    from . import mod_inputs
+    kind, _owner, thing = user
+    try:
+        if kind == 'node':
+            sock = thing.inputs.get(name)
+            if sock is not None and not sock.is_linked and sock.default_value != value:
+                sock.default_value = value
+        else:
+            item = next((i for i in thing.node_group.interface.items_tree
+                         if i.item_type == 'SOCKET' and i.in_out == 'INPUT' and i.name == name), None)
+            if item is not None:
+                inputs = mod_inputs.of(thing)
+                if inputs.get(item.identifier) != value:
+                    inputs[item.identifier] = value
+    except (AttributeError, TypeError, ReferenceError, KeyError):
+        pass
 
 
 def stream_inputs(obj):
@@ -295,6 +367,7 @@ def spec(obj):
             out.append((None, m, "NodeSocketMaterial", None, None, None, None))
         for f in d.func_ins:
             out.append((None, f.name, "NodeSocketClosure", None, None, None, None))
+            out.append((None, use_socket(f.name), "NodeSocketString", f.use_line(), None, None, None))
     if s.kind == 'MESH':
         # a surface can be lit by the scene's lights and take a Blender material's values
         for name in SURFACE_LINKS:
@@ -682,6 +755,8 @@ def apply(obj, values, user=None):
                 changed = True
             except (TypeError, ValueError):
                 pass
+    if s.kind in ('PARTICLES', 'STAGE', 'DEFORM', 'MESH') and _sync_uses(obj, values, user):
+        changed = True
     for p in s.params:
         if p.kind == 'COLOR':
             base, part = p.name[:-2], "rgb".index(p.name[-1])
@@ -767,10 +842,19 @@ def status_line(obj):
         return f"{'live' if live else 'real'} · {_fmt_count(s.count)}"
     if s.kind == 'DEFORM':
         return "live" if live else "real"
+    if s.kind in ('PARTICLES', 'STAGE', 'DEFORM'):
+        from . import links
+        warn = live_mod().chain_warnings(obj, links.heads_of(obj) or [links.base_name(obj)])
+        if warn:
+            return "⚠ " + warn[0][:60]
     if s.kind == 'STAGE':
         from . import links
         if obj.name in links.MESH_HEADS:
             return "live" if live else "real"
+        users = links.users_of(obj.name)
+        d = decls_of(obj)
+        if users and d.func_outs and not d.roles & {"born", "behave", "look", "warp", "deform"}:
+            return f"used by {len(users)}"
         heads = links.heads_of(obj)
         if heads:
             return "in chain"
@@ -778,6 +862,11 @@ def status_line(obj):
         return "function" if d.func_outs and not d.roles & {"born", "behave", "look", "warp", "deform"} \
             else "not connected"
     return "live" if live else "real"
+
+
+def live_mod():
+    from . import live
+    return live
 
 
 def label_for(group, obj):
