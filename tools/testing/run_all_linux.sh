@@ -4,8 +4,9 @@
 #   - background suites (-b) on every Blender listed
 #   - GPU suites in background mode through tests/headless.py, on Blender 5.2 or later only (gpu.init()
 #     starts the GPU without a window; earlier versions have no GPU in -b)
-# Suites that draw the live viewport (or press keys, or undo) still need a window: on Windows use
-# run_all_cn.ps1; they are listed under WINDOW_ONLY and skipped here.
+# Suites that draw the live viewport (or press keys, or undo) need a window: they run when DISPLAY is set
+# (tools/testing/xvfb_linux.sh gives a virtual one with no root; use GPU_BACKEND=vulkan for the real GPU),
+# and are skipped otherwise. On Windows use run_all_cn.ps1.
 #
 #   tools/testing/run_all_linux.sh [-o suite]... [blender ...]
 #   BLENDERS="/opt/blender-5.1.2/blender /opt/blender-5.2.2/blender" tools/testing/run_all_linux.sh
@@ -29,7 +30,7 @@ BACKGROUND="test_gn test_gn_library test_web test_factory_blender test_geonodes_
 HEADLESS="test_bake test_blender test_volume test_shape_blender test_particles test_galaxy test_bake_nodes test_gn_link
           test_nodes test_agent test_server test_link"
 GPU_BACKGROUND="test_cli_render test_uses test_groups"      # plain -b scripts that use the GPU
-WINDOW_ONLY="test_gpu_nodes test_modular test_graph_chains test_live_preview test_render_f12"
+WINDOW_ONLY="test_gpu_nodes test_modular test_graph_chains test_live_preview test_render_f12 test_explode_ui"
 
 want() { [ ${#ONLY[@]} -eq 0 ] && return 0; for o in "${ONLY[@]}"; do [ "$o" = "$1" ] && return 0; done; return 1; }
 result() { grep -aiE "ALL [0-9]+ CHECKS|^FAIL|checks passed" "$1" | head -2 | tr '\n' ' '; }
@@ -61,5 +62,16 @@ for B in "${BLENDERS[@]}"; do
         done
     else
         printf "%-8s %s\n" "$V" "GPU suites skipped: background mode has no GPU before Blender 5.2"
+    fi
+    if [ -n "${DISPLAY:-}" ]; then
+        for s in $WINDOW_ONLY; do
+            want "$s" && [ -f "$T/$s.py" ] || continue
+            log="$LOGS/${V}${GPU_BACKEND:+_$GPU_BACKEND}_$s.log"
+            timeout 1500 "$B" --factory-startup ${BACKEND_ARGS[@]+"${BACKEND_ARGS[@]}"} --enable-event-simulate \
+                --window-geometry 0 0 1600 1000 --python "$T/$s.py" > "$log" 2>&1
+            r=$(result "$log"); printf "%-8s %-24s %s\n" "$V" "$s" "${r:-no result (see $log)}"
+        done
+    else
+        printf "%-8s %s\n" "$V" "window suites skipped: no DISPLAY (tools/testing/xvfb_linux.sh makes one)"
     fi
 done
