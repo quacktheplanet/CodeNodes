@@ -675,12 +675,12 @@ def draw_surface(src, host, region, rv3d, scene):
 
 
 def _usable_depth(ctx, region):
-    """With overlays hidden, the Rendered viewport hands draw handlers a depth buffer of zeros (seen on Blender
-    5.2), so nothing would pass the depth test and live GPU nodes vanish. Then start from an empty depth buffer:
+    """With overlays hidden, the Rendered and Material Preview viewports (EEVEE) hand draw handlers a depth
+    buffer of zeros (seen on Blender 5.2), so nothing would pass the depth test and live GPU nodes vanish. Then start from an empty depth buffer:
     they draw over the rendered scene, still hiding parts of themselves. A real depth buffer is left alone."""
     shading = getattr(getattr(ctx, "space_data", None), "shading", None)
-    if shading is None or shading.type != 'RENDERED':
-        return
+    if shading is None or shading.type not in ('RENDERED', 'MATERIAL'):
+        return                                   # (Solid and Wireframe draw their own depth)
     import gpu
     try:
         fb = gpu.state.active_framebuffer_get()
