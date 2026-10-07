@@ -9,7 +9,10 @@
 #
 #   tools/testing/run_all_linux.sh [-o suite]... [blender ...]
 #   BLENDERS="/opt/blender-5.1.2/blender /opt/blender-5.2.2/blender" tools/testing/run_all_linux.sh
+#   GPU_BACKEND=vulkan tools/testing/run_all_linux.sh ...   (Blender's --gpu-backend; default: Blender's own)
 set -u
+BACKEND_ARGS=()
+[ -n "${GPU_BACKEND:-}" ] && BACKEND_ARGS=(--gpu-backend "$GPU_BACKEND")
 ENV_BLENDERS="${BLENDERS:-blender}"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 T="$REPO/tests"
@@ -40,8 +43,8 @@ for B in "${BLENDERS[@]}"; do
         | awk '/^CNVER/ {print $2}')
     [ -n "$V" ] || { echo "$B: not a working Blender"; continue; }
     run() {   # run <label> <suite> <args...>
-        local log="$LOGS/${V}_$2.log"
-        timeout 900 "$B" -b --factory-startup "${@:3}" > "$log" 2>&1
+        local log="$LOGS/${V}${GPU_BACKEND:+_$GPU_BACKEND}_$2.log"
+        timeout 900 "$B" -b --factory-startup ${BACKEND_ARGS[@]+"${BACKEND_ARGS[@]}"} "${@:3}" > "$log" 2>&1
         local r; r=$(result "$log"); printf "%-8s %-24s %s\n" "$V" "$2" "${r:-no result (see $log)}"
     }
     for s in $BACKGROUND; do

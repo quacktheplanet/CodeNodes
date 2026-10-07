@@ -36,6 +36,8 @@ The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
 - **Install check on Linux** (tools/testing/install_check_linux.sh): builds the extension zip, installs it
   into a throwaway profile on each Blender, and runs a use line, a List and Explode/Collapse from the
   installed copy. Passes on 5.0.1, 5.1.2 and 5.2.2.
+- **Vulkan:** `GPU_BACKEND=vulkan tools/testing/run_all_linux.sh` runs the suites on Blender's Vulkan backend
+  (headless on 5.2). Every suite passes, so the GPU code compiles under Vulkan's stricter rules too.
 - **The Windy Meadow** (`examples/meadow_demo.py`, docs/meadow_render.jpg): use lines, a List read by
   code and native nodes, and an exploded node, built and rendered with no window on Blender 5.2.
 - Fix: duplicating a code node whose menus weren't built yet no longer raises.
