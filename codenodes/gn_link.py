@@ -769,11 +769,22 @@ def _upstream_x(tree, sock, depth=0):
     return tree, l
 
 
+LIST_TAP = "cn_list_tap"          # on a hidden object that turns a native Geometry Nodes list into a table
+LIST_TABLE = "cn_list_table"      # on it: the list as a List node's code (what the consumer compiles in)
+_list_taps = {}                   # tap object name -> (tree, node name, socket identifier, element type, consumer)
+
+
+def _list_tap_name(consumer, inp):
+    return f"CN List · {consumer} · {inp}"
+
+
 def code_funcs():
     """{(consumer, input): (provider, output)} for every function and list input wired to a code node,
-    across node groups."""
+    across node groups. A list input wired to a native list (Field to List, Get ..., a List node's column
+    through native nodes) gets a list tap as its provider."""
     from . import gn_sockets
     funcs = {}
+    _list_taps.clear()
     for tree in bpy.data.node_groups:
         if tree.bl_idname != "GeometryNodeTree" or TAP in tree:
             continue
@@ -785,12 +796,177 @@ def code_funcs():
                 up = _upstream_x(tree, sock)
                 if up is None:
                     continue
-                l = up[1]
+                ltree, l = up
                 g = l.from_node.node_tree if l.from_node.type == 'GROUP' else None
                 pobj = source_of(g) if g is not None and is_code_group(g) else None
                 if pobj is not None:
                     funcs[(obj.name, sock.name)] = (pobj.name, l.from_socket.name)
+                elif sock.name in list_names and l.from_node.type != 'GROUP_INPUT':
+                    li = next(x for x in gn_sockets.decls_of(obj).lists if x.name == sock.name)
+                    if not li.is_record():
+                        name = _list_tap_name(obj.name, sock.name)
+                        _list_taps[name] = (ltree.name, l.from_node.name, l.from_socket.identifier, li.type,
+                                            obj.name, sock.name)
+                        funcs[(obj.name, sock.name)] = (name, "value")
     return funcs
+
+
+_LIST_TYPES = {"float": ('FLOAT', 'FLOAT', 1), "int": ('INT', 'FLOAT', 1), "vec2": ('VECTOR', 'FLOAT_VECTOR', 2),
+               "vec3": ('VECTOR', 'FLOAT_VECTOR', 3), "vec4": ('RGBA', 'FLOAT_COLOR', 4)}
+
+
+def sync_list_taps():
+    """Keep a hidden object per native list wired into a code node: its Geometry Nodes are the nodes that
+    make the list, then one point per item carrying the item as the attribute 'value'. Its table (the
+    List code the consumer compiles in) is refreshed from what it evaluates to. True if a table changed."""
+    from . import decl
+    col = sources_collection()
+    changed = False
+    for name, (tree_name, node_name, sock_id, etype, consumer, inp) in _list_taps.items():
+        tree = bpy.data.node_groups.get(tree_name)
+        hosts_ = _hosts_of(tree) if tree is not None else []
+        if not hosts_:
+            continue
+        sig = repr((tree_name, node_name, sock_id, etype, _upstream_signature(tree, node_name)))
+        tap = bpy.data.objects.get(name)
+        if tap is None:
+            tap = bpy.data.objects.new(name, hosts_[0].data)
+            col.objects.link(tap)
+            tap[LIST_TAP] = True
+        if tap.data != hosts_[0].data:
+            tap.data = hosts_[0].data
+        if tap.get("cn_sig") != sig:
+            _build_list_tap(tap, tree, node_name, sock_id, etype)
+            tap["cn_sig"] = sig
+        _copy_modifier_values(hosts_[0], tree, tap)
+        _depend_on(consumer, inp, tap)
+        text = _read_list_tap(tap, etype)
+        if text is not None and tap.get(LIST_TABLE) != text:
+            tap[LIST_TABLE] = text
+            changed = True
+    for obj in [o for o in col.objects if o.get(LIST_TAP) and o.name not in _list_taps]:
+        mod = obj.modifiers.get("CodeNodes List")
+        g = mod.node_group if mod is not None else None
+        bpy.data.objects.remove(obj)
+        if g is not None and g.users == 0:
+            bpy.data.node_groups.remove(g)
+    return changed
+
+
+def _upstream_signature(tree, node_name):
+    node = tree.nodes.get(node_name)
+    if node is None:
+        return ""
+    names = {node_name}
+    for sock in node.inputs:
+        names |= _upstream_nodes(tree, sock)
+    parts = []
+    for n in sorted(names):
+        nd = tree.nodes[n]
+        vals = []
+        for i in nd.inputs:
+            v = getattr(i, "default_value", None)
+            try:
+                vals.append(repr(tuple(v)) if hasattr(v, "__len__") and not isinstance(v, str) else repr(v))
+            except TypeError:
+                vals.append(repr(v))
+        props = [repr(getattr(nd, p.identifier, None)) for p in nd.bl_rna.properties
+                 if p.type == 'ENUM' and not p.is_readonly]
+        parts.append(f"{n}:{nd.bl_idname}:{vals}:{props}")
+    parts.append(repr(sorted((l.from_node.name, l.from_socket.identifier, l.to_node.name, l.to_socket.identifier)
+                             for l in tree.links if l.to_node.name in names)))
+    return "|".join(parts)
+
+
+def _build_list_tap(tap, tree, node_name, sock_id, etype):
+    socket_type, attr_type, _size = _LIST_TYPES[etype]
+    old = tap.modifiers.get("CodeNodes List")
+    old_tree = old.node_group if old is not None else None
+    t = tree.copy()
+    t.name = _unique(f".CN List · {tap.name}", bpy.data.node_groups)
+    t[TAP] = tap.name
+    src = t.nodes[node_name]
+    keep = {node_name}
+    for sock in src.inputs:
+        keep |= _upstream_nodes(t, sock)
+    gout = next((n for n in t.nodes if n.type == 'GROUP_OUTPUT'), None)
+    keep.add(gout.name)
+    for n in list(t.nodes):
+        if n.name not in keep:
+            t.nodes.remove(n)
+    out = next(o for o in src.outputs if o.identifier == sock_id)
+    ln, gi = t.nodes.new("GeometryNodeListLength"), t.nodes.new("GeometryNodeListGetItem")
+    for n in (ln, gi):
+        try:
+            n.socket_type = socket_type
+        except (AttributeError, TypeError):
+            pass
+    idx, pts = t.nodes.new("GeometryNodeInputIndex"), t.nodes.new("GeometryNodePoints")
+    store = t.nodes.new("GeometryNodeStoreNamedAttribute")
+    store.data_type = attr_type
+    store.inputs["Name"].default_value = "value"
+    t.links.new(out, ln.inputs[0])
+    t.links.new(out, gi.inputs[0])
+    t.links.new(idx.outputs[0], gi.inputs["Index"])
+    t.links.new(ln.outputs[0], pts.inputs["Count"])
+    t.links.new(pts.outputs[0], store.inputs["Geometry"])
+    t.links.new(gi.outputs[0], store.inputs["Value"])
+    geo_in = next(sk for sk in gout.inputs if sk.bl_idname == "NodeSocketGeometry")
+    for l in [l for l in t.links if l.to_node == gout]:
+        t.links.remove(l)
+    t.links.new(store.outputs[0], geo_in)
+    if old is None:
+        old = tap.modifiers.new("CodeNodes List", 'NODES')
+    old.node_group = t
+    if old_tree is not None and old_tree.users == 0:
+        bpy.data.node_groups.remove(old_tree)
+
+
+def _depend_on(consumer, inp, tap):
+    """An Object Info inside the consumer's group, so Blender evaluates the hidden tap object."""
+    obj = bpy.data.objects.get(consumer)
+    group = next((g for g in bpy.data.node_groups if is_code_group(g) and g.get(TAG) == consumer), None) \
+        if obj is not None else None
+    if group is None:
+        return
+    name = f"List · {inp}"
+    info = group.nodes.get(name)
+    if info is None:
+        info = group.nodes.new("GeometryNodeObjectInfo")
+        info.name = info.label = name
+        info.location = (-150, -400)
+    if info.inputs["Object"].default_value != tap:
+        info.inputs["Object"].default_value = tap
+
+
+def _read_list_tap(tap, etype):
+    """The tap's list as List code, or None if it can't be evaluated yet."""
+    import numpy as np
+    from . import decl
+    dg = bpy.context.evaluated_depsgraph_get()
+    try:
+        gs = tap.evaluated_get(dg).evaluated_geometry()
+    except (AttributeError, RuntimeError, ReferenceError):
+        return None
+    pc = gs.pointcloud
+    size = _LIST_TYPES[etype][2]
+    table = decl.Table()
+    col = decl.Column("value", size)
+    table.columns.append(col)
+    if pc is not None and len(pc.points) and "value" in pc.attributes:
+        n = min(len(pc.points), decl.MAX_ROWS)
+        a = pc.attributes["value"]
+        if size == 1:
+            buf = np.empty(len(pc.points), np.float32)
+            a.data.foreach_get("value", buf)
+            col.values = [float(v) for v in buf[:n]]
+        else:
+            k = 4 if a.data_type == 'FLOAT_COLOR' else 3
+            buf = np.empty(len(pc.points) * k, np.float32)
+            a.data.foreach_get("color" if k == 4 else "vector", buf)
+            buf = buf.reshape(-1, k)[:n, :size]
+            col.values = [tuple(float(x) for x in row) for row in buf]
+    return decl.set_table("// a native list, read by CodeNodes\n// @list\n", table)
 
 
 def upstream_code_node(tree, node, depth=0):
@@ -1452,6 +1628,14 @@ def sync_make_real():
     trees = [t for t in bpy.data.node_groups if t.bl_idname == "GeometryNodeTree" and TAP not in t]
     _holds.clear()
     funcs = code_funcs()
+    try:
+        if sync_list_taps():
+            for (cons, _inp), (prov, _exp) in funcs.items():
+                if prov in _list_taps:
+                    from . import gpu_live
+                    gpu_live.redraw()
+    except Exception:
+        _report_exc()
     all_terminals, all_pipes, all_mesh_heads = {}, {}, set()
     for tree in trees:
         pipes, mesh_heads, terminals = find_pipelines(tree, funcs)

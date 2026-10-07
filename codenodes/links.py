@@ -91,6 +91,9 @@ def pipelines_of(head_name):
 
 
 def _text(obj):
+    table = obj.get("cn_list_table")         # a native list wired into a code node (gn_link list taps)
+    if table is not None:
+        return table
     t = obj.codenodes.text
     return t.as_string() if t is not None else ""
 

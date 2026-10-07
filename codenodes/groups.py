@@ -49,7 +49,7 @@ def copy_node(dst_tree, node, location=None):
     c.label, c.width, c.hide = node.label, node.width, node.hide
     c.location = location if location is not None else node.location
     for src, dst in zip(node.inputs, c.inputs):
-        if hasattr(src, "default_value") and src.identifier == dst.identifier:
+        if hasattr(src, "default_value") and src.identifier == dst.identifier and src.bl_idname != "NodeSocketMenu":
             try:
                 dst.default_value = src.default_value
             except (AttributeError, TypeError, ValueError):

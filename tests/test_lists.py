@@ -200,6 +200,36 @@ def main():
         got = positions(nobj)
         check(len(got) == 3 and np.allclose(got, tvals, atol=1e-5),
               f"native nodes read the List node's columns as real lists ({got.round(2).tolist()})")
+    if native:
+        # a native list (Field to List over Index) wired straight into a code node's list input
+        ftl = tree.nodes.new("GeometryNodeFieldToList")
+        ftl.list_items.new('VECTOR', "p")
+        ftl.inputs["Count"].default_value = 4
+        idx2 = tree.nodes.new("GeometryNodeInputIndex")
+        mul = tree.nodes.new("ShaderNodeMath")
+        mul.operation = 'MULTIPLY'
+        mul.inputs[1].default_value = 0.5
+        comb = tree.nodes.new("ShaderNodeCombineXYZ")
+        tree.links.new(idx2.outputs[0], mul.inputs[0])
+        tree.links.new(mul.outputs[0], comb.inputs["X"])
+        tree.links.new(comb.outputs[0], ftl.inputs["p"])
+        tree.links.new(ftl.outputs[0], near.inputs["pts"])
+        settle(6)
+        comp2, _v = links.composite(head2)
+        check("int n1_pts_count() { return 4; }" in comp2.source
+              and "vec3(0.0, 0.0, 0.0), vec3(0.5, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(1.5, 0.0, 0.0)" in comp2.source,
+              "a native list (Field to List) wired into a code node is read and compiled in")
+        ftl.inputs["Count"].default_value = 6
+        settle(6)
+        comp2, _v = links.composite(head2)
+        check("return 6; }" in comp2.source, "and follows it when the list changes (6 items)")
+        if gpu:
+            p = at(obj, 40)
+            check(len(p) > 0, "the chains still run")
+        tree.links.remove(next(l for l in tree.links if l.to_socket == near.inputs["pts"]))
+        settle(6)
+        left = [o.name for o in bpy.data.objects if o.get("cn_list_tap")]
+        check(not left, f"unwire it and its hidden helper goes ({left})")
     print(f"\nALL {_checks} CHECKS PASSED", flush=True)
 
 

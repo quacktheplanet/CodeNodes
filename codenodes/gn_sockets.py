@@ -167,7 +167,8 @@ def code_tips(obj):
                 tips_in[l.name] = f"{d.descriptions[l.name]} (each row: {what[len('records ('):-1]})"
         else:
             tips_in[l.name] = (f"A list of {what}: wire in a List node"
-                               f"{'' if l.is_record() else ' or one of its columns'}. The code reads "
+                               f"{'' if l.is_record() else ', one of its columns or any list (e.g. Field to List)'}"
+                               f". The code reads "
                                f"{l.name}_count() and {l.name}(i)")
     if d.table is not None:
         rows = len(d.table)

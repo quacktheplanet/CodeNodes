@@ -106,6 +106,10 @@ A code node takes a list with `// @in list`:
 | `// @in list vec3 pts` | one column (float, int, vec2, vec3 or vec4 per row) | `pts_count()`, `pts(i)` |
 | `// @in list Attractor targets` with `struct Attractor { vec3 position; float strength; float radius; };` | a whole List: each field is filled from the column of the same name | `targets_count()`, `targets(i).strength` |
 
+On Blender 5.2 a list input of single values also takes **any native list**: Field to List over a
+mesh's positions, a List node's column passed through Filter or Sort List, and so on. CodeNodes
+evaluates it in a hidden helper and compiles it in the same way (records still come from List nodes).
+
 The table is compiled into the program as constants, so reading a list costs no more than reading a
 number. Edit a row and the chains using it recompile. A field with no column of its name is zero (the
 node shows a ⚠); unwired, a list is empty. Lists hold up to 4096 rows (up to 1024 also become real

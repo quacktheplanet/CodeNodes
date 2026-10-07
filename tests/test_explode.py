@@ -224,6 +224,19 @@ def main():
     check("const float CALM = 0.25;" in code and "vec3(-p.y, p.x, 0.0) * speed * 2.0;" in code
           and "DIRS[i % DIRS.length()]" in code,
           "pieces edited while exploded go back into the code (and arrays are indexed again)")
+    # a particle source with colour and menu inputs (a colour value used to outlive its node and crash)
+    g, err = gn_link.create('PARTICLES', "Swirl")
+    sw = gn_link.insert(tree, g, (0, -600))
+    sw.inputs["Slow / Young"].default_value = (0.2, 0.4, 0.9, 1.0)
+    settle(4)
+    swobj = gn_link.source_of(sw.node_tree)
+    w = explode_ops.explode_node(tree, sw)
+    settle(4)
+    back = explode_ops.collapse_node(tree, w)
+    settle(4)
+    check(swobj.codenodes.text.as_string() == gn_link.template('PARTICLES', "Swirl")
+          and tuple(round(x, 3) for x in back.inputs["Slow / Young"].default_value) == (0.2, 0.4, 0.9, 1.0),
+          "a source with colour and menu inputs explodes and collapses, keeping its colour")
     print(f"\nALL {_checks} CHECKS PASSED", flush=True)
 
 

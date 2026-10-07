@@ -62,7 +62,7 @@ def _expose(group, wnode, core):
         out = next((o for o in gin.outputs if o.identifier == item.identifier), None)
         if out is not None:
             group.links.new(out, sock)
-        if hasattr(sock, "default_value"):
+        if hasattr(sock, "default_value") and sock.bl_idname != "NodeSocketMenu":
             try:
                 wnode.inputs[item.identifier].default_value = sock.default_value
             except (AttributeError, TypeError, ValueError, KeyError):
@@ -191,21 +191,24 @@ def collapse_node(tree, wnode):
     for l in group.links:
         if l.to_node.type == 'GROUP_OUTPUT' and l.from_node == core:
             inner_out[l.to_socket.identifier] = l.from_socket.name
-    values = {inner_in[s.identifier]: s.default_value for s in wnode.inputs
-              if s.identifier in inner_in and hasattr(s, "default_value") and not s.is_linked}
+    # (menus are left out: CodeNodes sets them from the node's settings, and assigning a menu value on a
+    # node whose group was just rebuilt can crash Blender)
+    values = {inner_in[s.identifier]: _plain(s.default_value) for s in wnode.inputs
+              if s.identifier in inner_in and hasattr(s, "default_value") and not s.is_linked
+              and s.bl_idname != "NodeSocketMenu"}
     outer_in = [(l.from_node.name, l.from_socket.identifier, inner_in.get(l.to_socket.identifier))
                 for l in tree.links if l.to_node == wnode]
     outer_out = [(inner_out.get(l.from_socket.identifier), l.to_node.name, l.to_socket.identifier)
                  for l in tree.links if l.from_node == wnode]
     loc = wnode.location.copy()
-    new = groups.copy_node(tree, core, loc)
+    new_name = groups.copy_node(tree, core, loc).name
     tree.nodes.remove(wnode)
     for n in group.nodes:                       # the pieces go; the node itself is now `new`
         if n in used and n.type == 'GROUP':
             _remove_code_node(n.node_tree)
     bpy.data.node_groups.remove(group)
     obj.codenodes.text.from_string(code)
-    new_name = new.name
+    new = tree.nodes[new_name]                 # found again: removing data-blocks can free node pointers
     for name, v in values.items():
         s = new.inputs.get(name)
         if s is not None:
@@ -226,6 +229,11 @@ def collapse_node(tree, wnode):
     gn_link.sync()                          # wired first: a To Geometry left unconnected would reshape itself
     gn_link._dirty[0] = True
     return tree.nodes.get(new_name)
+
+
+def _plain(v):
+    """A socket value copied out (a colour or vector is a view into the socket, gone with its node)."""
+    return tuple(v) if hasattr(v, "__len__") and not isinstance(v, str) else v
 
 
 def _remove_code_node(group):

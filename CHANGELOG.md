@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0 (unreleased): the modular workflow
+## 0.6.0 (release candidate): the modular workflow
 
 The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
 
@@ -30,6 +30,12 @@ The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
   function and list links, values and To Geometry run through the group's sockets
   (tests/test_groups.py: identical results grouped four ways). Double-click a group of code nodes to
   go into it.
+- **Native lists into code nodes** (Blender 5.2): a list input of single values takes any Geometry
+  Nodes list (Field to List over a mesh, Filter / Sort List, ...). A hidden helper evaluates it and the
+  code node compiles it in like a List node's table, following it as it changes.
+- **Install check on Linux** (tools/testing/install_check_linux.sh): builds the extension zip, installs it
+  into a throwaway profile on each Blender, and runs a use line, a List and Explode/Collapse from the
+  installed copy. Passes on 5.0.1, 5.1.2 and 5.2.2.
 - **The Windy Meadow** (`examples/meadow_demo.py`, docs/meadow_render.jpg): use lines, a List read by
   code and native nodes, and an exploded node, built and rendered with no window on Blender 5.2.
 - Fix: duplicating a code node whose menus weren't built yet no longer raises.
