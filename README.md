@@ -313,7 +313,7 @@ Maths turned into a model that is *constructed* rather than sampled. Declare sli
 profile, then spin or push it:
 
 ```
-param height  0.34  0.10 0.80
+param height  0.34  0.10 0.80   # Height of the lamp
 param radius  0.14  0.03 0.40
 
 part shade
@@ -330,7 +330,7 @@ or extruded. Add › Mesh › **Code Shape**, or `api.code_to_shape(source)`.
 
 | command | what it does |
 |---|---|
-| `param name default min max` | a slider |
+| `param name default min max  # tooltip` | a slider (a comment at the end of the line is its tooltip) |
 | `part name [add\|subtract\|intersect]` | a piece, and how it combines with the others |
 | `profile` › `move` `line` `arc` `curve` `close` `shell` | a 2D outline; `shell` gives an open one thickness |
 | `path` › `move` `line` `curve` `helix` | a 3D route to carry a profile along |

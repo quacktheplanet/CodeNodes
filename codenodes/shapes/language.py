@@ -1,6 +1,6 @@
 """The shape language: readable text in, a solid out.
 
-    param height 0.30  0.05 1.0      # a slider, like @param elsewhere in CodeNodes
+    param height 0.30  0.05 1.0      # a slider, like @param elsewhere in CodeNodes; this comment is its tooltip
     param shade  0.16
 
     part shade                       # a named part; parts are joined at the end
@@ -486,10 +486,10 @@ def _build_part(name, ops, scope):
 
 TEMPLATE = """\
 # A desk lamp. Every number can be maths, so the whole thing is one formula.
-param height   0.34   0.10 0.80
-param shade_r  0.14   0.03 0.40
-param stem_r   0.010  0.003 0.05
-param base_r   0.095  0.03 0.30
+param height   0.34   0.10 0.80    # Height of the lamp, in metres
+param shade_r  0.14   0.03 0.40    # Radius of the shade at its rim
+param stem_r   0.010  0.003 0.05   # Thickness of the stem
+param base_r   0.095  0.03 0.30    # Radius of the base
 
 part shade
   profile

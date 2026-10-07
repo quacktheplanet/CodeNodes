@@ -336,9 +336,9 @@ vec3 color(vec3 p) { return vec3(1.0, 0.72, 0.35); }
         "Desk Lamp": None,          # filled in from shapes.TEMPLATE at first use
         "Vase": """\
 # A vase: one curved profile, spun around the vertical axis.
-param height  0.40  0.10 1.00
-param belly   0.12  0.03 0.40
-param neck    0.05  0.02 0.20
+param height  0.40  0.10 1.00   # Height of the vase, in metres
+param belly   0.12  0.03 0.40   # Radius at the widest part of the body
+param neck    0.05  0.02 0.20   # Radius of the opening at the top
 
 part body
   profile

@@ -146,6 +146,14 @@ def code_tips(obj):
     for name, text in d.descriptions.items():
         tips_in[name] = text
         tips_out[name] = text
+    if obj.codenodes.kind == 'SHAPE':
+        # a shape's sliders: the comment at the end of a `param` line is its tooltip
+        t = obj.codenodes.text
+        for line in (t.as_string() if t is not None else "").splitlines():
+            m = re.match(r"^\s*param\s+([A-Za-z_]\w*)[^#]*(?:#\s*(.*\S))?\s*$", line)
+            if m:
+                tips_in[m.group(1)] = m.group(2) or (f"The shape's '{m.group(1)}' (its `param` line in the code). "
+                                                     f"End that line with # and a sentence to make this tooltip")
     for a in d.attrs:
         tips_out.setdefault(a.name, f"The per-particle value '{a.name}' this node writes, as a field: after "
                                     f"To Geometry every point carries it")

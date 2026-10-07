@@ -2967,10 +2967,10 @@ void deform(inout Vertex v) {
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Template | menu |  | Desk Lamp, Vase, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
-| height | float | 0.34 | 0.1 to 0.8 |  |  |
-| shade_r | float | 0.14 | 0.03 to 0.4 |  |  |
-| stem_r | float | 0.01 | 0.003 to 0.05 |  |  |
-| base_r | float | 0.095 | 0.03 to 0.3 |  |  |
+| height | float | 0.34 | 0.1 to 0.8 |  | Height of the lamp, in metres |
+| shade_r | float | 0.14 | 0.03 to 0.4 |  | Radius of the shade at its rim |
+| stem_r | float | 0.01 | 0.003 to 0.05 |  | Thickness of the stem |
+| base_r | float | 0.095 | 0.03 to 0.3 |  | Radius of the base |
 | Smooth | toggle | True |  | Look | Smooth shading on the built model |
 
 **Outputs**
@@ -2983,10 +2983,10 @@ void deform(inout Vertex v) {
 
 ```text
 # A desk lamp. Every number can be maths, so the whole thing is one formula.
-param height   0.34   0.10 0.80
-param shade_r  0.14   0.03 0.40
-param stem_r   0.010  0.003 0.05
-param base_r   0.095  0.03 0.30
+param height   0.34   0.10 0.80    # Height of the lamp, in metres
+param shade_r  0.14   0.03 0.40    # Radius of the shade at its rim
+param stem_r   0.010  0.003 0.05   # Thickness of the stem
+param base_r   0.095  0.03 0.30    # Radius of the base
 
 part shade
   profile
@@ -3026,9 +3026,9 @@ part base
 |---|---|---|---|---|---|
 | ✎ Edit Code | toggle | False |  |  | Opens this node's code in a pop-up Text Editor, then switches itself back off like a button. Double-click the node or press Ctrl+E for the same |
 | Template | menu |  | Desk Lamp, Vase, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
-| height | float | 0.4 | 0.1 to 1 |  |  |
-| belly | float | 0.12 | 0.03 to 0.4 |  |  |
-| neck | float | 0.05 | 0.02 to 0.2 |  |  |
+| height | float | 0.4 | 0.1 to 1 |  | Height of the vase, in metres |
+| belly | float | 0.12 | 0.03 to 0.4 |  | Radius at the widest part of the body |
+| neck | float | 0.05 | 0.02 to 0.2 |  | Radius of the opening at the top |
 | Smooth | toggle | True |  | Look | Smooth shading on the built model |
 
 **Outputs**
@@ -3041,9 +3041,9 @@ part base
 
 ```text
 # A vase: one curved profile, spun around the vertical axis.
-param height  0.40  0.10 1.00
-param belly   0.12  0.03 0.40
-param neck    0.05  0.02 0.20
+param height  0.40  0.10 1.00   # Height of the vase, in metres
+param belly   0.12  0.03 0.40   # Radius at the widest part of the body
+param neck    0.05  0.02 0.20   # Radius of the opening at the top
 
 part body
   profile
