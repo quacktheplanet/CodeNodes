@@ -41,6 +41,8 @@ The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
 - **Install check on Linux** (tools/testing/install_check_linux.sh): builds the extension zip, installs it
   into a throwaway profile on each Blender, and runs a use line, a List and Explode/Collapse from the
   installed copy. Passes on 5.0.1, 5.1.2 and 5.2.2.
+- **Shift A › CodeNodes has submenus**, one per kind of node and per stage section, like Blender's own Add
+  menu. It used to be one long list that ran off a 1080p screen (found in a first-open review).
 - **Every suite runs on Linux, window suites included:** tools/testing/xvfb_linux.sh makes a virtual display
   with no root, and with `GPU_BACKEND=vulkan` the windowed suites (live viewport, F12 / Ctrl+F12 key presses,
   and the new tests/test_explode_ui.py) run on the real GPU. All pass.

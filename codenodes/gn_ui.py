@@ -420,12 +420,39 @@ def show_node_editor(context):
 
 # ---- menus ---------------------------------------------------------------------------------------
 
+def _categories():
+    """[(menu idname, label, icon, [(kind, template)])]: one submenu per kind of node and per stage section,
+    in the order the Add menu shows them."""
+    import re
+    from . import stage_templates
+    cats = []
+    for kind, (label, _desc, icon) in gn_link.KINDS.items():
+        if kind != 'STAGE':
+            cats.append((f"CODENODES_MT_gn_add_{kind.lower()}", label, icon,
+                         [(kind, key) for key in gn_link.TEMPLATES[kind]]))
+    for title, icon, keys in stage_templates.SECTIONS:
+        idname = "CODENODES_MT_gn_add_" + re.sub(r"\W+", "_", title.lower()).strip("_")
+        cats.append((idname, title, icon, [('STAGE', key) for key in keys]))
+    return cats
+
+
+def _category_menu(idname, label, items):
+    def draw(self, context):
+        layout = self.layout
+        layout.operator_context = 'INVOKE_REGION_WIN'
+        for kind, key in items:
+            op = layout.operator(CODENODES_OT_gn_add.bl_idname, text=key)
+            op.kind, op.template = kind, key
+    return type(idname, (bpy.types.Menu,), {"bl_idname": idname, "bl_label": label, "draw": draw})
+
+
 class CODENODES_MT_gn_add(bpy.types.Menu):
+    """Shift A › CodeNodes: the nodes that move streams around, then one submenu per kind of code node (the
+    same layout as Blender's own Add menu, so the list never runs off the screen)."""
     bl_idname = "CODENODES_MT_gn_add"
     bl_label = "CodeNodes"
 
     def draw(self, context):
-        from . import stage_templates
         layout = self.layout
         layout.operator_context = 'INVOKE_REGION_WIN'
         layout.operator(CODENODES_OT_gn_add_make_real.bl_idname, icon='MESH_DATA')
@@ -434,20 +461,13 @@ class CODENODES_MT_gn_add(bpy.types.Menu):
         op = layout.operator(CODENODES_OT_gn_add_flow.bl_idname, text="GPU Cache", icon='DISK_DRIVE')
         op.kind = 'CACHE'
         layout.separator()
-        for kind, (label, _desc, icon) in gn_link.KINDS.items():
-            if kind == 'STAGE':
-                continue
-            layout.label(text=label, icon=icon)
-            for key in gn_link.TEMPLATES[kind]:
-                op = layout.operator(CODENODES_OT_gn_add.bl_idname, text=f"    {key}")
-                op.kind, op.template = kind, key
-            layout.separator()
-        for title, icon, keys in stage_templates.SECTIONS:
-            layout.label(text=title, icon=icon)
-            for key in keys:
-                op = layout.operator(CODENODES_OT_gn_add.bl_idname, text=f"    {key}")
-                op.kind, op.template = 'STAGE', key
-            layout.separator()
+        for n, (idname, label, icon, _items) in enumerate(_categories()):
+            if n == len(gn_link.KINDS) - 1:
+                layout.separator()               # the code nodes you start from, then the stages
+            layout.menu(idname, text=label, icon=icon)
+
+
+_CATEGORY_MENUS = [_category_menu(idname, label, items) for idname, label, _icon, items in _categories()]
 
 
 class CODENODES_PT_gn(bpy.types.Panel):
@@ -654,7 +674,8 @@ def _show_text_beside(win, screen, node_area, text):
 
 classes = (CODENODES_OT_edit_code_popup, CODENODES_OT_gn_add, CODENODES_OT_gn_add_make_real, CODENODES_OT_gn_add_flow, CODENODES_OT_add_object, CODENODES_OT_show_in_gn,
            CODENODES_OT_gn_edit_code, CODENODES_OT_gn_template, CODENODES_OT_gn_rebuild,
-           CODENODES_OT_gn_make_native, CODENODES_OT_open_graph, CODENODES_MT_gn_add, CODENODES_PT_gn)
+           CODENODES_OT_gn_make_native, CODENODES_OT_open_graph, *_CATEGORY_MENUS, CODENODES_MT_gn_add,
+           CODENODES_PT_gn)
 
 
 _keymaps = []

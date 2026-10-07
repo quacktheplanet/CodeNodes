@@ -35,7 +35,7 @@ After installing (see [Install](#install)), open the demo (build it with `exampl
 
 1. Select a mesh (a plane works), open the **Geometry Nodes** editor, and add
    **Shift A › CodeNodes › GPU Particles › Firefly Swarm**. Set its **Emit From** to the plane.
-2. Add **Shift A › CodeNodes › Wander**, **Rise**, **Blink** and **Firefly Look**. Wire each one's
+2. Add **Shift A › CodeNodes › Particle Stages › Wander**, **Rise** and **Blink**, and **Particle Looks › Firefly Look**. Wire each one's
    **Particles** output into the next one's **Particles** input. Fireflies appear in the 3D viewport:
    glowing, blinking, wings flapping, drawn straight from the GPU. The source's header says
    `Firefly Swarm · live · 2.5k`, and each stage says `in chain`.

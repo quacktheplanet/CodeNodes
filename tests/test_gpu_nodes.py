@@ -153,6 +153,9 @@ def phase_menu_and_particles(st):
         def separator(self):
             pass
 
+        def menu(self, idname, text="", icon=''):
+            labels.append(("menu", text))
+
     gn_ui.CODENODES_MT_gn_add.draw(type("M", (), {"layout": L()})(), bpy.context)
     texts = [t for _i, t in labels]
     check(texts[0] == "" and labels[0][0] == "codenodes.gn_add_make_real" and "GPU Particles" in texts
