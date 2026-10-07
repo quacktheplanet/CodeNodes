@@ -19,7 +19,8 @@ $versions = @(
 )
 $windowed = 'test_blender.py', 'test_nodes.py', 'test_bake.py', 'test_volume.py', 'test_particles.py', 'test_agent.py',
             'test_server.py', 'test_shape_blender.py', 'test_bake_nodes.py', 'test_gn_link.py', 'test_link.py',
-            'test_gpu_nodes.py', 'test_modular.py', 'test_graph_chains.py', 'test_gpu_cache.py', 'test_lights.py', 'test_live_preview.py', 'test_galaxy.py', 'test_render_f12.py'
+            'test_gpu_nodes.py', 'test_modular.py', 'test_graph_chains.py', 'test_gpu_cache.py', 'test_lights.py', 'test_live_preview.py', 'test_galaxy.py', 'test_render_f12.py',
+            'test_uses.py', 'test_lists.py', 'test_explode.py', 'test_groups.py', 'test_explode_ui.py'
 $background = 'test_gn.py', 'test_gn_library.py', 'test_web.py', 'test_farm.py', 'test_factory_blender.py',
               'test_geonodes_library.py', 'test_node_reference.py'
 foreach ($v in $versions) {

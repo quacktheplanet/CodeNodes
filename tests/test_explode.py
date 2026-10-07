@@ -247,6 +247,5 @@ except Fail as exc:
 except Exception:
     traceback.print_exc()
     print("FAIL: exception", flush=True)
-if bpy.app.background:
-    sys.stdout.flush()
-    os._exit(0)
+sys.stdout.flush()
+os._exit(0)                 # (with a window too: these checks run straight away and then quit)

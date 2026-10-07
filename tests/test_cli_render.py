@@ -205,3 +205,5 @@ except Fail as exc:
 except Exception:
     traceback.print_exc()
     print("FAIL: exception", flush=True)
+sys.stdout.flush()
+os._exit(0)                 # (with a window too)
