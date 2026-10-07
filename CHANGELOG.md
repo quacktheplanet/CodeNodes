@@ -33,6 +33,9 @@ The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
 - **Native lists into code nodes** (Blender 5.2): a list input of single values takes any Geometry
   Nodes list (Field to List over a mesh, Filter / Sort List, ...). A hidden helper evaluates it and the
   code node compiles it in like a List node's table, following it as it changes.
+- **Values computed by nodes feed code nodes.** Math, Scene Time and any other computed value wired into a
+  code node's input is evaluated by a hidden helper and read back, so it drives the node (renders refresh it
+  every frame). Before, the typed value was used. tests/test_uses.py measures it.
 - **Install check on Linux** (tools/testing/install_check_linux.sh): builds the extension zip, installs it
   into a throwaway profile on each Blender, and runs a use line, a List and Explode/Collapse from the
   installed copy. Passes on 5.0.1, 5.1.2 and 5.2.2.

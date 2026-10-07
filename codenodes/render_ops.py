@@ -173,6 +173,8 @@ def prepare_frame(scene, frame, sources):
     `frame` None: Blender is already changing to the frame (a frame_change_pre handler)."""
     if frame is not None:
         scene.frame_set(frame)                   # frame handlers step Every Frame nodes (no render running)
+        if gn_link.has_value_taps():
+            sync_graph()                         # values computed by nodes (e.g. from Scene Time) for this frame
     temporary = []
     for src in sources:
         s = src.codenodes

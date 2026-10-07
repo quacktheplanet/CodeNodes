@@ -124,8 +124,9 @@ Geometry button, and the full error text.
 **How a code node works under the hood.** Blender doesn't let add-ons define new nodes inside
 Geometry Nodes, so a code node is an ordinary **Group node**, and its sockets are the group's inputs
 and outputs. Each node you add (or duplicate with Shift D) gets its own code. Values that come in
-through a link are followed back to a Value or Integer node, a reroute, or the modifier's own input;
-values computed by other nodes can't be read, so the number typed on the socket is used instead.
+through a link are followed back to a Value or Integer node, a reroute, or the modifier's own input.
+A value computed by other nodes (Math, Scene Time, ...) is evaluated by a hidden helper and read
+back, so it works too, frame by frame (a field is read at the origin).
 **Make Native** replaces a GPU Surface node with real Geometry Nodes that do the same maths (needs
 the ExpressNode add-on), so the file no longer needs CodeNodes at all.
 

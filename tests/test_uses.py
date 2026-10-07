@@ -172,6 +172,35 @@ def main():
     again, _ = drift(obj)
     check(abs(again / base - 1.0) < 0.01, f"and the push is back to the original ({again / base:.3f}×)")
 
+    # a value computed by other nodes reaches the code node (Value 2 -> Math x1.5 -> amount = 3)
+    val = tree.nodes.new("ShaderNodeValue")
+    val.outputs[0].default_value = 2.0
+    mul = tree.nodes.new("ShaderNodeMath")
+    mul.operation = 'MULTIPLY'
+    mul.inputs[1].default_value = 1.5
+    tree.links.new(val.outputs[0], mul.inputs[0])
+    tree.links.new(mul.outputs[0], push.inputs["amount"])
+    settle(6)
+    amt = next(p.value for p in pobj.codenodes.params if p.name == "amount")
+    check(abs(amt - 3.0) < 1e-5, f"a value computed by Math nodes reaches the code node's input ({amt})")
+    tripled, _ = drift(obj)
+    check(abs(tripled / base - 3.0) < 0.02, f"and drives it ({tripled / base:.3f}×)")
+    # Scene Time: it follows the frame
+    st = tree.nodes.new("GeometryNodeInputSceneTime")
+    tree.links.new(st.outputs["Seconds"], mul.inputs[0])
+    bpy.context.scene.frame_set(25)
+    settle(6)
+    amt = next(p.value for p in pobj.codenodes.params if p.name == "amount")
+    fps = bpy.context.scene.render.fps
+    check(abs(amt - 1.5 * 25 / fps) < 1e-3,
+          f"Scene Time × 1.5 follows the frame: {amt:.4f} at frame 25 ({25 / fps:.4f} s × 1.5)")
+    for l in [l for l in tree.links if l.to_socket == push.inputs["amount"]]:
+        tree.links.remove(l)
+    push.inputs["amount"].default_value = 1.0
+    settle(6)
+    check(not [o for o in bpy.data.objects if o.get("cn_value_tap")],
+          "unwired, the hidden helper that evaluated it goes")
+
     # one wind, two nodes, two meanings
     src2, push2 = chain(tree, 0, 400, "Still 2")
     tree.links.new(wind.outputs["wind"], push2.inputs["field"])

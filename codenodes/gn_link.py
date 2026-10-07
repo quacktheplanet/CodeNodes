@@ -14,8 +14,8 @@ code, rebuilds the source object, and Object Info hands the new geometry to the 
 the tree. Renders read the stored result and never run GPU code.
 
 Values that come in through a link are followed back to a Value / Integer node, a
-reroute, or the host tree's Group Input (the modifier's value). Anything computed by
-other nodes can't be read from Python, so the value typed on the socket is used instead.
+reroute, or the host tree's Group Input (the modifier's value). A value computed by other
+nodes is evaluated by a hidden helper object and read back (see _computed_value).
 """
 
 from __future__ import annotations
@@ -1210,8 +1210,115 @@ def _host_trees_value(tree, socket_identifier):
     return None
 
 
-def resolve(tree, socket, depth=0):
-    """A group node input's value, following simple links. None when it can't be known."""
+VALUE_TAP = "cn_value_tap"         # on a hidden object that evaluates a computed value wired into a code node
+_value_used = set()               # value taps read during this sync
+_VALUE_TYPES = {'VALUE': 'FLOAT', 'INT': 'INT', 'BOOLEAN': 'BOOLEAN', 'VECTOR': 'FLOAT_VECTOR',
+                'RGBA': 'FLOAT_COLOR'}
+
+
+def _computed_value(tree, link, dep_group):
+    """A value computed by other nodes (Math, Scene Time, a field read at the origin, ...): a hidden object
+    evaluates those nodes onto one point, and its attribute is read back. None if it can't be."""
+    out = link.from_socket
+    atype = _VALUE_TYPES.get(out.type)
+    hosts_ = _hosts_of(tree)
+    if atype is None or not hosts_:
+        return None
+    name = f"CN Value · {tree.name} · {link.from_node.name} · {out.identifier}"
+    _value_used.add(name)
+    sig = repr((atype, _upstream_signature(tree, link.from_node.name)))
+    tap = bpy.data.objects.get(name)
+    if tap is None:
+        tap = bpy.data.objects.new(name, hosts_[0].data)
+        sources_collection().objects.link(tap)
+        tap[VALUE_TAP] = True
+    if tap.data != hosts_[0].data:
+        tap.data = hosts_[0].data
+    if tap.get("cn_sig") != sig:
+        _build_value_tap(tap, tree, link.from_node.name, out.identifier, atype)
+        tap["cn_sig"] = sig
+    _copy_modifier_values(hosts_[0], tree, tap)
+    if dep_group is not None:                   # so Blender evaluates the hidden object
+        info = dep_group.nodes.get(f"Value · {name}")
+        if info is None:
+            info = dep_group.nodes.new("GeometryNodeObjectInfo")
+            info.name = info.label = f"Value · {name}"
+            info.location = (-150, -550)
+            info.hide = True
+        if info.inputs["Object"].default_value != tap:
+            info.inputs["Object"].default_value = tap
+    try:
+        gs = tap.evaluated_get(bpy.context.evaluated_depsgraph_get()).evaluated_geometry()
+    except (AttributeError, RuntimeError, ReferenceError):
+        return None
+    pc = gs.pointcloud
+    if pc is None or not len(pc.points) or "value" not in pc.attributes:
+        return None
+    d = pc.attributes["value"].data[0]
+    if atype == 'FLOAT_VECTOR':
+        return tuple(d.vector)
+    if atype == 'FLOAT_COLOR':
+        return tuple(d.color)
+    return d.value
+
+
+def _build_value_tap(tap, tree, node_name, sock_id, atype):
+    old = tap.modifiers.get("CodeNodes Value")
+    old_tree = old.node_group if old is not None else None
+    t = tree.copy()
+    t.name = _unique(f".CN Value · {tap.name}", bpy.data.node_groups)
+    t[TAP] = tap.name
+    src = t.nodes[node_name]
+    keep = {node_name}
+    for sock in src.inputs:
+        keep |= _upstream_nodes(t, sock)
+    gout = next((n for n in t.nodes if n.type == 'GROUP_OUTPUT'), None)
+    keep.add(gout.name)
+    for n in list(t.nodes):
+        if n.name not in keep:
+            t.nodes.remove(n)
+    pts = t.nodes.new("GeometryNodePoints")
+    pts.inputs["Count"].default_value = 1
+    store = t.nodes.new("GeometryNodeStoreNamedAttribute")
+    store.data_type = atype
+    store.inputs["Name"].default_value = "value"
+    t.links.new(pts.outputs[0], store.inputs["Geometry"])
+    t.links.new(next(o for o in src.outputs if o.identifier == sock_id), store.inputs["Value"])
+    geo_in = next(sk for sk in gout.inputs if sk.bl_idname == "NodeSocketGeometry")
+    for l in [l for l in t.links if l.to_node == gout]:
+        t.links.remove(l)
+    t.links.new(store.outputs[0], geo_in)
+    if old is None:
+        old = tap.modifiers.new("CodeNodes Value", 'NODES')
+    old.node_group = t
+    if old_tree is not None and old_tree.users == 0:
+        bpy.data.node_groups.remove(old_tree)
+
+
+def _drop_unused_value_taps():
+    col = bpy.data.collections.get(SOURCES)
+    for obj in [o for o in (col.objects if col is not None else []) if o.get(VALUE_TAP) and o.name not in _value_used]:
+        mod = obj.modifiers.get("CodeNodes Value")
+        g = mod.node_group if mod is not None else None
+        name = obj.name
+        bpy.data.objects.remove(obj)
+        if g is not None and g.users == 0:
+            bpy.data.node_groups.remove(g)
+        for grp in bpy.data.node_groups:
+            n = grp.nodes.get(f"Value · {name}") if grp.bl_idname == "GeometryNodeTree" else None
+            if n is not None:
+                grp.nodes.remove(n)
+
+
+def has_value_taps():
+    col = bpy.data.collections.get(SOURCES)
+    return col is not None and any(o.get(VALUE_TAP) for o in col.objects)
+
+
+def resolve(tree, socket, depth=0, dep_group=None):
+    """A group node input's value, following simple links; a value computed by other nodes comes from a
+    hidden object that evaluates them (when `dep_group`, the code node's group, is given). None when it
+    can't be known."""
     if not socket.is_linked:
         return getattr(socket, "default_value", None)
     if depth > 16:
@@ -1221,7 +1328,7 @@ def resolve(tree, socket, depth=0):
         return getattr(socket, "default_value", None)
     src_node, out = link.from_node, link.from_socket
     if src_node.type == 'REROUTE':
-        return resolve(tree, src_node.inputs[0], depth + 1)
+        return resolve(tree, src_node.inputs[0], depth + 1, dep_group)
     if src_node.type == 'VALUE':
         return out.default_value
     if src_node.bl_idname in ("FunctionNodeInputInt", "FunctionNodeInputFloat"):
@@ -1233,9 +1340,14 @@ def resolve(tree, socket, depth=0):
             for ptree, pnode in group_users(tree):
                 s = _socket_by(pnode.inputs, out.identifier, out.name)
                 if s is not None:
-                    return resolve(ptree, s, depth + 1)
+                    return resolve(ptree, s, depth + 1, dep_group)
         return v
-    return None                        # computed by other nodes: not readable from Python
+    if dep_group is not None and socket.type in _VALUE_TYPES and out.type in _VALUE_TYPES:
+        try:
+            return _computed_value(tree, link, dep_group)
+        except Exception:
+            _report_exc()
+    return None
 
 
 def read_values(user):
@@ -1244,7 +1356,7 @@ def read_values(user):
     values = {}
     if kind == 'node':
         for sock in thing.inputs:
-            v = resolve(owner, sock)
+            v = resolve(owner, sock, dep_group=thing.node_tree if is_code_group(thing.node_tree) else None)
             if v is not None:
                 values[sock.name] = v
     else:
@@ -1906,7 +2018,7 @@ def ensure_tap(src, tree, node, hosts_):
 
 def _copy_modifier_values(host, tree, tap):
     hm = next((m for m in host.modifiers if m.type == 'NODES' and m.node_group == tree), None)
-    tm = tap.modifiers.get("CodeNodes Tap")
+    tm = tap.modifiers.get("CodeNodes Tap") or next((m for m in tap.modifiers if m.type == 'NODES'), None)
     if hm is None or tm is None:
         return
     for item in tree.interface.items_tree:
@@ -1970,6 +2082,7 @@ def sync():
             gpu_live.hosts.clear()
             gpu_live.redraw()
         return
+    _value_used.clear()
     for gname, lst in users().items():
         group = bpy.data.node_groups.get(gname)
         obj = source_of(group)
@@ -2021,6 +2134,7 @@ def sync():
                 gn_sockets.apply_tips(g, gn_sockets.JOIN_TIPS, gn_sockets.JOIN_TIPS_OUT)
         except ReferenceError:
             pass
+    _drop_unused_value_taps()
     host_map = sync_make_real()
     try:
         from . import lights

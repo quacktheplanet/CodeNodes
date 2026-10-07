@@ -329,7 +329,8 @@ renders the bake.
 ## Feeding it from Geometry Nodes
 
 - **Values:** a typed value, a Value or Integer node, a reroute, or the modifier's own input.
-  Values computed by other nodes can't be read from Python, so the value typed on the socket is used.
+  A value computed by other nodes (Math, Scene Time, ...) is evaluated onto one point by a hidden helper
+  object and read back each sync; renders refresh it for every frame. A field is read at the origin.
 - **Geometry for particles:** the source's **Emit From** object input. CodeNodes reads that object's
   evaluated geometry (points, or a surface sampled evenly by area), including what its own Geometry
   Nodes make, and re-reads it when the object changes. Use `emitPoint(seed)` and `emitNormal(seed)`
