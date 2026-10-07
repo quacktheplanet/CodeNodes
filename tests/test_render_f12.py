@@ -332,7 +332,7 @@ def phase_rendered_view(st):
     win, area, region = view3d()
     sp = area.spaces.active
     gpu_live = cn("gpu_live")
-    results = {}
+    results, pixels = {}, {}
     for engine in ('BLENDER_EEVEE', 'CYCLES'):
         bpy.context.scene.render.engine = engine
         if engine == 'CYCLES':
@@ -343,11 +343,42 @@ def phase_rendered_view(st):
         for _ in range(20):
             bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
         results[engine] = gpu_live._fps.get("total", 0) - start
+        # and they're really in the picture (draw calls alone once passed while nothing showed: the Rendered
+        # view's depth buffer was all zeros): the view with them against the view without them
+        # with overlays hidden (a clean preview), which once left them out: no depth to test against
+        sp.overlay.show_overlays = False
+        saved = dict(gpu_live.hosts)
+        gpu_live.hosts.clear()
+        without = view_pixels(win, area)
+        links = cn("links")
+        gpu_live.hosts.update({k: v for k, v in saved.items()        # the particles alone: the surface
+                               if bpy.data.objects.get(k) is not None    # draws without a depth test anyway
+                               and links.ekind(bpy.data.objects[k]) == 'PARTICLES'})
+        with_ = view_pixels(win, area)
+        gpu_live.hosts.clear()
+        gpu_live.hosts.update(saved)
+        sp.overlay.show_overlays = True
+        pixels[engine] = float(np.abs(with_ - without).mean()) if with_ is not None and without is not None else 0.0
     sp.shading.type = 'SOLID'
     bpy.context.scene.render.engine = 'BLENDER_EEVEE'
     check(all(v > 0 for v in results.values()),
           f"the Rendered viewport still draws the live GPU nodes, in EEVEE and Cycles (draws: {results})")
+    check(all(v > 0.0005 for v in pixels.values()),
+          f"and the live particles show in it, overlays hidden too (mean pixel change with them drawn: {({k: round(v, 4) for k, v in pixels.items()})})")
     return True
+
+
+def view_pixels(win, area):
+    """The viewport as it looks now (a screenshot), as an array."""
+    for _ in range(4):
+        bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+    path = os.path.join(tempfile.gettempdir(), "cn_f12_view.png")
+    with bpy.context.temp_override(window=win, area=area):
+        bpy.ops.screen.screenshot_area(filepath=path)
+    im = bpy.data.images.load(path)
+    px = np.array(im.pixels[:], np.float32).reshape(im.size[1], im.size[0], 4)[:, :, :3]
+    bpy.data.images.remove(im)
+    return px
 
 
 PLAN = [phase_blank, phase_scene, phase_f12_wait, phase_ctrl_f12_wait, phase_movie_wait, phase_menu,

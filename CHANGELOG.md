@@ -50,6 +50,9 @@ The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
   (headless on 5.2). Every suite passes, so the GPU code compiles under Vulkan's stricter rules too.
 - **The Windy Meadow** (`examples/meadow_demo.py`, docs/meadow_render.jpg): use lines, a List read by
   code and native nodes, and an exploded node, built and rendered with no window on Blender 5.2.
+- Fix: with overlays hidden, the Rendered viewport (EEVEE) showed no live GPU nodes: it hands draw handlers
+  a depth buffer of zeros, so nothing passed the depth test. CodeNodes now starts from an empty depth buffer
+  there. tests/test_render_f12.py compares the view with and without the live particles, overlays hidden.
 - Fix: duplicating a code node whose menus weren't built yet no longer raises.
 - Fix: a command-line render (`blender -b scene.blend -a`, or bpy.ops.codenodes.render in a script) ran
   each particle source without its stages, because the node-graph sync is timer-driven and hadn't run

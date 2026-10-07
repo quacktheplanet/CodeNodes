@@ -674,6 +674,22 @@ def draw_surface(src, host, region, rv3d, scene):
                   (frame - scene.frame_start) / fps_, frame, lit, mat)
 
 
+def _usable_depth(ctx, region):
+    """With overlays hidden, the Rendered viewport hands draw handlers a depth buffer of zeros (seen on Blender
+    5.2), so nothing would pass the depth test and live GPU nodes vanish. Then start from an empty depth buffer:
+    they draw over the rendered scene, still hiding parts of themselves. A real depth buffer is left alone."""
+    shading = getattr(getattr(ctx, "space_data", None), "shading", None)
+    if shading is None or shading.type != 'RENDERED':
+        return
+    import gpu
+    try:
+        fb = gpu.state.active_framebuffer_get()
+        if fb.read_depth(1, max(0, region.height - 2), 1, 1).to_list()[0][0] == 0.0:
+            fb.clear(depth=1.0)
+    except Exception:
+        pass
+
+
 def _draw():
     if gpu_guard.rendering():
         return                                  # never touch the GPU while a render runs
@@ -684,10 +700,14 @@ def _draw():
     t0 = time.perf_counter()
     drew = False
     view_layer = ctx.view_layer
+    depth_checked = False
     for src_name, host_names in list(hosts.items()):
         src = bpy.data.objects.get(src_name)
         if src is None or not shows_live(src):
             continue
+        if not depth_checked:
+            depth_checked = True
+            _usable_depth(ctx, region)
         for hname in host_names:
             host = bpy.data.objects.get(hname)
             if host is None or host.name not in view_layer.objects or not host.visible_get(view_layer=view_layer):
