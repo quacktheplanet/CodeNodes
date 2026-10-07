@@ -19,6 +19,17 @@ The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
   List node's outputs are real Geometry Nodes lists too, so native nodes read the same table; before 5.2
   lists travel on bundle sockets. New starters: **Attractors** (a List) and **Attract to List**.
   tests/test_lists.py (all versions; on 5.2 it measures the pull and reads the lists natively).
+- **Explode and Collapse: a script's pieces on the graph, and back.** Explode (right-click a code node)
+  turns it into a node group you Tab or double-click into: the node keeps its entry points, and each
+  top-level constant becomes a Value node, each constant array a List node and each helper function a
+  function node, wired back in (pieces that use each other or the node's inputs are wired to them).
+  The node's inputs stay on the outside. Collapse puts the pieces back where they came from;
+  Explode then Collapse gives back the code exactly, for all 50 starters (tests/test_explode.py), and
+  an exploded node gives exactly the same particles.
+- **Code nodes work inside node groups.** Ctrl+G any code nodes (groups in groups too): chains,
+  function and list links, values and To Geometry run through the group's sockets
+  (tests/test_groups.py: identical results grouped four ways). Double-click a group of code nodes to
+  go into it.
 - Fix: duplicating a code node whose menus weren't built yet no longer raises.
 
 ## 0.5.0 (unreleased, draft): the Galaxy, and graphs that do more than a line of nodes

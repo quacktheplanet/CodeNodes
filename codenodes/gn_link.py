@@ -675,6 +675,124 @@ def _feeding(tree, sock):
     return next((l for l in tree.links if l.to_socket == sock and not l.is_muted), None)
 
 
+# ---- code nodes inside ordinary node groups ---------------------------------------------------------
+# Group code nodes with Ctrl+G (or Explode one) and the chain runs straight through the group: in through
+# its Group Input, out through its Group Output to wherever the group node is wired.
+
+WRAPPER = "codenodes_wrapper"     # on a node group made by Explode: the core code node's name inside it
+_holds = {}                        # node group name -> holds code nodes (cleared every sync)
+
+
+def _special(group):
+    return is_code_group(group) or is_make_real(group) or is_join(group) or is_cache(group) or TAP in group
+
+
+def holds_code(group, depth=0):
+    """True for an ordinary node group with code nodes in it (at any depth)."""
+    if group is None or group.bl_idname != "GeometryNodeTree" or _special(group):
+        return False
+    got = _holds.get(group.name)
+    if got is not None:
+        return got
+    _holds[group.name] = False                  # a group can't contain itself, but be safe
+    found = depth < 16 and any(
+        n.type == 'GROUP' and n.node_tree is not None and (_special(n.node_tree) and TAP not in n.node_tree
+                                                           or holds_code(n.node_tree, depth + 1))
+        for n in group.nodes)
+    _holds[group.name] = found
+    return found
+
+
+def group_users(group):
+    """[(tree, group node)] for every node using `group`."""
+    out = []
+    for tree in bpy.data.node_groups:
+        if tree.bl_idname != "GeometryNodeTree":
+            continue
+        for node in tree.nodes:
+            if node.type == 'GROUP' and node.node_tree == group:
+                out.append((tree, node))
+    return out
+
+
+def _socket_by(sockets, identifier, name):
+    from . import gn_sockets
+    return gn_sockets._socket_by(sockets, identifier, name)
+
+
+def _targets_x(tree, sock, depth=0):
+    """[(tree, node, input socket)] that `sock` feeds, like _targets, but through node groups holding code
+    nodes: into them through their Group Input, and out through their Group Output to every node using
+    them."""
+    out = []
+    for to, s in _targets(tree, sock):
+        if depth < 16 and to.type == 'GROUP' and holds_code(to.node_tree):
+            inner = to.node_tree
+            for gin in [n for n in inner.nodes if n.type == 'GROUP_INPUT']:
+                o = _socket_by(gin.outputs, s.identifier, s.name)
+                if o is not None:
+                    out += _targets_x(inner, o, depth + 1)
+        elif depth < 16 and to.type == 'GROUP_OUTPUT' and holds_code(tree):
+            if not getattr(to, "is_active_output", True):
+                continue
+            for ptree, pnode in group_users(tree):
+                o = _socket_by(pnode.outputs, s.identifier, s.name)
+                if o is not None:
+                    out += _targets_x(ptree, o, depth + 1)
+        else:
+            out.append((tree, to, s))
+    return out
+
+
+def _upstream_x(tree, sock, depth=0):
+    """(tree, link) bringing a value into `sock`: through reroutes, out of a node group's Group Input to what
+    feeds the group node, and into a node group holding code nodes to what feeds its Group Output."""
+    l = _feeding(tree, sock)
+    while l is not None and l.from_node.type == 'REROUTE':
+        l = _feeding(tree, l.from_node.inputs[0])
+    if l is None or depth >= 16:
+        return None if l is None else (tree, l)
+    n = l.from_node
+    if n.type == 'GROUP_INPUT':
+        for ptree, pnode in group_users(tree):
+            if holds_code(tree):
+                s = _socket_by(pnode.inputs, l.from_socket.identifier, l.from_socket.name)
+                if s is not None:
+                    return _upstream_x(ptree, s, depth + 1)
+        return tree, l
+    if n.type == 'GROUP' and holds_code(n.node_tree):
+        inner = n.node_tree
+        gout = next((g for g in inner.nodes if g.type == 'GROUP_OUTPUT' and getattr(g, "is_active_output", True)),
+                    None)
+        s = _socket_by(gout.inputs, l.from_socket.identifier, l.from_socket.name) if gout is not None else None
+        return _upstream_x(inner, s, depth + 1) if s is not None else None
+    return tree, l
+
+
+def code_funcs():
+    """{(consumer, input): (provider, output)} for every function and list input wired to a code node,
+    across node groups."""
+    from . import gn_sockets
+    funcs = {}
+    for tree in bpy.data.node_groups:
+        if tree.bl_idname != "GeometryNodeTree" or TAP in tree:
+            continue
+        for node, obj in _code_nodes(tree):
+            list_names = {l.name for l in gn_sockets.decls_of(obj).lists}
+            for sock in node.inputs:
+                if not sock.is_linked or (sock.bl_idname != "NodeSocketClosure" and sock.name not in list_names):
+                    continue
+                up = _upstream_x(tree, sock)
+                if up is None:
+                    continue
+                l = up[1]
+                g = l.from_node.node_tree if l.from_node.type == 'GROUP' else None
+                pobj = source_of(g) if g is not None and is_code_group(g) else None
+                if pobj is not None:
+                    funcs[(obj.name, sock.name)] = (pobj.name, l.from_socket.name)
+    return funcs
+
+
 def upstream_code_node(tree, node, depth=0):
     """The code node at the head of whatever feeds a To Geometry node's first input: back through
     reroutes and through GPU Stage nodes to the chain's source. None if no code node feeds it."""
@@ -934,7 +1052,13 @@ def resolve(tree, socket, depth=0):
         return getattr(src_node, "integer", None) if src_node.bl_idname == "FunctionNodeInputInt" \
             else getattr(src_node, "value", None)
     if src_node.type == 'GROUP_INPUT':
-        return _host_trees_value(tree, out.identifier)
+        v = _host_trees_value(tree, out.identifier)
+        if v is None:                  # inside a node group: what the group node gets
+            for ptree, pnode in group_users(tree):
+                s = _socket_by(pnode.inputs, out.identifier, out.name)
+                if s is not None:
+                    return resolve(ptree, s, depth + 1)
+        return v
     return None                        # computed by other nodes: not readable from Python
 
 
@@ -998,9 +1122,14 @@ def split(group, user):
     return new_group
 
 
-def _hosts_of(tree):
-    return [o for o in bpy.data.objects
-            if any(m.type == 'NODES' and m.node_group == tree for m in getattr(o, "modifiers", ()))]
+def _hosts_of(tree, depth=0):
+    """Objects whose Geometry Nodes modifier runs `tree`, directly or inside node groups."""
+    out = [o for o in bpy.data.objects
+           if any(m.type == 'NODES' and m.node_group == tree for m in getattr(o, "modifiers", ()))]
+    if depth < 16:
+        for ptree, _node in group_users(tree):
+            out += [o for o in _hosts_of(ptree, depth + 1) if o not in out]
+    return out
 
 
 def _migrate_gpu_group(group):
@@ -1099,33 +1228,24 @@ def _stream_names(obj):
     return "Mesh", "Mesh", 'DEFORM'
 
 
-def find_pipelines(tree):
-    """The code-node graph of one tree, as pipelines.
+def find_pipelines(tree, funcs=None):
+    """The code-node graph starting in one tree, as pipelines.
 
     Returns (pipes, mesh_heads, terminals):
       pipes       {(head name, (stage names...)): {"kind", "funcs", "leaf": bool, "cache": node name or None}}
       mesh_heads  stage sources that head a mesh chain (a warp or deform wired to plain geometry)
-      terminals   {To Geometry node name: [pipeline keys it outputs]}
+      terminals   {(tree name, To Geometry node name): [pipeline keys it outputs]}
 
     A pipeline is every path from a source through stages (and Join Particles / GPU Cache nodes, which
     pass the stream on) to where it ends: a node nothing continues from (drawn live), or a node wired
     into a To Geometry (made real there). A stream wired into two stages splits into two pipelines.
+    Paths run through ordinary node groups that hold code nodes (Ctrl+G, or an exploded node). `funcs` is
+    code_funcs(), passed in when the caller looks at many trees.
     """
     from . import gn_sockets
     nodes = _code_nodes(tree)
-    by_node = {n.name: o for n, o in nodes}
-    funcs = {}                 # function inputs and list inputs: (consumer, input) -> (provider, output)
-    for node, obj in nodes:
-        list_names = {l.name for l in gn_sockets.decls_of(obj).lists}
-        for sock in node.inputs:
-            if not sock.is_linked or (sock.bl_idname != "NodeSocketClosure" and sock.name not in list_names):
-                continue
-            l = _feeding(tree, sock)
-            while l is not None and l.from_node.type == 'REROUTE':
-                l = _feeding(tree, l.from_node.inputs[0])
-            if l is None or l.from_node.name not in by_node:
-                continue
-            funcs[(obj.name, sock.name)] = (by_node[l.from_node.name].name, l.from_socket.name)
+    if funcs is None:
+        funcs = code_funcs()
 
     def reachable(names):
         todo, seen, out = list(names), set(), {}
@@ -1151,52 +1271,52 @@ def find_pipelines(tree):
         if cache is not None and info["cache"] is None:
             info["cache"] = cache
 
-    def explore(node, out_name, in_name, kind, head, path, cache, depth):
+    def explore(t, node, out_name, in_name, kind, head, path, cache, depth):
         if depth > 64:
             return
         out = node.outputs.get(out_name)
         children, ends = [], []
-        for to, sock in (_targets(tree, out) if out is not None else []):
+        for t2, to, sock in (_targets_x(t, out) if out is not None else []):
             g = to.node_tree if to.type == 'GROUP' else None
             if g is None:
                 continue
             if is_code_group(g):
-                obj = by_node.get(to.name)
+                obj = source_of(g)
                 if obj is not None and obj.codenodes.kind == 'STAGE' and sock.name == in_name \
                         and obj.name not in path:
-                    children.append((to, path + (obj.name,), cache))
+                    children.append((t2, to, path + (obj.name,), cache))
             elif (is_join(g) or is_cache(g)) and sock.bl_idname == "NodeSocketBundle" and kind == 'PARTICLES':
-                children.append((to, path, f"{tree.name}\x00{to.name}" if is_cache(g) else cache))
+                children.append((t2, to, path, f"{t2.name}\x00{to.name}" if is_cache(g) else cache))
             elif is_make_real(g):
-                ends.append(to.name)
+                ends.append((t2.name, to.name))
         key = (head, path)
         if ends or not children:
             record(key, kind, not children, cache)
-        for t in ends:
-            lst = terminals.setdefault(t, [])
+        for t_end in ends:
+            lst = terminals.setdefault(t_end, [])
             if key not in lst:
                 lst.append(key)
-        for child, p, c in children:
-            explore(child, in_name, in_name, kind, head, p, c, depth + 1)
+        for t2, child, p, c in children:
+            explore(t2, child, in_name, in_name, kind, head, p, c, depth + 1)
 
     for node, obj in nodes:
         kind = obj.codenodes.kind
         if kind in ('PARTICLES', 'DEFORM'):
             out_name, in_name, k = _stream_names(obj)
-            explore(node, out_name, in_name, k, obj.name, (), None, 0)
+            explore(tree, node, out_name, in_name, k, obj.name, (), None, 0)
         elif kind == 'STAGE' and gn_sockets.decls_of(obj).takes_mesh():
             mesh_in = node.inputs.get("Mesh")
-            l = _feeding(tree, mesh_in) if mesh_in is not None else None
-            while l is not None and l.from_node.type == 'REROUTE':
-                l = _feeding(tree, l.from_node.inputs[0])
-            if l is None:
+            up = _upstream_x(tree, mesh_in) if mesh_in is not None else None
+            if up is None:
                 continue
-            up = by_node.get(l.from_node.name)
-            if up is not None and up.codenodes.kind in ('DEFORM', 'STAGE'):
+            fn = up[1].from_node
+            g = fn.node_tree if fn.type == 'GROUP' else None
+            src = source_of(g) if g is not None and is_code_group(g) else None
+            if src is not None and src.codenodes.kind in ('DEFORM', 'STAGE'):
                 continue                         # part of a mesh chain started further up
             # a warp or deform wired straight to ordinary geometry: it heads its own mesh chain
             mesh_heads.add(obj.name)
-            explore(node, "Mesh", "Mesh", 'DEFORM', obj.name, (), None, 0)
+            explore(tree, node, "Mesh", "Mesh", 'DEFORM', obj.name, (), None, 0)
     return pipes, mesh_heads, terminals
 
 
@@ -1330,10 +1450,14 @@ def sync_make_real():
     from . import gn_sockets, gpu_live, links
     _migrate_make_real_names()
     trees = [t for t in bpy.data.node_groups if t.bl_idname == "GeometryNodeTree" and TAP not in t]
-    per_tree, all_pipes, all_mesh_heads = {}, {}, set()
+    _holds.clear()
+    funcs = code_funcs()
+    all_terminals, all_pipes, all_mesh_heads = {}, {}, set()
     for tree in trees:
-        pipes, mesh_heads, terminals = find_pipelines(tree)
-        per_tree[tree.name] = terminals
+        pipes, mesh_heads, terminals = find_pipelines(tree, funcs)
+        for t_end, keys in terminals.items():
+            lst = all_terminals.setdefault(t_end, [])
+            lst.extend(k for k in keys if k not in lst)
         for key, info in pipes.items():
             if key in all_pipes:
                 all_pipes[key]["leaf"] = all_pipes[key]["leaf"] or info["leaf"]
@@ -1381,7 +1505,6 @@ def sync_make_real():
     for tree in trees:
         hosts_ = None
         seen_real = set()
-        terminals = per_tree.get(tree.name, {})
         for node in tree.nodes:
             if node.type != 'GROUP' or node.node_tree is None:
                 continue
@@ -1402,7 +1525,8 @@ def sync_make_real():
                     node.node_tree = new
                     group = new
                 seen_real.add(group.name)
-                objs = [bpy.data.objects.get(names[k]) for k in terminals.get(node.name, []) if k in names]
+                objs = [bpy.data.objects.get(names[k]) for k in all_terminals.get((tree.name, node.name), [])
+                        if k in names]
                 objs = [o for o in objs if o is not None]
                 if not objs:
                     up = upstream_code_node(tree, node)

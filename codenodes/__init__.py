@@ -14,7 +14,7 @@ bl_info = {
     "category": "Mesh",
 }
 
-_modules = ("safe_errors", "prefs", "props", "live", "gpu_live", "lights", "ops", "bake_ops", "nodes", "gn_ui", "ui", "render_ops",
+_modules = ("safe_errors", "prefs", "props", "live", "gpu_live", "lights", "ops", "bake_ops", "nodes", "gn_ui", "explode_ops", "ui", "render_ops",
             "server")
 
 

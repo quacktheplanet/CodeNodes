@@ -470,6 +470,16 @@ class CODENODES_PT_gn(bpy.types.Panel):
             layout.label(text=rnode.label)
             return
         if obj is None:
+            space = getattr(context, "space_data", None)
+            tree = getattr(space, "edit_tree", None)
+            active = tree.nodes.active if tree is not None else None
+            from . import explode_ops
+            if active is not None and active.type == 'GROUP' and explode_ops.is_exploded(active.node_tree) \
+                    or explode_ops.is_exploded(tree):
+                layout.label(text="An exploded code node", icon='MOD_EXPLODE')
+                layout.label(text="Tab or double-click into it")
+                layout.operator("codenodes.collapse", icon='FULLSCREEN_EXIT')
+                return
             layout.label(text="Add (Shift A) › CodeNodes", icon='INFO')
             layout.label(text="Settings live on the nodes;")
             layout.label(text="code opens in a Text Editor.")
@@ -478,6 +488,8 @@ class CODENODES_PT_gn(bpy.types.Panel):
         layout.label(text=node.label or group.name, icon=gn_link.KINDS.get(s.kind, ("", "", 'SCRIPT'))[2])
         row = layout.row(align=True)
         row.operator(CODENODES_OT_gn_edit_code.bl_idname, icon='TEXT')
+        if s.kind in gn_link.CODE_KINDS:
+            row.operator("codenodes.explode", text="Explode", icon='MOD_EXPLODE')
         if s.kind in gn_link.GPU_KINDS:
             row.operator(CODENODES_OT_gn_add_make_real.bl_idname, text="Add To Geometry", icon='MESH_DATA')
         if s.last_error:

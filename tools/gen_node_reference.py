@@ -111,6 +111,31 @@ number. Edit a row and the chains using it recompile. A field with no column of 
 node shows a ⚠); unwired, a list is empty. Lists hold up to 4096 rows (up to 1024 also become real
 Geometry Nodes lists).
 
+### Explode, Collapse and node groups
+
+**Explode** (right-click a code node › Explode Code Node, or the sidebar's Explode button) turns a
+code node into a node group of its pieces. Tab or double-click into it like any node group: inside
+is the node itself, now holding only its entry points (`behave`, `spawn`, `look`, ... and the functions
+it offers), and one node per top-level piece of its code, wired back in:
+
+| In the code | Becomes | And the code gets |
+|---|---|---|
+| `const float CALM = 0.92;` | a Value node CALM | `// @in float CALM 0.92` |
+| `const vec3 DIRS[3] = vec3[3](...);` | a List node DIRS, one row per element | `// @in list vec3 DIRS` (`DIRS[i]` reads `DIRS(i)`) |
+| `vec3 curl(vec3 p) { ... }` | a function node curl | `// @in func vec3 curl(vec3 p)` |
+
+The node's inputs stay on the outside of the group. A piece that uses one of the node's inputs gets
+it too, and pieces that use each other are wired to each other. A piece that can't stand on its own
+stays in the code: a constant another top-level declaration needs (an array size, `const float B = A *
+2.0;`), a function that uses a struct, a `#define`, a global or a hidden input, or a function written
+twice. Pieces are ordinary code nodes: edit one, rewire it, or ungroup (Ctrl+Alt+G) to share it with
+other nodes. **Collapse** (right-click the group, or the sidebar inside it) puts every piece still
+wired in back into the code where it came from; Explode then Collapse gives back the code exactly.
+
+**Any code nodes can be grouped** (Ctrl+G), and groups can hold groups: chains, function and list
+links and values run straight through a group's inputs and outputs. One limit: a mesh stage (Bend,
+Sway, ...) that starts its own chain from plain geometry must sit in the same tree as that geometry.
+
 ### Streams: which functions make which node
 
 | The code defines | The node is | Stream sockets |
