@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0 (unreleased): the modular workflow
+
+The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
+
+- **Use lines: one shared function, each node decides what it means.** Every function input shows a
+  text input under it (`wind · use`) holding one expression: `wind(p) * 0.4`, `vec3(wind(p).xy, 0)`,
+  `wind(p) + vec3(0, 0, rise)`. The node's code keeps calling `wind(p)`; the compiler wraps the wired
+  function in the expression (nothing extra when it's the plain call). It lives in the code as
+  `// @in func vec3 wind(vec3 p) use: wind(p) * 0.4` and stays in sync with the node both ways. A
+  shared function's header says how many nodes use it (`Wind Field · used by 3`); a function wired in
+  with a different signature shows a ⚠ on the node that takes it. tests/test_decl.py (pure Python) and
+  tests/test_uses.py (Blender; measures the pushes) cover it.
+
 ## 0.5.0 (unreleased, draft): the Galaxy, and graphs that do more than a line of nodes
 
 - **The Galaxy scene** (`examples/galaxy_demo.py`, `examples/galaxy_scene.py`): a solar system in front

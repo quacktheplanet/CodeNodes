@@ -44,11 +44,22 @@ and the node's sockets follow at once.
 | `// @in color tint 1.0 0.6 0.2` | a colour | `tint` (a `vec3`) |
 | `// @in func vec3 wind(vec3 p)` | a function input: wire another node's function output into it | `wind(p)` |
 | `// @in func float sdf(vec3 p) = 1e9` | the same, with what it returns when nothing is wired | `sdf(p)` |
+| `// @in func vec3 wind(vec3 p) use: wind(p) * 0.4` | the same, with a **use line** (see below) | `wind(p)` gives the use line's value |
 | `// @in func vec3 bodyPos(int i, float t)` | any signature: ints, several arguments, or none (`int bodyCount()`) | `bodyPos(i, uSceneTime)` |
 | `// @in material mat` | a Material socket | `mat_base` (vec3), `mat_roughness`, `mat_metallic`, `mat_emit` (vec3, colour × strength), `mat_alpha` |
 | `// @in hidden lightX 0.0` | none: a value the add-on fills in itself (e.g. Scene Lights' light data) | `lightX` |
 
 A function input with nothing wired returns zero (or the value after `=`), so a node always compiles.
+
+**Use lines: one shared function, used differently by each node.** Every function input shows a text
+input right under it, `wind · use`. It holds one expression saying how *this* node applies what's
+wired in: `wind(p) * 0.4` for a gentle drift, `vec3(wind(p).xy * height, 0)` for grass that only sways
+sideways, `wind(p) + vec3(0, 0, rise)` for smoke. The node's code keeps calling `wind(p)` and gets the
+use line's value. The expression can use the function's arguments, the node's own inputs and the
+helpers. Typing on the node writes it into the code as `use: …` at the end of the declaration line,
+and editing the code updates the node. The plain call (`wind(p)`) is the default and costs nothing. The
+shared function's header says how many nodes use it (`Wind Field · used by 3`), and wiring in a
+function whose signature doesn't match the input shows a ⚠ on the node that takes it.
 
 **Tooltips.** End any declaration line with a sentence in double quotes and it becomes that socket's
 hover tooltip in the node editor (and its "What it does" entry below):
@@ -196,7 +207,7 @@ def _fmt(v):
 
 TYPE_NAMES = {"NodeSocketFloat": "float", "NodeSocketInt": "int", "NodeSocketBool": "toggle",
               "NodeSocketColor": "colour", "NodeSocketMenu": "menu", "NodeSocketGeometry": "geometry",
-              "NodeSocketBundle": "particles", "NodeSocketClosure": "function",
+              "NodeSocketBundle": "particles", "NodeSocketClosure": "function", "NodeSocketString": "text",
               "NodeSocketObject": "object", "NodeSocketMaterial": "material", "NodeSocketVector": "vector"}
 
 

@@ -146,8 +146,9 @@ def code_tips(obj):
     for f in d.func_ins:
         tips_in.setdefault(f.name, f"Wire a function here (e.g. from a field node); the code calls {f.name}(…)")
         args = ", ".join(f.arg_names())
+        example = f"min({f.plain_use()}, 100)" if f.ret == "int" else f"{f.plain_use()} * 0.4"
         tips_in[use_socket(f.name)] = (
-            f"How this node uses what's wired into '{f.name}': one expression, e.g. {f.plain_use()} * 0.4. It can "
+            f"How this node uses what's wired into '{f.name}': one expression, e.g. {example}. It can "
             f"use {f.name}'s arguments ({args or 'none'}), this node's inputs and the helpers. {f.plain_use()} uses "
             f"it as it is. Kept in the code as  use: …  on the {f.name} line")
     for m in d.materials:

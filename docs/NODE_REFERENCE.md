@@ -24,11 +24,22 @@ and the node's sockets follow at once.
 | `// @in color tint 1.0 0.6 0.2` | a colour | `tint` (a `vec3`) |
 | `// @in func vec3 wind(vec3 p)` | a function input: wire another node's function output into it | `wind(p)` |
 | `// @in func float sdf(vec3 p) = 1e9` | the same, with what it returns when nothing is wired | `sdf(p)` |
+| `// @in func vec3 wind(vec3 p) use: wind(p) * 0.4` | the same, with a **use line** (see below) | `wind(p)` gives the use line's value |
 | `// @in func vec3 bodyPos(int i, float t)` | any signature: ints, several arguments, or none (`int bodyCount()`) | `bodyPos(i, uSceneTime)` |
 | `// @in material mat` | a Material socket | `mat_base` (vec3), `mat_roughness`, `mat_metallic`, `mat_emit` (vec3, colour × strength), `mat_alpha` |
 | `// @in hidden lightX 0.0` | none: a value the add-on fills in itself (e.g. Scene Lights' light data) | `lightX` |
 
 A function input with nothing wired returns zero (or the value after `=`), so a node always compiles.
+
+**Use lines: one shared function, used differently by each node.** Every function input shows a text
+input right under it, `wind · use`. It holds one expression saying how *this* node applies what's
+wired in: `wind(p) * 0.4` for a gentle drift, `vec3(wind(p).xy * height, 0)` for grass that only sways
+sideways, `wind(p) + vec3(0, 0, rise)` for smoke. The node's code keeps calling `wind(p)` and gets the
+use line's value. The expression can use the function's arguments, the node's own inputs and the
+helpers. Typing on the node writes it into the code as `use: …` at the end of the declaration line,
+and editing the code updates the node. The plain call (`wind(p)`) is the default and costs nothing. The
+shared function's header says how many nodes use it (`Wind Field · used by 3`), and wiring in a
+function whose signature doesn't match the input shows a ⚠ on the node that takes it.
 
 **Tooltips.** End any declaration line with a sentence in double quotes and it becomes that socket's
 hover tooltip in the node editor (and its "What it does" entry below):
@@ -530,8 +541,11 @@ Points from Function: one point per index, placed every step by a function wired
 | Count | int | 3 | 1 to 16777216 |  | How many particles to simulate. Drawing them live handles millions; To Geometry copies them into Blender, which costs more |
 | Emit From | object |  |  |  | An object whose surface the particles are born on (optional). Without one, the code decides where they start |
 | place | function |  |  |  | Where point i is at time t: wire in a function such as Orbits' planetPos |
+| place · use | text | place(i, t) |  |  | How this node uses what's wired into 'place': one expression, e.g. place(i, t) * 0.4. It can use place's arguments (i, t), this node's inputs and the helpers. place(i, t) uses it as it is. Kept in the code as  use: …  on the place line |
 | size | function |  |  |  | The size of point i, written as its bodySize attribute (e.g. Orbits' planetRadius) |
+| size · use | text | size(i) |  |  | How this node uses what's wired into 'size': one expression, e.g. size(i) * 0.4. It can use size's arguments (i), this node's inputs and the helpers. size(i) uses it as it is. Kept in the code as  use: …  on the size line |
 | count | function |  |  |  | How many points to use (e.g. Orbits' planetCount); points past it get size 0 |
+| count · use | text | count() |  |  | How this node uses what's wired into 'count': one expression, e.g. min(count(), 100). It can use count's arguments (none), this node's inputs and the helpers. count() uses it as it is. Kept in the code as  use: …  on the count line |
 | Colour By | menu |  | Code, Speed, Age | Look | What colours the particles when no Look node is wired: the code's own colour, their speed or their age |
 | Slow / Young | colour | (0.15, 0.3, 1, 1) |  | Look | Colour of slow particles (Colour By: Speed) or young ones (Colour By: Age) |
 | Fast / Old | colour | (1, 0.55, 0.2, 1) |  | Look | Colour of fast particles (Colour By: Speed) or old ones (Colour By: Age) |
@@ -1059,6 +1073,7 @@ Push by Field: a force from a function wired into 'field' (e.g. Wind Field).
 | Template | menu |  | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Gravity to Bodies, Collide with Bodies, Star Colours, Follow Body, Colour by Height, Orbits, Figure Eights, Scene Lights, Custom |  | Load one of the ready-made codes for this kind of node. If you had edited the code, your version is kept in a text named '… (before …)' |
 | amount | float | 1 | 0 to 10 |  | How strongly the field pushes |
 | field | function |  |  |  | The force to push with: wire in a function such as Wind Field's wind |
+| field · use | text | field(p) |  |  | How this node uses what's wired into 'field': one expression, e.g. field(p) * 0.4. It can use field's arguments (p), this node's inputs and the helpers. field(p) uses it as it is. Kept in the code as  use: …  on the field line |
 
 **Outputs**
 
@@ -1096,6 +1111,7 @@ Collide with Shape: bounce off a surface wired into 'sdf' (a GPU Surface node's 
 | bounce | float | 0.4 | 0 to 1 |  | How much speed is kept after a bounce (0 = stop dead, 1 = perfectly bouncy) |
 | radius | float | 0.02 | 0 to 1 |  | Particle radius used for contact, in metres |
 | sdf | function |  |  |  | The surface to bounce off: wire in a GPU Surface node's sdf output |
+| sdf · use | text | sdf(p) |  |  | How this node uses what's wired into 'sdf': one expression, e.g. sdf(p) * 0.4. It can use sdf's arguments (p), this node's inputs and the helpers. sdf(p) uses it as it is. Kept in the code as  use: …  on the sdf line |
 
 **Outputs**
 
@@ -1142,8 +1158,11 @@ Gravity to Bodies: Newton's pull towards a star at the centre and towards every 
 | starMass | float | 30 | 0 to 1000 |  | Pull of the star at the centre (0 = no star) |
 | soften | float | 0.25 | 0.01 to 10 |  | Stops the pull growing without limit very close to a body, in metres |
 | bodyPos | function |  |  |  | Where body i is at time t: wire in Orbits' planetPos |
+| bodyPos · use | text | bodyPos(i, t) |  |  | How this node uses what's wired into 'bodyPos': one expression, e.g. bodyPos(i, t) * 0.4. It can use bodyPos's arguments (i, t), this node's inputs and the helpers. bodyPos(i, t) uses it as it is. Kept in the code as  use: …  on the bodyPos line |
 | bodyMass | function |  |  |  | The mass of body i: wire in Orbits' planetMass |
+| bodyMass · use | text | bodyMass(i) |  |  | How this node uses what's wired into 'bodyMass': one expression, e.g. bodyMass(i) * 0.4. It can use bodyMass's arguments (i), this node's inputs and the helpers. bodyMass(i) uses it as it is. Kept in the code as  use: …  on the bodyMass line |
 | bodyCount | function |  |  |  | How many bodies there are: wire in Orbits' planetCount |
+| bodyCount · use | text | bodyCount() |  |  | How this node uses what's wired into 'bodyCount': one expression, e.g. min(bodyCount(), 100). It can use bodyCount's arguments (none), this node's inputs and the helpers. bodyCount() uses it as it is. Kept in the code as  use: …  on the bodyCount line |
 
 **Outputs**
 
@@ -1193,8 +1212,11 @@ Collide with Bodies: particles bounce off the star at the centre and off every b
 | margin | float | 0.12 | 0 to 1 |  | Extra room for mountains, as a fraction of each body's radius |
 | bounce | float | 0.5 | 0 to 1 |  | Speed kept after a bounce (0 = stop dead, 1 = perfectly bouncy) |
 | bodyPos | function |  |  |  | Where body i is at time t: wire in Orbits' planetPos |
+| bodyPos · use | text | bodyPos(i, t) |  |  | How this node uses what's wired into 'bodyPos': one expression, e.g. bodyPos(i, t) * 0.4. It can use bodyPos's arguments (i, t), this node's inputs and the helpers. bodyPos(i, t) uses it as it is. Kept in the code as  use: …  on the bodyPos line |
 | bodyRadius | function |  |  |  | The radius of body i: wire in Orbits' planetRadius |
+| bodyRadius · use | text | bodyRadius(i) |  |  | How this node uses what's wired into 'bodyRadius': one expression, e.g. bodyRadius(i) * 0.4. It can use bodyRadius's arguments (i), this node's inputs and the helpers. bodyRadius(i) uses it as it is. Kept in the code as  use: …  on the bodyRadius line |
 | bodyCount | function |  |  |  | How many bodies there are: wire in Orbits' planetCount |
+| bodyCount · use | text | bodyCount() |  |  | How this node uses what's wired into 'bodyCount': one expression, e.g. min(bodyCount(), 100). It can use bodyCount's arguments (none), this node's inputs and the helpers. bodyCount() uses it as it is. Kept in the code as  use: …  on the bodyCount line |
 
 **Outputs**
 
@@ -1390,6 +1412,7 @@ Material Look: particles in a Blender material's colours (its Principled BSDF: b
 | brightness | float | 1 | 0 to 10 |  | Overall brightness |
 | mat | material |  |  |  | The Blender material whose colours, roughness and metallic the particles take |
 | light | function |  |  |  | How they're lit: wire in Scene Lights' light (unwired: a soft default light) |
+| light · use | text | light(p, n, v, albedo, roughness, metallic) |  |  | How this node uses what's wired into 'light': one expression, e.g. light(p, n, v, albedo, roughness, metallic) * 0.4. It can use light's arguments (p, n, v, albedo, roughness, metallic), this node's inputs and the helpers. light(p, n, v, albedo, roughness, metallic) uses it as it is. Kept in the code as  use: …  on the light line |
 
 **Outputs**
 
@@ -1596,6 +1619,7 @@ Follow Body: carries particles or a mesh along with a moving body (e.g. a planet
 | body | int | 1 | 0 to 7 |  | Which body to follow (0 = the first) |
 | tilt | float | 0.45 | -3.2 to 3.2 |  | Tilt of the ring's plane, in radians |
 | bodyPos | function |  |  |  | Where body i is at time t: wire in Orbits' planetPos |
+| bodyPos · use | text | bodyPos(i, t) |  |  | How this node uses what's wired into 'bodyPos': one expression, e.g. bodyPos(i, t) * 0.4. It can use bodyPos's arguments (i, t), this node's inputs and the helpers. bodyPos(i, t) uses it as it is. Kept in the code as  use: …  on the bodyPos line |
 
 **Outputs**
 
@@ -1677,6 +1701,7 @@ Sway by Field: bends a mesh (grass, cloth, hair cards) with a force function wir
 | amount | float | 0.15 | 0 to 5 |  | How far it sways |
 | height | float | 0.6 | 0.01 to 10 |  | Height at which the sway is full; below it the mesh bends less (roots stay put) |
 | field | function |  |  |  | The force to sway with: wire in a function such as Wind Field's wind |
+| field · use | text | field(p) |  |  | How this node uses what's wired into 'field': one expression, e.g. field(p) * 0.4. It can use field's arguments (p), this node's inputs and the helpers. field(p) uses it as it is. Kept in the code as  use: …  on the field line |
 
 **Outputs**
 
