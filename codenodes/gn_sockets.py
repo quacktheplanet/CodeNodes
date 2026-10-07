@@ -996,7 +996,13 @@ def switch_template(obj, key, user=None):
 # ---- status in the graph ---------------------------------------------------------------------------
 
 def _fmt_count(n):
-    return f"{n / 1e6:.1f}M" if n >= 1e6 else (f"{n / 1e3:.0f}k" if n >= 1e3 else str(n))
+    """1500 -> 1.5k, 2500 -> 2.5k, 20000 -> 20k, 1000000 -> 1.0M (one decimal under ten, so it isn't rounded off)."""
+    if n >= 1e6:
+        return f"{n / 1e6:.1f}M"
+    if n >= 1e3:
+        k = n / 1e3
+        return f"{k:.1f}".rstrip("0").rstrip(".") + "k" if k < 10 else f"{k:.0f}k"
+    return str(n)
 
 
 def status_line(obj):
