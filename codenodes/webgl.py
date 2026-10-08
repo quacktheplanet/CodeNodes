@@ -5,8 +5,8 @@
 
 The chain's own code runs unchanged in the browser: the same composed source (spawn, born, behave,
 look, warp, functions, lists, use lines) and the same helpers, with the sliders in the same parameter
-buffer. Only the stepper differs (webgl_runtime.js). WebBlend's CodeNodes target calls particle_bundle
-and ships webgl_runtime.js with the page.
+buffer. Only the stepper differs (webgl_runtime.js). Other exporters can call particle_bundle
+and ship webgl_runtime.js with their own pages.
 
 Particles, GPU Surfaces (raymarched, lit by the scene's lights or a material when they're wired in) and
 mesh chains (GPU Mesh nodes, and warps or deforms heading a chain: the incoming mesh is shipped once and

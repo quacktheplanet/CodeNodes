@@ -3,8 +3,8 @@
     blender -b --factory-startup --python tests/test_webgl.py      (Blender 5.2+: GPU in background mode)
 
 Packages an object showing two chains (a Galaxy, and a Swirl pushed by a Wind Field with a use line and a
-List), checks the bundles and writes a page. That the page runs in a browser is checked by WebBlend's
-tests/browser_codenodes.mjs. Prints each check, ends with "ALL n CHECKS PASSED" or "FAIL: ...".
+List), checks the bundles and writes a page. That the page runs in a browser is checked separately
+with a headless Chrome. Prints each check, ends with "ALL n CHECKS PASSED" or "FAIL: ...".
 """
 import json
 import os

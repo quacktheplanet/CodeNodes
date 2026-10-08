@@ -273,7 +273,7 @@ entirely, and edit it on the fly.*
 **P2.6 — headless Blender to the web** (2026-09-26)
 
 Run Blender with no window, build the geometry, and publish it as an interactive page — three.js,
-with sliders for the parameters. A separate scene → HTML/CSS exporter (WebBlend, not yet
+with sliders for the parameters. A separate scene → HTML/CSS exporter (a companion add-on, not yet
 public) is heading the same way.
 
 Worth noting how close it already is: a shape description and a node tree are both **plain data
@@ -302,7 +302,7 @@ with declared parameters**, so the page can expose exactly those as sliders. Two
   `agent.web_shape` writes a ~60 KB page that rebuilds as sliders move (5-10 ms for the lamp),
   checked in headless Edge. Shapes whose parts cut others still need Blender. The port found a
   bug in the Python: a path's `line … steps N` could never work.
-- WebBlend can take the exporter as its core.
+- A companion web-page add-on can take the exporter as its core.
 
 **P2.7 — graphics showcases** (2026-09-26)
 

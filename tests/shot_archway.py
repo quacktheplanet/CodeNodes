@@ -1,5 +1,5 @@
 """Screenshot of the castle gate where the live (raymarched) castle meets the real plateau mesh, used to check
-the edge where the two meet (the thin dark jagged line the user saw at the bottom of the archway).
+the edge where the two meet (a thin dark jagged line at the bottom of the archway).
 
     blender --factory-startup --window-geometry 0 0 1600 960 --python tests/shot_archway.py
 

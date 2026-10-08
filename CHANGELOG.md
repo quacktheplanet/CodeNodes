@@ -9,9 +9,8 @@
   Several chains share one canvas and one camera (the scene camera's view to start, then drag and zoom).
   The page offers every node's sliders, one per node even when a node is shared by several chains.
   - In Blender: sidebar › **Export Live Web Page** (with a code node selected).
-  - In WebBlend: the **CodeNodes Live** compile target puts it on a page (WebBlend branch
-    `codenodes-target`).
-  - tests/test_webgl.py checks the packaging; WebBlend's tests/browser_codenodes.mjs runs it in Chrome.
+  - A companion web-page add-on (not yet public) can place it on a page through the same bundle.
+  - tests/test_webgl.py checks the packaging; a browser check runs the page in Chrome.
   - **GPU Surfaces too:** the raymarcher runs as one fragment shader at the page's resolution (the SDF, its
     `color(p)`, the sun or the scene's lights and a material when wired in, soft shadows, ambient occlusion,
     fog) and writes depth, so particles pass behind a castle.
@@ -23,7 +22,7 @@
 
 ## 0.6.0 (release candidate): the modular workflow
 
-The design settled on 2026-10-07: Uses, then Lists, then Explode / Collapse.
+Built in three steps: Uses, then Lists, then Explode / Collapse.
 
 - **Use lines: one shared function, each node decides what it means.** Every function input shows a
   text input under it (`wind · use`) holding one expression: `wind(p) * 0.4`, `vec3(wind(p).xy, 0)`,

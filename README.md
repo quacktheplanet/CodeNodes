@@ -23,10 +23,11 @@ scenes as interactive web pages.
 - *the Aerie citadel as a GPU Surface, raymarched live*
 - *fireflies from a chain of six code nodes, with a little firefly model on each for the render*
 
-> **Status: early (v0.3).** Everything listed as *works* is covered by tests on Blender 5.0.1 and
-> 5.1.2, on Windows 11 with an NVIDIA GPU. Other platforms haven't been tried yet.
+> **Status: early (v0.6).** Everything listed as *works* is covered by tests on Blender 5.0, 5.1 and
+> 5.2: on Windows with OpenGL, and on Linux with OpenGL and Vulkan (including headless), all on NVIDIA
+> GPUs. AMD, Intel and macOS haven't been tried yet. See [TODO.md](TODO.md) for the roadmap.
 >
-> **Licence: to be decided.** Until a licence file is added, please ask before reusing the code.
+> **Licence:** GPL-3.0-or-later.
 
 ## Your first five minutes
 
@@ -114,8 +115,9 @@ each frame:
 No bake is needed. Stills land in the Render window, animations are written to the output path in its
 format (a movie is written from the rendered frames with Blender's own movie writer), and a scene
 without GPU nodes gets Blender's own render. The Rendered viewport keeps drawing the live GPU nodes. A
-preference (CodeNodes › "F12 and Render menu include GPU nodes") switches it off. For command-line or
-farm renders, bake first.
+preference (CodeNodes › "F12 and Render menu include GPU nodes") switches it off. **Command-line and
+farm renders** (`blender -b file.blend -a`) include GPU nodes on Blender 5.2 and newer, where background
+Blender has a GPU; on 5.0 and 5.1, bake first.
 
 **Tab into a code node** to see its code in a frame, and its full status or error in another. The
 Node Editor sidebar (N) only has what Blender can't put on a node: an Edit Code button, an Add To
@@ -164,8 +166,7 @@ Pull a script apart, share the pieces, and let each node use them its own way.
 
 Select an object with GPU particle chains, GPU Surfaces or mesh chains and click **Export Live Web Page** in the sidebar: you get a
 page that runs those chains in the browser (WebGL2), the same code that runs in your viewport, with each
-node's sliders as page controls. Serve the folder (`python -m http.server`) and open it. For a whole site
-built in Blender, WebBlend's **CodeNodes Live** target places it on a page next to text, images and video.
+node's sliders as page controls. Serve the folder (`python -m http.server`) and open it.
 
 ## A bigger example: the Galaxy
 
@@ -224,7 +225,13 @@ scene, the asteroids keep moving, but the planets they orbit stay where the real
 | **Everything on the node** | settings as node inputs (Template dropdown, count, colours, toggles), status in the header, ✎ Edit Code toggle opens a code pop-up | works |
 | **Node editor** | code nodes with typed sockets that compile into one GPU program | works |
 | **Bake to Disk** | animations written to files that play back with stock nodes; renders with no GPU and no add-on | works |
-| **Bake to Nodes** | the GLSL itself becomes a Geometry Nodes network | experimental (needs the ExpressNode add-on, not public yet) |
+| **Use lines** | each node decides what a shared function input (a wind field, say) means to it; one function, many meanings | works |
+| **Lists** | a List node (a table you edit) and list inputs on code nodes; real Geometry Nodes lists on Blender 5.2 | works |
+| **Explode / Collapse** | pull a script's top-level pieces (constants, helper functions) onto the graph and put them back; code nodes work inside node groups | works |
+| **Computed values into code nodes** | values computed by other nodes (Math, Scene Time…) feed code-node inputs | works (fields are read at the origin) |
+| **Live web pages from code nodes** | particle chains, GPU Surfaces and mesh chains run in a browser (WebGL2) with each node's sliders | works |
+| **Render form** | GPU Mesh code and warps compiled to native Geometry Nodes, so they render with no GPU code at all | experimental (needs the ExpressNode add-on) |
+| **Bake to Nodes** | the GLSL itself becomes a Geometry Nodes network | experimental (needs the ExpressNode add-on) |
 | **Claude plugin (MCP + skill)** | Claude builds, renders and looks at its work in your open Blender; nothing to start in Blender; fixed tool list, no arbitrary code | works |
 | **Geometry Nodes agent** | build, explain and edit any node tree as data; a library of tested capabilities (terrain, scatter, walls, rooms, roofs, stairs, water, paths) | works |
 | **Web pages** | a scene as one self-contained page with sliders; Code Shapes rebuild live in the browser | works |
@@ -234,9 +241,10 @@ scene, the asteroids keep moving, but the planets they orbit stay where the real
 ## Requirements
 
 - **Blender 5.0 or newer.**
-- **A GPU and a Blender window** for the live GPU features (Code → Mesh, Volume, Particles). Background
-  Blender (`-b`) has no GPU, so bake first for headless renders. Shapes, Geometry Nodes and the web
-  export all work headless.
+- **A GPU** for the live GPU features. On Blender 5.0 and 5.1 they need a Blender window, because
+  background Blender (`-b`) has no GPU there, so bake first for headless renders. On 5.2 and newer,
+  background Blender has a GPU, and command-line renders include GPU nodes. Shapes, Geometry Nodes and
+  the web export work headless on every version.
 - **To use it with Claude:** Claude Code, and Python 3.10+ on the PATH (the MCP server uses the
   standard library only: nothing to install).
 
@@ -250,7 +258,7 @@ scene, the asteroids keep moving, but the planets they orbit stay where the real
    blender --command extension build --source-dir codenodes --output-dir dist
    ```
 
-   That writes `dist/codenodes-0.1.2.zip` (Blender needs the `dist` folder to exist first).
+   That writes `dist/codenodes-0.6.0.zip` (Blender needs the `dist` folder to exist first).
 2. **Install it.** Edit › Preferences › Get Extensions › the ⌄ menu at the top right ›
    **Install from Disk…** › pick the zip. It's enabled straight away.
 
@@ -608,7 +616,7 @@ There are three phases.
    GPU and without this add-on. **Remove Cache** goes back to live.
 3. **Bake to Nodes (experimental).** The code itself becomes a Geometry Nodes network: no files, no
    GPU, evaluated natively every frame, sliders on the modifier. CodeNodes translates the GLSL into
-   the language of ExpressNode (a separate add-on, not public yet), which builds the node group;
+   the language of [ExpressNode](https://github.com/quacktheplanet/ExpressNode) (a separate add-on), which builds the node group;
    a Volume Cube (density = −sdf) and Volume to Mesh make the surface. Tested against the GPU mesh from
    the same code: the same vertices, after a slider change and on an animated frame. About 8 ms per
    rebuild at resolution 96.
@@ -640,20 +648,30 @@ api.bake_to_nodes("Ring")   # to nodes: {"ok": True, "sliders": [...]} or {"ok":
 
 ## Known limitations
 
-- **Tested on Windows only** (Windows 11, NVIDIA RTX A4500, OpenGL). macOS, Linux and other GPUs
-  haven't been tried.
-- GPU code (Code → Mesh, Volume, Particles) needs Blender with a window. Bake first for headless renders.
+- **Tested on NVIDIA only:** Windows (OpenGL) and Linux (OpenGL and Vulkan). AMD, Intel and macOS
+  (Metal) haven't been tried.
+- On Blender 5.0 and 5.1, GPU code needs Blender with a window; bake first for headless renders. On 5.2+
+  background Blender has a GPU.
 - Code → Volume has no node or panel yet; it's used from scripts and the assistant.
 - Surface nets rounds off sharp edges and corners slightly. For crisp edges, use Code → Shape.
 - Baked file paths are absolute, so moving a .blend with a bake breaks its playback. A relative-path
   mode is planned.
 - Roofs cover a plan's bounding box; L- and T-shaped plans don't get proper roofs yet.
 - Buildings from a spec and the `geonodes/` library are experimental (see above).
-- Bake to Nodes needs the ExpressNode add-on, which isn't public yet.
+- Bake to Nodes and the render form need the ExpressNode add-on.
 - GPU nodes and Blender objects don't shadow each other, and the live additive glow isn't tone-mapped
   in the Solid viewport (dense glow can clip to white).
 
 ## Tests
+
+**The easy way:** run every suite on every Blender you have.
+- **Windows:** `powershell -File tools/testing/run_all_cn.ps1 -Blender <blender.exe>,<blender.exe>`.
+  Windowed suites run on a hidden desktop, so no window appears while you work.
+- **Linux:** `tools/testing/run_all_linux.sh <blender> [<blender> ...]` runs everything headless. For
+  the window-only suites too, use `eval "$(tools/testing/xvfb_linux.sh)"` and `GPU_BACKEND=vulkan`.
+
+Individual suites, a selection (`tests/` has the rest: GPU nodes, graphs, Uses, Lists, Explode, groups,
+the web export, the render form, F12):
 
 ```bash
 python tests/test_mesher.py                                    # mesher, no Blender (17 checks)

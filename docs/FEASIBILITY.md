@@ -171,11 +171,11 @@ Two things made it exact:
      one family at a time, each tested against Blender like the terrain.
   2. Instancing, primitives and sampling on WebGPU compute. That's medium.
   3. Curve to Mesh and booleans. That's large, and the right home is probably CPU or WebAssembly.
-- **Anything unsupported can fall back to baked variants**, which WebBlend's Configurator already does.
+- **Anything unsupported can fall back to baked variants**, as a web exporter's slider configurator can do.
 
 ## 6. Blender objects to the web — works
 
-- **WebBlend's showcase test passes 17/17** on branch `components`:
+- **A companion web exporter's (not yet public) showcase test passes 17/17:**
   - GLB viewer
   - VGEO streaming with a GLB fallback
   - an instanced scene (2 assets, 63 placements)
@@ -202,7 +202,7 @@ Two things made it exact:
    - anything unsupported falls back to baked variants
 
    The add-on should show, per tree, which parts will be live and which baked, before export.
-6. **Objects go to the web through WebBlend,** which already works (GLB, VGEO streaming, variants).
+6. **Objects go to the web through a companion exporter (not yet public),** which already works (GLB, VGEO streaming, variants).
 
 ## What not to promise yet
 

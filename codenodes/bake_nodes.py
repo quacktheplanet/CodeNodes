@@ -404,13 +404,26 @@ def translate(source, time_offset=0.0):
 WRAPPER_PREFIX = "CN Nodes "
 
 
+# ExpressNode's package was renamed from `coding_nodes` to `expressnode`, and it ships as a Blender
+# extension (then it lives under bl_ext.<repository>.expressnode). Try every place it can be.
+EXPRESSNODE_PACKAGES = ("expressnode", "coding_nodes")
+
+
 def _expression_nodes():
-    try:
-        from coding_nodes.backend.pipeline import build_in_blender
-        return build_in_blender
-    except ImportError:
-        raise CannotConvert("Bake to Nodes needs the ExpressNode add-on "
-                            "(github.com/quacktheplanet/ExpressNode) installed and enabled") from None
+    import importlib
+    import sys
+    names = list(EXPRESSNODE_PACKAGES)
+    for mod in list(sys.modules):            # an installed extension: bl_ext.<repo>.expressnode
+        if mod.startswith("bl_ext.") and mod.rsplit(".", 1)[-1] in EXPRESSNODE_PACKAGES:
+            names.append(mod)
+    for name in names:
+        for sub in ("backend.pipeline", "coding_nodes.backend.pipeline", "expressnode.backend.pipeline"):
+            try:
+                return importlib.import_module(f"{name}.{sub}").build_in_blender
+            except (ImportError, AttributeError):
+                continue
+    raise CannotConvert("Bake to Nodes needs the ExpressNode add-on "
+                        "(github.com/quacktheplanet/ExpressNode) installed and enabled") from None
 
 
 def build(obj):

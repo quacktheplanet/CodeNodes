@@ -309,8 +309,9 @@ def phase3(state):
         res = bpy.ops.codenodes.gn_make_native('EXEC_DEFAULT')
     if res != {'FINISHED'}:
         try:
-            import coding_nodes  # noqa: F401
-        except ImportError:
+            from codenodes import bake_nodes
+            bake_nodes._expression_nodes()
+        except Exception:
             raise Fail("Make Native needs ExpressNode: put it at ../ExpressNode or set CODENODES_EXPRESSION_NODES")
     ng = nat.node_tree
     check(res == {'FINISHED'} and not gn_link.is_code_group(ng) and nat_src not in bpy.data.objects
