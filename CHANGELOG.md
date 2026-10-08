@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased (branch `webgl-export`): code nodes on the web
+## 0.6.0 (2026-10-08): the first public release
+
+### Code nodes on the web
 
 - **Particle chains run live in a browser.** `codenodes/webgl.py` packages every particle chain on an
   object (its composed GLSL, slider values, look, emitter samples and the object's place) and
@@ -20,7 +22,7 @@
     mesh the chain receives is shipped once and its `deform` runs in the vertex shader each frame. The
     whole Windy Meadow runs on a page: swaying grass, smoke and fireflies, one Wind Field slider for all.
 
-## 0.6.0 (release candidate): the modular workflow
+### The modular workflow
 
 Built in three steps: Uses, then Lists, then Explode / Collapse.
 
@@ -82,7 +84,7 @@ Built in three steps: Uses, then Lists, then Explode / Collapse.
   merging point clouds keeps only one material list (Blender 5.2), which took the material off the
   tree's own made-real points.
 
-## 0.5.0 (unreleased, draft): the Galaxy, and graphs that do more than a line of nodes
+## 0.5.0 (development build, not released): the Galaxy, and graphs that do more than a line of nodes
 
 - **The Galaxy scene** (`examples/galaxy_demo.py`, `examples/galaxy_scene.py`): a solar system in front
   of a spiral galaxy and a nebula, built to show reuse (one Planet Terrain node, three planets), sharing
@@ -115,7 +117,7 @@ Built in three steps: Uses, then Lists, then Explode / Collapse.
   tools/testing/run_all_linux.sh runs the whole matrix with no display. A blank socket shape (5.0.0 in
   background mode) counts as single-value in the catalog.
 
-## 0.4.1 (unreleased, draft): a crash fixed, sliders you can see, tooltips
+## 0.4.1 (development build, not released): a crash fixed, sliders you can see, tooltips
 
 - **Fixed a crash when switching a node's Template** (reported from the v4 demo). Rebuilding a group's
   sockets freed the old ones; an error printed afterwards asked Python for "Did you mean …?"
@@ -134,7 +136,7 @@ Built in three steps: Uses, then Lists, then Explode / Collapse.
   reads the hit distance unfiltered instead of blending it with "no hit" across the outline.
 - Demo: the firefly render setup is one **Firefly Model** node (Size, Flap Speed, Glow Strength).
 
-## 0.4.0 (unreleased, draft): code-node graphs, caching and lighting
+## 0.4.0 (development build, not released): code-node graphs, caching and lighting
 
 ### Graphs, not just chains
 - A stream wired into several stages splits into branches, each going its own way (glowing heads and
@@ -183,7 +185,7 @@ Built in three steps: Uses, then Lists, then Explode / Collapse.
 - Mesh stages get the random and noise helpers (`curlNoise`, `gnoise`, `rand1`...) that particles
   have, so a Wind Field can feed a mesh chain.
 
-## 0.3.0 (unreleased, draft): code nodes you write, wired into chains
+## 0.3.0 (development build, not released): code nodes you write, wired into chains
 
 ### A node's sockets come from its code
 - `// @in float|int name default min max`, `// @in color name r g b` and
@@ -230,7 +232,7 @@ Built in three steps: Uses, then Lists, then Explode / Collapse.
   velocity.
 - tests/test_modular.py (27 checks, Blender 5.0.1 and 5.1.2).
 
-## 0.2.0 (unreleased, draft): GPU nodes
+## 0.2.0 (development build, not released): GPU nodes
 
 ### GPU code as nodes, drawn live
 - **GPU Particles** are stepped by a compute shader and drawn straight from GPU memory into the
@@ -276,7 +278,7 @@ Built in three steps: Uses, then Lists, then Explode / Collapse.
   node follows it. 3D View › Add › Mesh › GPU Surface adds one when asked, and so does the
   assistant's `code_node` (`make_real`, on by default).
 
-## 0.1.2 (unreleased, draft)
+## 0.1.2 (development build, not released)
 
 ### Nodes first
 - **3D Viewport › Add › Mesh › Code Mesh / Code Shape / Code Particles** now make an object whose
@@ -308,7 +310,7 @@ Built in three steps: Uses, then Lists, then Explode / Collapse.
 - Booleans are checked one part at a time: an empty or implausible result is an error naming the
   part, instead of a partial mesh reported as fine.
 
-## 0.1.1 (unreleased, draft)
+## 0.1.1 (development build, not released)
 
 ### Code nodes in Geometry Nodes
 - **Add › CodeNodes** in the Geometry Nodes editor: Code Mesh (SDF), Code Shape and Code Particles,
@@ -328,7 +330,7 @@ Built in three steps: Uses, then Lists, then Explode / Collapse.
 - The starter node graph makes a small Saturn instead of an unexplained blob.
 - README: a "Your first five minutes" section.
 
-## 0.1.0 (unreleased, draft)
+## 0.1.0 (development build, not released)
 
 The first public version. Tested on Blender 5.0.1 and 5.1.2, Windows 11, NVIDIA RTX A4500.
 
