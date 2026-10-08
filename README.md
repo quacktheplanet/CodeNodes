@@ -230,9 +230,6 @@ claude plugin marketplace add quacktheplanet/CodeNodes
 claude plugin install codenodes@codenodes
 ```
 
-(While this work is on the `gpu-nodes` branch, add the branch:
-`claude plugin marketplace add "quacktheplanet/CodeNodes#gpu-nodes"`.)
-
 Then open Blender (with the add-on installed) and ask Claude for something: *"use CodeNodes to make a
 vase with a wavy rim and render it"*, or *"make a donut code node and wire three copies into a
 Join"*. There's nothing to start or copy in Blender: the add-on lets assistants on this computer
@@ -670,4 +667,5 @@ repo.
 
 ## Licence
 
-To be decided. Until a licence file is added, the code is not licensed for reuse; please ask first.
+GPL-3.0-or-later, like Blender itself: see [LICENSE](LICENSE). That covers the add-on, the MCP
+server, the node-group assets and the examples.
