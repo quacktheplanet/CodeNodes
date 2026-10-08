@@ -9,10 +9,13 @@ param(
     [string]$Extra = "--factory-startup",
     [int]$Timeout = 300,
     [string]$Pattern = 'ok:|FAIL|CHECKS|Traceback|Error',
-    [string]$Repo = (Resolve-Path "$PSScriptRoot\..\..").Path,
+    [string]$Repo = "",
     [string]$Blender = ""
 )
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+# $PSScriptRoot can be empty inside param() defaults (powershell -File from another host), so the repo
+# default is worked out here instead.
+if (-not $Repo) { $Repo = (Resolve-Path (Join-Path $here "..\..")).Path }
 if (-not ("HiddenRun" -as [type])) { Add-Type -Path "$here\HiddenRun.cs" }
 $exe = if ($Blender) { $Blender } else {
     "$env:ProgramFiles\Blender Foundation\Blender $(($Ver -split '\.')[0..1] -join '.')\blender.exe" }

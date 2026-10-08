@@ -146,7 +146,7 @@ def main():
     double, _ = drift(obj)
     check(abs(double / base - 2.0) < 0.02, f"and the particles are pushed twice as far ({double / base:.3f}×)")
     comp, _v = links.composite(gn_link.source_of(src.node_tree))
-    check("_field_in(p) * 2.0" in comp.source, "compiled as a wrapper around the shared wind")
+    check("wired_field(p) * 2.0" in comp.source, "compiled as a wrapper around the shared wind")
 
     # edited in the code -> the node
     pobj.codenodes.text.from_string(code.replace("field(p) * 2.0", "-field(p) * amount"))

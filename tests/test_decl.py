@@ -100,18 +100,18 @@ def main():
     drift = chain.Unit("Drift", DRIFT, funcs={"wind": (wind, "wind")})
     comp = chain.compose_particles(head, [drift])
     src = comp.source
-    check("#define n1_wind_in f0_Wind_Field_wind" in src, "the wired function comes in under its raw name")
-    check("vec3 n1_wind(vec3 p, float t) { return n1_wind_in(p, t) * n1_height * 0.5; }" in src,
+    check("#define n1_wired_wind f0_Wind_Field_wind" in src, "the wired function comes in under its raw name")
+    check("vec3 n1_wind(vec3 p, float t) { return n1_wired_wind(p, t) * n1_height * 0.5; }" in src,
           "the use line becomes a wrapper: the node's sliders prefixed, the arguments kept")
     check(src.index("vec3 n1_wind(vec3 p") < src.index("void n1_behave"),
           "the wrapper comes before the code that calls it")
     check("n1_wind(p.position, uSceneTime)" in src, "the node's code still calls wind(...)")
     plain = chain.compose_particles(head, [chain.Unit("Plain", PLAIN, funcs={"wind": (wind, "wind")})])
-    check("#define n1_wind f0_Wind_Field_wind" in plain.source and "n1_wind_in" not in plain.source,
+    check("#define n1_wind f0_Wind_Field_wind" in plain.source and "n1_wired_wind" not in plain.source,
           "without a use line it's the plain alias, as before (no cost)")
     lone = chain.compose_particles(head, [chain.Unit("Drift", DRIFT)])
-    check("vec3 n1_wind_in(vec3 p, float t) { return vec3(0.0); }" in lone.source
-          and "return n1_wind_in(p, t) * n1_height * 0.5;" in lone.source,
+    check("vec3 n1_wired_wind(vec3 p, float t) { return vec3(0.0); }" in lone.source
+          and "return n1_wired_wind(p, t) * n1_height * 0.5;" in lone.source,
           "unwired, the use line wraps the stand-in")
     # the same wind, used two ways by two nodes in one chain
     a = chain.Unit("Gentle", DRIFT.replace("* height * 0.5", "* 0.1"), funcs={"wind": (wind, "wind")})
@@ -121,8 +121,8 @@ def main():
     check(two.source.count("vec3 wind(vec3 p, float t) {") == 0
           and two.source.count("f0_Wind_Field_wind(vec3 p, float t)") == 1,
           "one shared Wind Field is included once")
-    check("return n1_wind_in(p, t) * 0.1;" in two.source
-          and "return n2_wind_in(p, t) + vec3(0.0, 0.0, n2_height);" in two.source,
+    check("return n1_wired_wind(p, t) * 0.1;" in two.source
+          and "return n2_wired_wind(p, t) + vec3(0.0, 0.0, n2_height);" in two.source,
           "and each node wraps it its own way")
     # errors in a use line point at the declaration line in the node's own code
     line = next(i for i, l in enumerate(src.splitlines(), 1) if l.startswith("vec3 n1_wind(vec3 p"))
@@ -138,7 +138,7 @@ def main():
                                           "// @in float v_scale 1.0\n"
                                           "void deform(inout Vertex v) { v.position += wind(v.position); }\n",
                                           funcs={"wind": (wind, "wind")})])
-    check("return n0_wind_in(p) * n0_v_scale;" in mesh.source, "use lines work in mesh chains too")
+    check("return n0_wired_wind(p) * n0_v_scale;" in mesh.source, "use lines work in mesh chains too")
     check(any("takes vec3 wind(vec3 p)" in w for w in mesh.warnings),
           "and a provider with more arguments than the input is flagged")
     lists()

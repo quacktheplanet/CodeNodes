@@ -73,7 +73,7 @@ def main():
         live._flush()
     head = gn_link.source_of(swirl.node_tree)
     comp, _v = links.composite(head)
-    check("_field_in(p) * 0.5" in comp.source and "_targets_count() { return 3; }" in comp.source,
+    check("wired_field(p) * 0.5" in comp.source and "_targets_count() { return 3; }" in comp.source,
           "a chain with a use line and a List compiles from the install")
     check(not head.codenodes.last_error, f"and runs on the GPU ({head.codenodes.last_error[:80]})")
     w = explode_ops.explode_node(tree, swirl)

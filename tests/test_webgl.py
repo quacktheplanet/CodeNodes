@@ -85,8 +85,8 @@ def main():
     check(len(castle["lights"]) == 140 and castle["bounds"][0] != castle["bounds"][1] and castle["sky"] in (True, False),
           "with their bounds, sun and light block")
     sw = next(b for b in bundles if b["name"] == "Swirl")
-    check("_field_in(p) * 0.5" in sw["source"] and "_targets_count() { return 3; }" in sw["source"]
-          and re.search(r"#define n1_field_in f0_\w*_wind", sw["source"]),
+    check("wired_field(p) * 0.5" in sw["source"] and "_targets_count() { return 3; }" in sw["source"]
+          and re.search(r"#define n1_wired_field f0_\w*_wind", sw["source"]),
           "a chain's code is packaged whole: the wired-in wind, its use line and the List")
     check(sw["prelude"].count("float rand1(") == 1 and "void cnSpawn(" in sw["source"],
           "with the helpers it calls, once")

@@ -201,7 +201,9 @@ class _Builder:
         # line (`use: wind(p) * 0.4`) wraps it: the code keeps calling wind(p) and gets the use line's
         # value, so each node decides what a shared function means to it.
         for f in d.func_ins:
-            raw = f"{prefix}{f.name}_in" if f.wraps() else prefix + f.name
+            # (the wired-in name must not start with the wrapper's name: Blender 5.0's shader
+            # preprocessor mangles `#define n1_field_in ...` followed by `vec3 n1_field(...)`)
+            raw = f"{prefix}wired_{f.name}" if f.wraps() else prefix + f.name
             link = u.funcs.get(f.name)
             if link is not None:
                 provider, export = link

@@ -4,9 +4,11 @@
 # Blender builds: -Blender 'path\to\blender.exe','path\to\other\blender.exe' (version read from each),
 # default every "Blender X.Y" under C:\Program Files\Blender Foundation. -Deps: a folder of Python
 # packages the plain suites import (numpy etc.), if your Python lacks them.
-param([string]$Repo = (Resolve-Path "$PSScriptRoot\..\..").Path, [string[]]$Only = @(),
+param([string]$Repo = "", [string[]]$Only = @(),
       [string[]]$Blender = @(), [string]$Python = "", [string]$Deps = "")
-Add-Type -Path "$PSScriptRoot\HiddenRun.cs"
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+if (-not $Repo) { $Repo = (Resolve-Path (Join-Path $here "..\..")).Path }   # $PSScriptRoot can be empty in param()
+Add-Type -Path "$here\HiddenRun.cs"
 $py = if ($Python) { $Python } else { (Get-Command python -ErrorAction Stop).Source }
 if ($Deps) { $env:PYTHONPATH = $Deps }
 $T = "$Repo\tests"
