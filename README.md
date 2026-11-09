@@ -1,242 +1,51 @@
 # CodeNodes
 
-**Code nodes inside Geometry Nodes, running on the GPU.** Each code node is a node you write: its code
-declares its own inputs and outputs, and you wire code nodes together like any other nodes. Each
-chain compiles into one GPU program and draws live in the viewport:
-- particle systems built from small nodes: a source, then behaviours, then a look (millions of
-  particles)
-- surfaces from distance functions, raymarched live
-- code that runs on every vertex of a mesh, and warps that bend particles and meshes alike
+**Write your own Geometry Nodes nodes in code.** A code node's code says what goes in, what comes
+out, and the maths in between. Wire it into a Geometry Nodes tree beside Blender's own nodes, feed it
+from them, feed them from it, and tune it with sliders.
 
-**Code runs on the GPU by default, and one node makes it geometry.** Every code node runs and draws
-on the GPU, live. Add **To Geometry** after a chain when you want ordinary Blender geometry: its
-header reads **To Points** after particles and **To Mesh** after a surface or mesh chain. Then you can
-instance on it, shade it, render it in EEVEE or Cycles, or export it. Nothing inserts it for you.
+**Made for writing with Claude.** Claude is good at maths and geometry code. CodeNodes lets it write
+code and gives you the result as nodes you keep editing: move a slider, add your own nodes around
+it, or ask Claude to change the code. A Claude Code plugin (an MCP server and a skill) comes with it.
 
-It also lets an assistant build, read and edit ordinary **Geometry Nodes** setups, and publish
-scenes as interactive web pages.
+![Code nodes wired into an ordinary Geometry Nodes tree](docs/gn_integration.png)
 
-![Night falls on the Aerie castle: fireflies glow across a plateau shaped by GPU code](docs/gpu_demo.jpg)
-
-*The demo scene (`examples/gpu_demo.py`), rendered with F12:*
-- *a flat grid shaped into a plateau by a GPU Mesh node*
-- *the Aerie citadel as a GPU Surface, raymarched live*
-- *fireflies from a chain of six code nodes, with a little firefly model on each for the render*
-
-> **Status: early (v0.6).** Everything listed as *works* is covered by tests on Blender 5.0, 5.1 and
-> 5.2: on Windows with OpenGL, and on Linux with OpenGL and Vulkan (including headless), all on NVIDIA
-> GPUs. AMD, Intel and macOS haven't been tried yet. See [TODO.md](TODO.md) for the roadmap.
+> **Status: early (v0.6), and the main goal isn't reached yet.** Code nodes that Geometry Nodes
+> itself evaluates, inside your tree, with fields going in and out, work today for maths without
+> loops, through the companion add-on [ExpressNode](https://github.com/quacktheplanet/ExpressNode).
+> Loops, lists and geometry operations come next. [Where it stands](#where-it-stands) says what works
+> now; [TODO.md](TODO.md) has the roadmap.
+>
+> Tested on Blender 5.0, 5.1 and 5.2: on Windows with OpenGL, and on Linux with OpenGL and Vulkan
+> (including headless), all on NVIDIA GPUs. AMD, Intel and macOS haven't been tried yet.
 >
 > **Licence:** GPL-3.0-or-later.
 
-## Your first five minutes
+## Where it stands
 
-After installing (see [Install](#install)), open the demo (build it with `examples/gpu_demo.py`, see
-[Quick start](#quick-start)), or start fresh:
+Code meets Geometry Nodes in four ways today. What sets them apart is who runs the code, because
+that decides what you can do with the result.
 
-1. Select a mesh (a plane works), open the **Geometry Nodes** editor, and add
-   **Shift A › CodeNodes › GPU Particles › Firefly Swarm**. Set its **Emit From** to the plane.
-2. Add **Shift A › CodeNodes › Particle Stages › Wander**, **Rise** and **Blink**, and **Particle Looks › Firefly Look**. Wire each one's
-   **Particles** output into the next one's **Particles** input. Fireflies appear in the 3D viewport:
-   glowing, blinking, wings flapping, drawn straight from the GPU. The source's header says
-   `Firefly Swarm · live · 2.5k`, and each stage says `in chain`.
-3. Everything you can change is **on the nodes**: each node's sliders come from its code (`strength`,
-   `climb`, `rate`, `size`, `flap`…), with the Template dropdown and settings panels beside them.
-   **Hover over any socket** for a sentence saying what it does. The timeline doesn't need to play:
-   with it paused the viewport keeps simulating, so dragging Wander's `strength` changes the motion
-   straight away.
-4. Switch on **✎ Edit Code**, a node's first input. Its code pops up in a Text Editor window, and the
-   toggle switches itself back off. Double-clicking the node or pressing Ctrl+E does the same. Change
-   the code and the fireflies follow as you type. A new `// @in float gust 1 0 5` line becomes a new
-   input on the node; a new `// @out attr heat` line becomes a new output. End a line with a sentence
-   in quotes (`// @in float gust 1 0 5  "How strong the gusts are"`) and that's its tooltip.
-5. **Shift A › CodeNodes › To Geometry** after the last node turns the chain into real points (its
-   header reads **To Points**),
-   carrying `velocity`, `age` and each attribute the chain declares (Blink's `brightness` and
-   `phase`). Wire them into Instance on Points, Set Material or anything else. Set its **When** to
-   *Only for Render* to keep the live look in the viewport.
-6. **F12** (or Render › Render Image) renders with the GPU nodes included; **Ctrl+F12** renders the
-   animation, to the output path in its format (movies too).
-7. Code nodes form a **graph**: wire Blink's **Particles** output into both Firefly Look and
-   **Streak Look**, and you get glowing heads *and* trails from one simulation. **Join Particles**
-   merges two streams; one **Wind Field** can push the fireflies and sway a grass mesh at once.
-8. **Scene Lights** lights code nodes with your lamps and world; **Material Look** brings in a
-   Blender material. **GPU Cache** bakes a simulation (⟳ Bake Now) and plays it back.
+| | You write | Who runs it | What you get | State |
+|---|---|---|---|---|
+| **Native code nodes** | Python-style maths: `def ripple(P, t, amp=0.3): ...` | Geometry Nodes: the code is compiled into stock nodes | fields in and out; works per object, in the modifier stack, in bakes and on render farms; the file opens without any add-on | maths only, no loops yet; lives in [ExpressNode](https://github.com/quacktheplanet/ExpressNode) |
+| **Code Shapes** | a small shape language: profiles, revolve, extrude, sweep, loft | CodeNodes, in Python (and in JavaScript in a browser) | exact meshes with sharp edges and real UVs, a slider for every `param` | works |
+| **GPU code nodes** | GLSL: particles, distance-function surfaces, code on every vertex | your graphics card, drawn live over the viewport by CodeNodes | millions of particles live; **To Geometry** turns the result into real geometry | works, but Geometry Nodes doesn't run them: a field wired in is read at the origin |
+| **Geometry Nodes as data** | nothing: an assistant reads and writes your trees | Blender | Claude builds, explains and edits ordinary node trees without breaking them | works |
 
-Every node, with its code and every socket, is in [docs/NODE_REFERENCE.md](docs/NODE_REFERENCE.md);
-how graphs, baking and lighting work is in [docs/GPU_NODES.md](docs/GPU_NODES.md).
+## Where it's going
 
-**The kinds of code node** (all in Shift A › CodeNodes, and in 3D View › Add › Mesh):
+The goal is the first row without its limits:
+- a code node in your tree whose sockets follow its code as you type
+- compiled into stock nodes, so Geometry Nodes runs it like any other node
+- loops (Repeat zones), lists (Blender 5.2), state between frames (Simulation zones), geometry
+  operations and your own functions
+- code nodes wired to each other and to Blender's nodes
+- as fast as the same nodes built by hand
 
-| Node | You write | Starters |
-|---|---|---|
-| **GPU Particles** | a source: `spawn(p)`, optionally `update(p, dt)` and `look(p)` | Galaxy, Flow, Attractor (from Myriad), Swirl, Fountain, Firefly Swarm, Spark Ball |
-| **GPU Stage** | one step in a chain: `behave(p, dt)`, `born(p)`, `look(p)`, `warp(q)`, `deform(v)`, or functions for other nodes | Wander, Rise, Gravity, Vortex, Drag, Blink, Push by Field, Collide with Shape, Glow Look, Firefly Look, Streak Look, Material Look, Bend, Taper, Ripple, Sway by Field, Wind Field, Scene Lights |
-| **Join Particles** / **GPU Cache** | nothing: flow nodes that merge two particle streams, or bake and play back a simulation | — |
-| **GPU Surface (SDF)** | `float sdf(vec3 p)`, the distance to the surface; optional `vec3 color(vec3 p)` | Castle (from Aerie), Planet (Tellus-style), Saturn, Donut, Rounded Box, Gyroid Ball, Blob |
-| **GPU Mesh** | `void deform(inout Vertex v)`, run on every vertex of the mesh wired into it | Wave, Noise Displace, Mesa, Twist |
-| **Code Shape** | a small shape language (profiles, revolve, extrude, sweep); real geometry straight away | Desk Lamp, Vase |
-
-![The demo in the Geometry Nodes workspace: the firefly chain drawn live, and the render side that places a firefly on each point](docs/gpu_workspace.jpg)
-
-**A node's sockets come from its code:**
-
-```glsl
-// @in  float amount 1.0 0 10      a slider           // @in  int   steps 2 1 8     a whole number
-// @in  color tint 1 0.6 0.2       a colour           // @in  func  vec3 field(vec3 p)   a function input
-// @out attr  heat 0.0             a per-particle value, readable by later nodes (and a field output)
-// @out func  force                one of your functions, as an output socket
-```
-
-Particles travel on **Particles** sockets, meshes on Geometry sockets, functions on **Closure**
-sockets, and attributes come out as float fields. Each node's names get their own prefix, so nodes
-never clash. Compile errors name the node and the line you wrote. A **Bend** node works on particles
-and meshes alike, and never changes the simulation: straighten it and the swirl is exactly as before.
-[docs/GPU_NODES.md](docs/GPU_NODES.md) has the full syntax, how chains combine, the numbers, the limits,
-and proposals for the rest of the starter library.
-
-![The same Bend node on a galaxy of particles and on a mesh column](docs/bend.jpg)
-
-**Live, and converted.** A GPU chain on its own draws straight from GPU memory into the viewport:
-- a million particles at about 190 fps
-- the six-node firefly chain at about 150
-- all depth-tested against your objects
-
-That's a viewport picture: it isn't selectable, and later nodes can't see it. **To Geometry** turns
-it into geometry.
-
-**Rendering: just press F12.** Running GPU code while Blender renders crashes Blender, so when a
-scene has GPU code nodes, F12, Ctrl+F12 and Render › Render Image / Render Animation take turns, for
-each frame:
-1. step the GPU chains to that frame
-2. convert them (live-only chains just for the render)
-3. render that frame, then move on
-
-No bake is needed. Stills land in the Render window, animations are written to the output path in its
-format (a movie is written from the rendered frames with Blender's own movie writer), and a scene
-without GPU nodes gets Blender's own render. The Rendered viewport keeps drawing the live GPU nodes. A
-preference (CodeNodes › "F12 and Render menu include GPU nodes") switches it off. **Command-line and
-farm renders** (`blender -b file.blend -a`) include GPU nodes on Blender 5.2 and newer, where background
-Blender has a GPU; on 5.0 and 5.1, bake first.
-
-**Tab into a code node** to see its code in a frame, and its full status or error in another. The
-Node Editor sidebar (N) only has what Blender can't put on a node: an Edit Code button, an Add To
-Geometry button, and the full error text.
-
-**How a code node works under the hood.** Blender doesn't let add-ons define new nodes inside
-Geometry Nodes, so a code node is an ordinary **Group node**, and its sockets are the group's inputs
-and outputs. Each node you add (or duplicate with Shift D) gets its own code. Values that come in
-through a link are followed back to a Value or Integer node, a reroute, or the modifier's own input.
-A value computed by other nodes (Math, Scene Time, ...) is evaluated by a hidden helper and read
-back, so it works too, frame by frame (a field is read at the origin).
-**Make Native** replaces a GPU Surface node with real Geometry Nodes that do the same maths (needs
-the ExpressNode add-on), so the file no longer needs CodeNodes at all.
-
-**The separate CodeNodes node editor** (Sidebar › **New Node Graph**, or switch any Node Editor's
-type to *CodeNodes*) combines several distance functions into one GPU program with Combine (union,
-subtract, blend), Transform and Offset nodes. The starter graph makes a small Saturn.
-
-## The modular workflow: the Windy Meadow
-
-Pull a script apart, share the pieces, and let each node use them its own way.
-`examples/meadow_demo.py` builds this scene and renders it with no window (Blender 5.2):
-
-![The Windy Meadow: grass and chimney smoke in one wind, fireflies drifting between lanterns](docs/meadow_render.jpg)
-
-- **Use lines: one wind, three meanings.** One **Wind Field** is wired into three nodes, and its header
-  says `used by 3`. Every function input has a use line under it saying how that node applies what's
-  wired in. The grass's **Sway by Field** uses `vec3(field(p).xy, 0.0) * 1.4` (sideways only). The
-  fireflies' **Push by Field** uses `field(p) * 0.25` (a gentle drift). The smoke's uses
-  `field(p) * 1.2 + vec3(0.0, 0.0, amount * 0.4)` (it bends and rises). Type on the node or in the
-  code: they stay in sync.
-- **Lists: data on the graph.** **Lanterns** is a List node, a table of positions and pulls. The
-  fireflies' **Attract to List** reads it in code (`targets(i).strength`), and native nodes read the
-  same table (Get List Item → Points → Instance on Points) to stand a lantern on every row. Add a row
-  and there's another lantern, with fireflies gathering round it.
-- **Explode: a script's pieces as nodes.** **Drift** is exploded. Double-click (or Tab) into it like
-  any node group: its `CALM` constant is a Value node and its `loop()` helper is a node of its own,
-  both wired into what's left of Drift. Right-click › Collapse Into Code puts them back exactly.
-  Any code nodes can be grouped with Ctrl+G too, and chains run straight through the group.
-
-![The meadow's node tree: Wind Field used by 3, the Lanterns List, Drift exploded](docs/meadow_nodes.jpg)
-
-![Inside the exploded Drift: its CALM constant as a Value node and loop() as a node of its own](docs/meadow_exploded.jpg)
-
-## On the web
-
-Select an object with GPU particle chains, GPU Surfaces or mesh chains and click **Export Live Web Page** in the sidebar: you get a
-page that runs those chains in the browser (WebGL2), the same code that runs in your viewport, with each
-node's sliders as page controls. Serve the folder (`python -m http.server`) and open it.
-
-## A bigger example: the Galaxy
-
-The firefly chain is one line of nodes. The Galaxy scene (`examples/galaxy_demo.py` builds it, and
-`examples/galaxy_scene.py` is the code) shows what a *graph* of code nodes adds to Geometry Nodes: a
-solar system in front of a spiral galaxy and a nebula, where the systems share functions and act on
-each other. Select **Solar System** and its node tree shows four labelled frames:
-
-![The Galaxy scene rendered: planets, the Sun, the asteroid belt, a ringed planet, the galaxy and the nebula](docs/galaxy_render.jpg)
-
-1. **Shared Orbit: one node, many consumers.** The **Orbits** node has no stream. It gives out
-   functions: `planetPos(i, t)`, `planetRadius(i)`, `planetMass(i)` and `planetCount()`. The planets'
-   placement, the asteroids' gravity, their collisions and the ring all call those same functions.
-   Pick **Figure Eights** in Orbits' Template dropdown and all of them follow the new paths at once:
-   the planets trace figures of eight, the asteroids feel them in their new places, and the ring
-   goes along.
-2. **Reuse: one node, three planets.** Three **Planet Terrain** nodes (the same starter, a GPU Mesh)
-   with different seeds and sea levels make a rocky world, an ocean world and an ice world. Each is
-   painted by a **Colour by Height** node. It's the Mesa idea on a sphere, and yes, it combines with
-   anything, because its input and output are ordinary geometry.
-3. **Native + GPU: they take turns.** Ico Sphere (native) → Planet Terrain (GPU) → Colour by Height
-   (GPU) → To Mesh → Set Material (native) → Geometry to Instance → Instance on Points (native). The
-   points it instances on come from a GPU node, **Points from Function**, which places one point per
-   planet with Orbits' `planetPos` and writes `bodySize` for Instance on Points' Scale.
-4. **Interaction: systems act on each other.** An asteroid **Belt** runs through **Gravity to
-   Bodies** (pulled by the star and every planet) and **Collide with Bodies** (bouncing off them; none
-   ever ends up inside one), then To Points and Instance on Points turn it into lumpy rocks. A
-   **Ring** of dust goes round the second planet through **Follow Body**.
-
-Around it: a **Sun** (a GPU Surface lit by its own emission, with a real Point light parented to it,
-so the real planets are lit), a **Galaxy** of a million stars coloured by temperature (**Star
-Colours** writes a `temp` attribute that a Blackbody node uses in renders), and a **Nebula** (GPU
-sprites live; a real volume from ordinary nodes, Volume Cube from noise, switched on for renders
-with Is Viewport).
-
-**Timing:** orbits use `uSceneTime`, the timeline's time. While the viewport previews a paused
-scene, the asteroids keep moving, but the planets they orbit stay where the real planets are.
-
-## What's in it
-
-| Feature | What it does | Status |
-|---|---|---|
-| **Code → Mesh** (scripted object) | GLSL signed distance function → watertight quad mesh, sampled on the GPU | works |
-| **Code → Shape** | a small shape language → exact, constructed meshes with sharp edges and real UVs | works |
-| **Code → Volume** | GLSL density → OpenVDB volume that renders natively | works (script/API only, no panel yet) |
-| **Code nodes you write** | a node's code declares its inputs (sliders, whole numbers, colours, functions) and outputs (streams, functions, per-particle attributes); sockets follow the code as you type | works |
-| **Graphs of code nodes** | streams split into branches (branches that only differ in looks share one simulation), merge with Join Particles, and one function feeds any number of nodes; every path compiles into one GPU program; errors name the node and line | works |
-| **GPU Cache** | bake a live particle simulation to disk (16-bit floats, compressed, next to the .blend) and play it back; Blender's own Bake node works after To Geometry too | works |
-| **Scene Lights / Material Look** | your lamps, world and Blender materials on code nodes: lit looks for particles, and lit GPU Surfaces | works |
-| **GPU Particles** | a particle source you write, drawn live (millions); Emit From another object's surface; To Geometry → points with velocity, age, life and the chain's attributes | works |
-| **GPU Stage** | behaviours, looks (glow, fireflies with flapping wings), warps (Bend, Taper on particles and meshes), mesh stages, functions | works |
-| **GPU Surface** | a distance function raymarched live in the viewport, lit, depth-tested with your objects; To Geometry → a watertight mesh | works |
-| **GPU Mesh** | code run on every vertex of the mesh wired into it; To Geometry → the same topology with new positions, `color` and `value` | works |
-| **To Geometry** | the node that turns a GPU node's result into real geometry: When (every frame / when changed / only for render), limits, attributes | works |
-| **Rendering GPU nodes** | F12, Ctrl+F12 and the Render menu: GPU and renderer take turns per frame, no bake needed | works |
-| **Everything on the node** | settings as node inputs (Template dropdown, count, colours, toggles), status in the header, ✎ Edit Code toggle opens a code pop-up | works |
-| **Node editor** | code nodes with typed sockets that compile into one GPU program | works |
-| **Bake to Disk** | animations written to files that play back with stock nodes; renders with no GPU and no add-on | works |
-| **Use lines** | each node decides what a shared function input (a wind field, say) means to it; one function, many meanings | works |
-| **Lists** | a List node (a table you edit) and list inputs on code nodes; real Geometry Nodes lists on Blender 5.2 | works |
-| **Explode / Collapse** | pull a script's top-level pieces (constants, helper functions) onto the graph and put them back; code nodes work inside node groups | works |
-| **Computed values into code nodes** | values computed by other nodes (Math, Scene Time…) feed code-node inputs | works (fields are read at the origin) |
-| **Live web pages from code nodes** | particle chains, GPU Surfaces and mesh chains run in a browser (WebGL2) with each node's sliders | works |
-| **Render form** | GPU Mesh code and warps compiled to native Geometry Nodes, so they render with no GPU code at all | experimental (needs the ExpressNode add-on) |
-| **Bake to Nodes** | the GLSL itself becomes a Geometry Nodes network | experimental (needs the ExpressNode add-on) |
-| **Claude plugin (MCP + skill)** | Claude builds, renders and looks at its work in your open Blender; nothing to start in Blender; fixed tool list, no arbitrary code | works |
-| **Geometry Nodes agent** | build, explain and edit any node tree as data; a library of tested capabilities (terrain, scatter, walls, rooms, roofs, stairs, water, paths) | works |
-| **Web pages** | a scene as one self-contained page with sliders; Code Shapes rebuild live in the browser | works |
-| **Buildings from a spec** | a written spec → floor plan → building → equipment → checks (factories, warehouses, simple houses) | experimental |
-| **`geonodes/` library** | node-group assets and example scenes that open in plain Blender, no add-on needed | experimental |
+The GPU nodes stay, as the live preview and effects side. The building generator and the node-group
+library are moving to a repository of their own (see
+[Moving out](#moving-out-buildings-and-the-node-group-library)).
 
 ## Requirements
 
@@ -291,14 +100,15 @@ are open).
 
 | To try | Do this |
 |---|---|
+| A native code node | Install [ExpressNode](https://github.com/quacktheplanet/ExpressNode). In a Geometry Nodes editor press N › **ExpressNode** tab, type a function, click **Add Expression Node Group**, and wire its **Result** into anything. |
+| Code → Shape | Add › Mesh › **Code Shape**. Sliders appear on the node for every `param` line. |
+| Geometry Nodes capabilities | From a clone of this repo: `blender -b --factory-startup --python examples/village_demo.py -- out` builds and renders the village shown below into `out/`. |
 | GPU Particles | Geometry Nodes › Shift A › CodeNodes › **GPU Particles › Galaxy** (or Flow, Attractor…), wired to the output; play the timeline. |
 | GPU Surface | Shift A › CodeNodes › **GPU Surface › Castle**; add **To Geometry** after it for a real mesh. |
 | GPU Mesh | Wire any mesh into Shift A › CodeNodes › **GPU Mesh › Wave**, then **To Geometry** for the modified mesh. |
 | The demo scene | `blender --factory-startup --window-geometry 0 0 1600 960 --python examples/gpu_demo.py -- out` builds `out/codenodes_demo_v3.blend` (a Fireflies scene and a Bend scene) and renders it. |
-| Code → Shape | Add › Mesh › **Code Shape**. Sliders appear on the node for every `param` line. |
 | Code → Volume | From the Python console: `from bl_ext.user_default.codenodes import api, volume` then `api.code_to_volume(volume.TEMPLATE, name="Smoke")`. |
 | Node editor | Open a Node Editor and switch its type to **CodeNodes** (or Sidebar › CodeNodes › **New Node Graph**). |
-| Geometry Nodes capabilities | From a clone of this repo: `blender -b --factory-startup --python examples/village_demo.py -- out` builds and renders the village above into `out/`. |
 | Web page with sliders | `blender -b --factory-startup --python examples/web_simple.py -- courtyard.html`, then open the page in a browser. |
 | The library without the add-on | Open anything in [`geonodes/`](geonodes/) in plain Blender (see its README). |
 
@@ -306,24 +116,31 @@ The examples run straight from a clone (they load CodeNodes from the repo, no in
 are listed in [examples/README.md](examples/README.md). Everything below goes into
 each feature in more detail.
 
-## Code → Mesh
+## Native code nodes, today
 
-Write a signed distance function (negative inside, positive outside). CodeNodes samples it on the
-GPU and builds a real, watertight quad mesh.
+[ExpressNode](https://github.com/quacktheplanet/ExpressNode) compiles a short Python-style function
+into an ordinary Geometry Nodes group, with the function's parameters as inputs and a **Result**
+output. Geometry Nodes evaluates it like any other group, so fields work both ways:
 
-```glsl
-// @param radius 1.0 0.2 2.0
-// @param thickness 0.3 0.05 0.8
-float sdf(vec3 p) {
-  return smin(sdTorus(p, radius, thickness), sdSphere(p, 0.6), 0.4);
-}
+```python
+def ripple(P, t, freq=6.0, amp=0.3):
+    return vec3(0.0, 0.0, sin(P.x * freq + t) * amp)
 ```
 
-Each `// @param name default min max` line becomes a slider. Your slider values are kept when the
-code changes, so an assistant can rewrite the code without resetting what you tuned. **Live**
-rebuilds as you edit; **Animate** rebuilds every frame, with the time in `uTime`.
+In a Geometry Nodes editor, press N, open the **ExpressNode** tab, type the function and click **Add
+Expression Node Group**. Then wire **Result** into Set Position's Offset, or into anything else. It
+handles maths, `if`/`else`, your own helper functions, noise and attributes. It doesn't handle loops
+or geometry operations yet.
 
-## Code → Shape
+CodeNodes uses the same compiler in three places. All three are experimental and need ExpressNode
+installed:
+- **Make Native** replaces a GPU Surface node with stock nodes that do the same maths
+- **Bake to Nodes** turns a Code → Mesh distance function into a node network
+- the **render form** compiles GPU Mesh code and warps into nodes, so they render with no GPU
+
+Bringing this into CodeNodes' own code nodes is the next step (see [Where it's going](#where-its-going)).
+
+## Code Shapes
 
 Maths turned into a model that is *constructed* rather than sampled. Declare sliders, describe a 2D
 profile, then spin or push it:
@@ -367,110 +184,6 @@ numbers.
 It is a language CodeNodes parses itself, not Python, so a description from anywhere is safe to
 build.
 
-## Code → Volume
-
-Write a density instead of a distance and get smoke, cloud or nebula geometry that EEVEE and Cycles
-render natively:
-
-```glsl
-// @param scale 1.6 0.2 6.0
-float density(vec3 p) {
-  return clamp(1.0 - length(p) / 1.6 + 0.5 * (fbm3(p * scale) - 0.55), 0.0, 1.0);
-}
-```
-
-```python
-api.code_to_volume(source, name="Smoke", resolution=96)                    # one frame
-api.code_to_volume(source, name="Smoke", frame_start=1, frame_end=48)      # a .vdb sequence
-```
-
-Volumes are written as OpenVDB files, so a sequence plays back natively with no add-on and no GPU.
-
-## Code → Particles
-
-Write the solver yourself. `spawn` places a particle, `update` moves it, and CodeNodes keeps the
-state on the GPU and steps it as the frame changes:
-
-```glsl
-// @param speed 1.0 0.0 4.0
-void spawn(inout Particle p) {
-  p.position = randBall(p.seed) * 1.8;
-  p.life = 4.0 + rand1(p.seed * 3.3) * 3.0;      // then it respawns
-}
-void update(inout Particle p, float dt) {
-  p.velocity = vec3(-p.position.y, p.position.x, 0.2) * speed;  // your own field: a swirl
-  p.position += p.velocity * dt;
-}
-```
-
-`Particle` carries `position`, `velocity`, `age`, `life` and a per-particle `seed`. The points come
-out as a real point cloud with `velocity`, `speed`, `age` and `life` attributes, so Geometry Nodes
-can instance anything onto them and Cycles uses `velocity` for motion blur. (The Add › Code
-Particles template shows a curl-noise field written the same way.) Shade with **`speed`**, not
-`velocity`: Blender reserves that name for motion blur and a shader can't read it back.
-Add › Mesh › **Code Particles**, or `api.code_to_particles(source, name="Swirl", count=20000)`.
-
-300,000 particles simulate in about 12 ms per frame on an RTX A4500.
-
-## From a script
-
-```python
-from bl_ext.user_default.codenodes import api      # the extension's module path
-api.code_to_mesh(source, name="Ring", resolution=128)
-# {"ok": True, "faces": 18432, ...}, or {"ok": False, "error": "line 3: undefined variable 'lenght'"}
-api.set_params("Ring", radius=1.4)
-print(api.reference())                             # the helper functions available in GLSL
-```
-
-Errors never raise. They come back with the line number in *your* code, so a caller can fix the code
-and try again.
-
-## Node editor
-
-Open a Node Editor and switch its type to **CodeNodes** (or View3D › Sidebar › CodeNodes ›
-**New Node Graph** for a starter graph).
-
-| node | does |
-|---|---|
-| **SDF Code** | code in a Text block; each `@param` line becomes an input socket |
-| **Combine** | Union, Subtract, Intersect, Smooth Union, Smooth Subtract (blend width K) |
-| **Transform** | move, rotate, scale a shape |
-| **Offset** | grow or shrink a shape |
-| **Mesh Output** | Code → Mesh: target object, resolution, bounds, Live, Animate |
-| **Particles** | a solver in code; its `@param` lines become input sockets |
-| **Points Output** | simulates and shows the points on an object, with the same Live / Animate / Bake |
-| **Shape** | a parametric description; its `param` lines become input sockets |
-
-The whole graph compiles into one GPU program. Each code node's functions and parameters get a
-per-node prefix, so two nodes can both define `bump()`. A compile error names the node and the line
-inside it, and that node shows the error too. Reroutes and muted nodes pass shapes through, and
-graphs can have up to 256 sliders.
-
-## Driving it from an assistant
-
-`codenodes.agent` is the surface an assistant works through. Every call returns a plain dict and
-never raises for a fixable mistake, so a model can read the error, fix its code and try again:
-
-```python
-from bl_ext.user_default.codenodes import agent
-agent.help()                                   # the kinds, the GLSL helpers, a template for each
-agent.make("mesh", code, name="Ring")          # or "particles" / "volume" / "shape"
-agent.set_params("Ring", radius=1.4)
-agent.look_at("Ring"); agent.light("studio")   # frame it, light it
-agent.render()                                 # -> {"path": "...png"} to open and look at
-agent.scene()                                  # what exists, with each object's kind and sliders
-agent.bake("Ring", 1, 48)
-```
-
-`look_at` and `light` exist because a render with no camera aim or lighting comes out black, which
-wastes a whole round trip.
-
-**Over MCP.** `mcp/` is an MCP server (standard library only) that exposes those functions to an
-assistant, so it can build something, render it and look at what it made; the Claude Code plugin
-runs it for you (see [Use it with Claude](#use-it-with-claude)). It only accepts connections from
-this computer and **has no way to run arbitrary code in Blender**: the add-on answers only the names
-in its own tool table. See [mcp/README.md](mcp/README.md).
-
 ## Geometry Nodes, built and edited by an assistant
 
 ![A level built entirely through the tools](docs/level_demo.jpg)
@@ -483,7 +196,8 @@ lamps modelled in the shape language. Every step was one tool call:
 `codenodes.gn` lets an assistant work with ordinary Geometry Nodes: build a setup, understand one
 that already exists, and change part of it without disturbing the rest.
 
-**A library of tested capabilities** to compose rather than write from nothing. Each is an ordinary
+**A library of tested capabilities** to compose rather than write from nothing. (This library is moving to its own repository: see
+[Moving out](#moving-out-buildings-and-the-node-group-library).) Each is an ordinary
 node group with its controls as modifier sliders, seeded so the same seed gives the same result:
 
 | capability | what it does |
@@ -540,28 +254,72 @@ agent.nodes_check("MyGroup")              # what came out: mesh, curves, points,
 The same tools are MCP tools, alongside `material`, `collect`, `curve`, `light("outdoor")`,
 `look_at` and `render`, so an assistant can build a scene, look at it and fix what it sees.
 
-## Buildings from a spec (experimental)
+## GPU code nodes
 
-"Make me a 60 x 40 m factory floor with docks, racking, machining, two robot cells, QA and offices"
-becomes a spec (spaces with areas, closeness ratings, material flow, equipment), and six tools do the
-rest:
+![Night falls on the Aerie castle: fireflies glow across a plateau shaped by GPU code](docs/gpu_demo.jpg)
+
+*The demo scene (`examples/gpu_demo.py`), rendered with F12: a plateau shaped by a GPU Mesh node,
+the Aerie citadel as a GPU Surface raymarched live, and fireflies from a chain of six code nodes.*
+
+Code nodes written in GLSL, run on the graphics card and drawn live in the viewport. Each node's code
+declares its inputs and outputs. Wire nodes into chains and graphs, and every path compiles into one
+GPU program:
+- **GPU Particles:** a particle source you write, then stages for what the particles do and how they
+  look (millions of particles, live)
+- **GPU Surface:** a distance function, raymarched live
+- **GPU Mesh:** code run on every vertex of the mesh wired into it
+- **GPU Stage:** one step in a chain: a behaviour, a look, a warp, or functions for other nodes
+
+**How they fit into Geometry Nodes.** Blender doesn't let add-ons add new node types to Geometry
+Nodes, so a GPU code node is an ordinary Group node: CodeNodes runs its code and draws the result over
+the viewport. Geometry Nodes doesn't evaluate it. Values come in from Value nodes, reroutes or the
+modifier's inputs, and a field wired in is read at the origin. **To Geometry** after a chain turns it
+into real points or a mesh that the rest of the tree, renders and exports can use. F12 and the Render
+menu include GPU nodes without a bake, and the same code runs in a browser (WebGL2).
+
+- [docs/GPU_TOUR.md](docs/GPU_TOUR.md): a hands-on walk through the firefly chain, the Windy Meadow
+  and the Galaxy
+- [docs/GPU_NODES.md](docs/GPU_NODES.md): how nodes, chains, rendering, baking and lighting work,
+  and their limits
+- [docs/NODE_REFERENCE.md](docs/NODE_REFERENCE.md): every node, with its code and every socket
+
+## Code → Mesh, Volume and Particles
+
+Besides code nodes, CodeNodes turns code straight into geometry on an object, from the Add menu, a
+script or an assistant:
+- **Code → Mesh:** a GLSL distance function becomes a watertight quad mesh
+- **Code → Volume:** a density becomes an OpenVDB volume that renders natively
+- **Code → Particles:** a solver you write becomes a point cloud with velocity, age and life
+- **The CodeNodes node editor** combines distance functions into one GPU program
+- **Bake to Disk** and **Bake to Nodes** make animations render anywhere, with no GPU
+
+All of it, with code examples and how CodeNodes keeps Blender from crashing, is in
+[docs/SCRIPTED_OBJECTS.md](docs/SCRIPTED_OBJECTS.md).
+
+## Driving it from an assistant
+
+`codenodes.agent` is the surface an assistant works through. Every call returns a plain dict and
+never raises for a fixable mistake, so a model can read the error, fix its code and try again:
 
 ```python
-agent.plan_site(spec, name="Plant")      # or example="factory"; a plan, a text grid, a picture
-agent.edit_plan("Plant", [{"op": "swap", "a": "QA", "b": "Offices"}])
-agent.build_plan("Plant")                # walls with every door and dock cut, roof, columns, lights
-agent.place_equipment("Plant")           # conveyors, fenced robot cells, rack rows, machine rows
-agent.verify("Plant")                    # collisions, aisles, egress walk, reach, floating parts,
-                                         # openings, mesh intersections; renders three views
-agent.assets("robot_arm")                # a generator's sliders, clearances and joints
+from bl_ext.user_default.codenodes import agent
+agent.help()                                   # the kinds, the GLSL helpers, a template for each
+agent.make("mesh", code, name="Ring")          # or "particles" / "volume" / "shape"
+agent.set_params("Ring", radius=1.4)
+agent.look_at("Ring"); agent.light("studio")   # frame it, light it
+agent.render()                                 # -> {"path": "...png"} to open and look at
+agent.scene()                                  # what exists, with each object's kind and sliders
+agent.bake("Ring", 1, 48)
 ```
 
-The same six are MCP tools. Everything is built from the Geometry Nodes library and 17 parametric
-generators. It's a first pass: layouts are sensible and every check passes, but the equipment is
-simple and blocky and house plans come out boxy. How it works and why:
-[docs/MODELING_RESEARCH.md](docs/MODELING_RESEARCH.md).
+`look_at` and `light` exist because a render with no camera aim or lighting comes out black, which
+wastes a whole round trip.
 
-![the example factory](docs/factory_demo.jpg)
+**Over MCP.** `mcp/` is an MCP server (standard library only) that exposes those functions to an
+assistant, so it can build something, render it and look at what it made; the Claude Code plugin
+runs it for you (see [Use it with Claude](#use-it-with-claude)). It only accepts connections from
+this computer and **has no way to run arbitrary code in Blender**: the add-on answers only the names
+in its own tool table. See [mcp/README.md](mcp/README.md).
 
 ## To the web, with sliders
 
@@ -603,51 +361,76 @@ a million-particle simulation, a raster flythrough, a mesh editor) made alongsid
 them in a browser with WebGL2. Two of them load three.js from a CDN, so they need an internet
 connection.
 
-## Animation, and making it render
+## Moving out: buildings and the node-group library
 
-There are three phases.
+Two parts of this repository are outside CodeNodes' main job and are moving to a repository of their
+own: the capability library (terrain, scatter, walls, rooms, roofs, stairs, water and paths, in
+`codenodes/gn/library.py`) with the [`geonodes/`](geonodes/) assets, and the building generator
+(`codenodes/factory/`). The tools for reading, writing and editing Geometry Nodes trees stay. Until
+the move, everything works as described here.
 
-1. **Live.** Turn on **Animate** and the mesh rebuilds on every frame change, using `uTime`. This is
-   for working, not for rendering: running GPU code from a frame handler during an F12 render crashes
-   Blender, and background Blender has no GPU at all.
-2. **Baked.** Press **Bake to Disk**, pick a frame range, and CodeNodes writes one file per frame next
-   to your .blend and builds a small node group (Scene Time → Format String → Import PLY) that plays
-   it back. From then on it's ordinary Geometry Nodes geometry: it renders in F12, on a machine with no
-   GPU and without this add-on. **Remove Cache** goes back to live.
-3. **Bake to Nodes (experimental).** The code itself becomes a Geometry Nodes network: no files, no
-   GPU, evaluated natively every frame, sliders on the modifier. CodeNodes translates the GLSL into
-   the language of [ExpressNode](https://github.com/quacktheplanet/ExpressNode) (a separate add-on), which builds the node group;
-   a Volume Cube (density = −sdf) and Volume to Mesh make the surface. Tested against the GPU mesh from
-   the same code: the same vertices, after a slider change and on an animated frame. About 8 ms per
-   rebuild at resolution 96.
+### Buildings from a spec (experimental)
 
-   What translates: local variables, maths, `?:`, your own helper functions and CodeNodes' distance
-   helpers (`sdSphere`, `sdBox`, `smin`, `rotateZ`…), `uTime`/`uFrame`. Loops, `if` statements and
-   `noise3`/`fbm3` don't yet: the button says which line and suggests Bake to Disk.
+"Make me a 60 x 40 m factory floor with docks, racking, machining, two robot cells, QA and offices"
+becomes a spec (spaces with areas, closeness ratings, material flow, equipment), and six tools do the
+rest:
 
 ```python
-api.bake("Blob", 1, 48)     # to disk
-api.bake_to_nodes("Ring")   # to nodes: {"ok": True, "sliders": [...]} or {"ok": False, "error": "line 9: a loop...", "fallback": "bake"}
+agent.plan_site(spec, name="Plant")      # or example="factory"; a plan, a text grid, a picture
+agent.edit_plan("Plant", [{"op": "swap", "a": "QA", "b": "Offices"}])
+agent.build_plan("Plant")                # walls with every door and dock cut, roof, columns, lights
+agent.place_equipment("Plant")           # conveyors, fenced robot cells, rack rows, machine rows
+agent.verify("Plant")                    # collisions, aisles, egress walk, reach, floating parts,
+                                         # openings, mesh intersections; renders three views
+agent.assets("robot_arm")                # a generator's sliders, clearances and joints
 ```
 
-## What keeps it from crashing
+The same six are MCP tools. Everything is built from the Geometry Nodes library and 17 parametric
+generators. It's a first pass: layouts are sensible and every check passes, but the equipment is
+simple and blocky and house plans come out boxy. How it works and why:
+[docs/MODELING_RESEARCH.md](docs/MODELING_RESEARCH.md).
 
-- A shader that doesn't compile is a message, not a crash. The driver's log is captured and mapped
-  back to your line numbers.
-- The GPU only samples the grid; the meshing is pure numpy. One slice is timed first, and code that
-  would take too long is refused before it can stall the GPU. Work runs in short slabs.
-- Resolution (8–512), memory (1 GiB) and texture size are checked before anything runs.
-- A new mesh is built on the side and swapped in only when everything succeeded, so a failed build
-  leaves the object as it was. Materials and modifiers carry over, and old mesh data is freed.
-- Animate is skipped while a render job runs.
-- Rebuilding a node (a new template, a code edit that changes its sockets) never keeps Python
-  references to Blender data across the rebuild: users are saved and re-found by name. And before any
-  error is printed, Blender structs are taken off it, because Python's "Did you mean …?" suggestion
-  calls dir() on them, which crashes Blender when the struct was just freed (this was a real crash on
-  switching templates).
+![the example factory](docs/factory_demo.jpg)
+
+## Everything in it
+
+| Feature | What it does | Status |
+|---|---|---|
+| **Code → Mesh** (scripted object) | GLSL signed distance function → watertight quad mesh, sampled on the GPU | works |
+| **Code → Shape** | a small shape language → exact, constructed meshes with sharp edges and real UVs | works |
+| **Code → Volume** | GLSL density → OpenVDB volume that renders natively | works (script/API only, no panel yet) |
+| **Code nodes you write** | a node's code declares its inputs (sliders, whole numbers, colours, functions) and outputs (streams, functions, per-particle attributes); sockets follow the code as you type | works |
+| **Graphs of code nodes** | streams split into branches (branches that only differ in looks share one simulation), merge with Join Particles, and one function feeds any number of nodes; every path compiles into one GPU program; errors name the node and line | works |
+| **GPU Cache** | bake a live particle simulation to disk (16-bit floats, compressed, next to the .blend) and play it back; Blender's own Bake node works after To Geometry too | works |
+| **Scene Lights / Material Look** | your lamps, world and Blender materials on code nodes: lit looks for particles, and lit GPU Surfaces | works |
+| **GPU Particles** | a particle source you write, drawn live (millions); Emit From another object's surface; To Geometry → points with velocity, age, life and the chain's attributes | works |
+| **GPU Stage** | behaviours, looks (glow, fireflies with flapping wings), warps (Bend, Taper on particles and meshes), mesh stages, functions | works |
+| **GPU Surface** | a distance function raymarched live in the viewport, lit, depth-tested with your objects; To Geometry → a watertight mesh | works |
+| **GPU Mesh** | code run on every vertex of the mesh wired into it; To Geometry → the same topology with new positions, `color` and `value` | works |
+| **To Geometry** | the node that turns a GPU node's result into real geometry: When (every frame / when changed / only for render), limits, attributes | works |
+| **Rendering GPU nodes** | F12, Ctrl+F12 and the Render menu: GPU and renderer take turns per frame, no bake needed | works |
+| **Everything on the node** | settings as node inputs (Template dropdown, count, colours, toggles), status in the header, ✎ Edit Code toggle opens a code pop-up | works |
+| **Node editor** | code nodes with typed sockets that compile into one GPU program | works |
+| **Bake to Disk** | animations written to files that play back with stock nodes; renders with no GPU and no add-on | works |
+| **Use lines** | each node decides what a shared function input (a wind field, say) means to it; one function, many meanings | works |
+| **Lists** | a List node (a table you edit) and list inputs on code nodes; real Geometry Nodes lists on Blender 5.2 | works |
+| **Explode / Collapse** | pull a script's top-level pieces (constants, helper functions) onto the graph and put them back; code nodes work inside node groups | works |
+| **Computed values into code nodes** | values computed by other nodes (Math, Scene Time…) feed code-node inputs | works (fields are read at the origin) |
+| **Live web pages from code nodes** | particle chains, GPU Surfaces and mesh chains run in a browser (WebGL2) with each node's sliders | works |
+| **Render form** | GPU Mesh code and warps compiled to native Geometry Nodes, so they render with no GPU code at all | experimental (needs the ExpressNode add-on) |
+| **Bake to Nodes** | the GLSL itself becomes a Geometry Nodes network | experimental (needs the ExpressNode add-on) |
+| **Claude plugin (MCP + skill)** | Claude builds, renders and looks at its work in your open Blender; nothing to start in Blender; fixed tool list, no arbitrary code | works |
+| **Geometry Nodes agent** | build, explain and edit any node tree as data; a library of tested capabilities (terrain, scatter, walls, rooms, roofs, stairs, water, paths) | works |
+| **Web pages** | a scene as one self-contained page with sliders; Code Shapes rebuild live in the browser | works |
+| **Buildings from a spec** | a written spec → floor plan → building → equipment → checks (factories, warehouses, simple houses) | experimental |
+| **`geonodes/` library** | node-group assets and example scenes that open in plain Blender, no add-on needed | experimental |
 
 ## Known limitations
 
+- **Native code nodes do maths only:** no loops, lists or geometry operations yet, and they need the
+  ExpressNode add-on.
+- **GPU code nodes aren't evaluated by Geometry Nodes:** a field wired into one is read at the origin,
+  and the live result is a viewport overlay until **To Geometry** turns it into geometry.
 - **Tested on NVIDIA only:** Windows (OpenGL) and Linux (OpenGL and Vulkan). AMD, Intel and macOS
   (Metal) haven't been tried.
 - On Blender 5.0 and 5.1, GPU code needs Blender with a window; bake first for headless renders. On 5.2+
