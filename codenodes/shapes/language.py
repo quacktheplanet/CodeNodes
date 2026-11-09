@@ -78,6 +78,21 @@ SOLID_WORDS = ("revolve", "extrude", "sweep", "loft", "translate", "rotate", "sc
                "array", "smooth", "bevel")
 
 
+def split_commas(text):
+    """Split at the commas outside brackets: `max(1, 2), 3` is two arguments, not three."""
+    parts, depth, start = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return [p.strip() for p in parts if p.strip()]
+
+
 def split_args(text, keywords=()):
     """Split `0.1, 0.02 radius 0.014` into ["0.1", "0.02"], {"radius": "0.014"}.
 
@@ -89,12 +104,16 @@ def split_args(text, keywords=()):
         return [], {}
     wanted = {k.lower() for k in keywords}
     if not wanted:
-        return [p.strip() for p in text.split(",") if p.strip()], {}
+        return split_commas(text), {}
 
     # A word only starts a keyword if it is outside brackets, is not the first token of
     # the previous keyword's value, and does not follow an operator. That last rule is
     # what keeps `turns (length - thick) / pitch` reading `pitch` as a variable, while
     # `pitch pitch` still reads as "the keyword, then a parameter of the same name".
+    # A comma counts as an operator only among the positional arguments, so `translate
+    # 0, x, 0` keeps x as a number. Once a keyword has started, each value is a single
+    # expression, so a comma there can only separate it from the next keyword:
+    # `extrude depth = 0.5, axis y`.
     found, depth, skip_to, ignore_at = [], 0, 0, -1
     for match in re.finditer(r"[()]|[A-Za-z_]\w*", text):
         token = match.group(0)
@@ -108,8 +127,9 @@ def split_args(text, keywords=()):
             ignore_at = -1
             continue
         before = text[:match.start()].rstrip()
+        operators = "+-*/%=(" if found else "+-*/%,=("
         if depth or match.start() < skip_to or token.lower() not in wanted \
-                or (before and before[-1] in "+-*/%,=("):
+                or (before and before[-1] in operators):
             continue
         word = token.lower()
         after = text[match.end():]
@@ -133,7 +153,7 @@ def split_args(text, keywords=()):
         else:
             named[word] = text[value:end].strip().rstrip(",").strip()
     head = text[:found[0][0]].strip().rstrip(",") if found else text
-    positional = [p.strip() for p in head.split(",") if p.strip()] if head else []
+    positional = split_commas(head) if head else []
     return positional, named
 
 

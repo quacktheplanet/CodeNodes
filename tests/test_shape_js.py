@@ -42,6 +42,25 @@ part cup
   shell 0.003
   revolve segments 36 degrees open
 """, [{}, {"open": 90}]),
+    "part turn touching the axis (found by a C++ port)": ("""
+param open 270 30 359
+part dome
+  profile
+    move 0, 0
+    line 0.3, 0
+    curve x = 0.3*cos(t*pi/2)  y = 0.3*sin(t*pi/2)  steps 12
+  revolve segments 24 degrees open
+""", [{}, {"open": 120}, {"open": 45}]),
+    "a keyword after a comma, a call with commas": ("""
+param w 1 0.2 3
+part plate
+  profile
+    move 0, 0
+    line w, 0
+    line w, 0.5
+    close
+  extrude depth = max(0.2, w * 0.3), axis y, steps 2
+""", [{}, {"w": 2.5}]),
     "extrude with taper, on x": ("""
 param w 1 0.2 3
 part plate

@@ -506,8 +506,13 @@ function revolve(profile, segments = 48, degrees = 360, axis = "z", cap = true) 
   }
   let solid = new Solid(orient(raw, axis), stitch(rings, n, full, profile.closed), []);
   const onAxis = points.map((p) => p[0] < 1e-9);
+  // caps before the weld: they use ring-by-ring vertex numbers, which the weld renumbers.
+  // A profile that starts and ends on the axis is closed by the axis, so its caps close along it.
+  if (cap && !profile.closed && !full) {
+    if (onAxis[0] && onAxis[n - 1]) addFanCaps(solid, rings, n);
+    else addFlatCaps(solid, rings, n);
+  }
   if (onAxis.some(Boolean)) solid = weldAxis(solid, rings, n, onAxis);
-  if (cap && !profile.closed && !full) addFlatCaps(solid, rings, n);
   return orientOutward(solid);
 }
 
@@ -732,7 +737,19 @@ const PATH_WORDS = ["move", "line", "curve", "helix"];
 const SOLID_WORDS = ["revolve", "extrude", "sweep", "loft", "translate", "rotate", "scale", "array", "smooth", "bevel"];
 
 const fail = (line, message) => { throw new ShapeError(`line ${line}: ${message}`); };
-const commas = (text) => text.split(",").map((p) => p.trim()).filter(Boolean);
+// split at the commas outside brackets: `max(1, 2), 3` is two arguments, not three
+function commas(text) {
+  const parts = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+  }
+  parts.push(text.slice(start));
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
 const yes = (v, dflt) => !["0", "no", "false"].includes(String(v === undefined ? dflt : v).toLowerCase());
 
 function splitArgs(text, keywords = []) {
@@ -750,7 +767,9 @@ function splitArgs(text, keywords = []) {
     if (token === ")") { depth--; continue; }
     if (start === ignoreAt) { ignoreAt = -1; continue; }
     const before = text.slice(0, start).trimEnd();
-    if (depth || start < skipTo || !wanted.has(token.toLowerCase()) || (before && "+-*/%,=(".includes(before[before.length - 1]))) continue;
+    // a comma rules a keyword out only among the positional arguments (see language.py)
+    const operators = found.length ? "+-*/%=(" : "+-*/%,=(";
+    if (depth || start < skipTo || !wanted.has(token.toLowerCase()) || (before && operators.includes(before[before.length - 1]))) continue;
     const word = token.toLowerCase();
     const equals = /^\s*=\s*/.exec(text.slice(end));
     const valueStart = end + (equals ? equals[0].length : 0);

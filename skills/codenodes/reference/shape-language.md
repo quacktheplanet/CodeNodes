@@ -32,6 +32,9 @@ or extruded. Add › Mesh › **Code Shape**, or `api.code_to_shape(source)`.
 
 Functions: `sin cos tan asin acos atan atan2 sqrt abs sign floor ceil round exp log pow min max mod
 hypot clamp mix smoothstep radians degrees`, plus `pi`, `tau`, `e`, and `t` inside a `curve`.
+`a if condition else b` picks between two values. Both sides are worked out (a `curve` computes
+every step at once), so every name on either side must exist, even on the side that isn't used.
+Arguments are separated by commas, and commas inside a call such as `max(1, 2)` stay with it.
 
 `subtract` lets one part cut another (a hole drilled through a block), `sweep` along a `helix`
 makes springs and screw threads (a path that ends where it starts, such as a full turn with no

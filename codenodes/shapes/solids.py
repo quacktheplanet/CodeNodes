@@ -285,13 +285,20 @@ def revolve(profile, segments=48, degrees=360.0, axis="z", cap=True):
                                       sharp_along=sharp)
     solid = Solid(verts, faces, uvs, sharp_edges)
     on_axis = points[:, 0] < AXIS_EPS
+    if cap and not profile.closed and not full:
+        # Before the weld: the caps are built from ring-by-ring vertex numbers, which the
+        # weld renumbers. The weld then carries the cap triangles over like any others.
+        # A profile that starts and ends on the axis is closed by the axis itself, so its
+        # caps close along it too, and the part-turn comes out watertight.
+        if on_axis[0] and on_axis[-1]:
+            _add_fan_caps(solid, rings, len(points))
+        else:
+            _add_flat_caps(solid, rings, len(points))
     if on_axis.any():
         # Points sitting on the axis trace no circle: every ring would put a separate
         # vertex in the same place, which leaves the mesh non-manifold and unusable as a
         # boolean cutter. Share one vertex there, and let those quads become triangles.
         solid = _weld_axis(solid, rings, len(points), on_axis)
-    if cap and not profile.closed and not full:
-        _add_flat_caps(solid, rings, len(points))
     return orient_outward(solid)
 
 

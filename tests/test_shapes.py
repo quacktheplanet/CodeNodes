@@ -448,6 +448,61 @@ def test_closed_sweeps():
     check(solids.is_closed(twisted), "a ring with a full twist is still closed")
 
 
+def test_found_by_the_cpp_port():
+    """Bugs a C++ port turned up (November 2026). The JavaScript shared all of them."""
+    dome = """
+param open 270 30 359
+part dome
+  profile
+    move 0, 0
+    line 0.3, 0
+    curve x = 0.3*cos(t*pi/2)  y = 0.3*sin(t*pi/2)  steps 12
+  revolve segments 24 degrees open
+"""
+    # A part-turn of an open profile touching the axis: the caps were added after the axis
+    # weld renumbered the vertices, so Python crashed and JavaScript made a NaN vertex.
+    for degrees, share in ((270, 0.75), (90, 0.25), (-120, 1 / 3)):
+        solid = language.parse(dome).build({"open": degrees})
+        faces = np.concatenate([np.asarray(f) for f in solid.polygons()])
+        check(np.isfinite(solid.verts).all() and faces.min() >= 0 and faces.max() < len(solid.verts),
+              f"a {degrees}° turn of a profile touching the axis builds a valid mesh")
+        volume = solids._signed_volume(solid) / 6
+        ideal = 2 / 3 * math.pi * 0.3 ** 3 * share
+        check(solids.is_closed(solid) and 0.97 * ideal < volume <= ideal,
+              f"closed along the axis, facing out, with the right volume ({volume:.5f} of {ideal:.5f} m³)")
+    one_end = language.parse("""
+part a
+  profile
+    move 0, 0
+    line 0.3, 0
+    line 0.3, 0.3
+  revolve segments 24 degrees 270
+""").build()
+    faces = np.concatenate([np.asarray(f) for f in one_end.polygons()])
+    check(faces.max() < len(one_end.verts), "a part-turn with only one end on the axis builds too")
+
+    # A keyword straight after a comma was read as part of the expression before it.
+    box = "part a\n  profile\n    move 0, 0\n    line 1, 0\n    line 1, 1\n    close\n"
+    with_comma = language.parse(box + "  extrude depth = 0.5, axis y\n").build()
+    without = language.parse(box + "  extrude depth = 0.5 axis y\n").build()
+    check(np.array_equal(with_comma.verts, without.verts), "a keyword after a comma starts a keyword")
+    check(language.split_args("0, x, 0", ("x", "y", "z")) == (["0", "x", "0"], {}),
+          "but among positional arguments a name after a comma is still a value (translate 0, x, 0)")
+
+    # Commas inside a function call split the arguments.
+    check(language.split_args("max(1, 2), 3") == (["max(1, 2)", "3"], {}),
+          "commas inside brackets don't split arguments")
+    tall = language.parse(box + "  extrude max(1, 2)\n").build()
+    check(abs(tall.verts[:, 2].max() - 2) < 1e-6, "so `extrude max(1, 2)` extrudes 2")
+    angled = language.parse(box + "  extrude depth = atan2(1, 1), steps 2\n").build()
+    check(abs(angled.verts[:, 2].max() - math.pi / 4) < 1e-6, "and a two-argument call works as a keyword's value")
+
+    # Not a bug: both sides of `a if c else b` are evaluated (whole arrays at once), so a
+    # name on the side that isn't taken must still exist. Documented in the language reference.
+    check(raises(lambda: language.parse(box + "  extrude 1 if 1 > 0 else nope\n").build(),
+                 "unknown name 'nope'"), "both sides of an if/else are checked for unknown names")
+
+
 def main():
     test_expressions()
     test_profiles_and_solids()
@@ -456,6 +511,7 @@ def main():
     test_language_extras()
     test_named_transforms()
     test_closed_sweeps()
+    test_found_by_the_cpp_port()
     print(f"\nAll {_checks} checks passed.")
 
 
